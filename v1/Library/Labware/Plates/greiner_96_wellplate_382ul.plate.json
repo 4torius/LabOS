@@ -1,0 +1,49 @@
+{
+  "id": "greiner_96_wellplate_382ul",
+  "display_name": "Greiner 96 Well Plate 382 µL Flat",
+  "category": "wellPlate",
+  "format": "96Standard",
+  "rows": 8,
+  "columns": 12,
+  "total_wells": 96,
+  "row_labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H"
+  ],
+  "max_volume_ul": 382,
+  "working_volume_ul": 320,
+  "well_shape": "circular",
+  "well_diameter_mm": 6.96,
+  "well_depth_mm": 10.9,
+  "dimensions_mm": {
+    "x": 127.76,
+    "y": 85.48,
+    "z": 14.6
+  },
+  "bottom_type": "flat",
+  "instruments": [
+    "opentrons",
+    "tecan"
+  ],
+  "opentrons_load_name": "greiner_96_wellplate_382ul",
+  "tecan_compatible": true,
+  "brand": "Greiner Bio-One",
+  "catalog_numbers": [
+    "655101",
+    "655161",
+    "655191"
+  ],
+  "tags": [
+    "flat-bottom",
+    "transparent",
+    "cell-culture",
+    "greiner"
+  ],
+  "notes": "Greiner flat-bottom plate. Cat. 655101 is the plate detected in existing Tecan AnIML files."
+}

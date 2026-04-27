@@ -1,0 +1,173 @@
+# ═══════════════════════════════════════════════════════════════════
+#                     BicoccaLab v7 - .gitignore
+# ═══════════════════════════════════════════════════════════════════
+
+# ───────────────────────────────────────────────────────────────────
+#                          PYTHON
+# ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env/
+
+# ───────────────────────────────────────────────────────────────────
+#                          IDE & EDITORS
+# ───────────────────────────────────────────────────────────────────
+.vscode/settings.json
+.vscode/launch.json
+.vscode/*.code-workspace
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+.project
+.pydevproject
+.spyderproject
+.spyproject
+
+# ───────────────────────────────────────────────────────────────────
+#                     RUNTIME DATA DIRECTORIES
+# ───────────────────────────────────────────────────────────────────
+# Keep folders via .gitkeep but ignore contents
+logs/*
+!logs/.gitkeep
+errors/*
+!errors/.gitkeep
+input/*
+!input/.gitkeep
+output/*
+!output/.gitkeep
+processed/*
+!processed/.gitkeep
+images/*
+!images/.gitkeep
+temp/*
+!temp/.gitkeep
+
+# Results (data generated during experiments)
+Results/CSV/*
+!Results/CSV/.gitkeep
+Results/Excel/*
+!Results/Excel/.gitkeep
+Results/XML/*
+!Results/XML/.gitkeep
+Results/AnIML/*
+!Results/AnIML/.gitkeep
+Results/opentrons/*
+!Results/opentrons/.gitkeep
+
+# ───────────────────────────────────────────────────────────────────
+#                     C# BUILD ARTIFACTS (TECAN)
+# ───────────────────────────────────────────────────────────────────
+SiLA2/TecanSiLA2Server/bin/
+SiLA2/TecanSiLA2Server/obj/
+SiLA2/TecanSiLA2Server/TecanClient/bin/
+SiLA2/TecanSiLA2Server/TecanClient/obj/
+*.user
+*.suo
+packages/
+
+# ───────────────────────────────────────────────────────────────────
+#                     CONFIGURATION OVERRIDES
+# ───────────────────────────────────────────────────────────────────
+# Local config (keep lab_config.yaml as template)
+*_local.yaml
+config_test.yaml
+config.local.yaml
+secrets.yaml
+
+# ───────────────────────────────────────────────────────────────────
+#                     BACKUP & TEMPORARY FILES
+# ───────────────────────────────────────────────────────────────────
+*.old
+*.bak
+*_old.*
+*_backup.*
+*.tmp
+*.temp
+~$*
+
+# ───────────────────────────────────────────────────────────────────
+#                     GENERATED FILES
+# ───────────────────────────────────────────────────────────────────
+# gRPC generated stubs (can be regenerated)
+src/grpc/*_pb2.py
+src/grpc/*_pb2_grpc.py
+!src/grpc/.gitkeep
+
+# Tip tracker state (machine-specific)
+tip_state.json
+*.tip_state.json
+
+# ───────────────────────────────────────────────────────────────────
+#                     OS SPECIFIC
+# ───────────────────────────────────────────────────────────────────
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+.nfs*
+
+# ───────────────────────────────────────────────────────────────────
+#                     JUPYTER NOTEBOOKS
+# ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ───────────────────────────────────────────────────────────────────
+#                     TESTING & COVERAGE
+# ───────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# ───────────────────────────────────────────────────────────────────
+#                     KEEP THESE FILES
+# ───────────────────────────────────────────────────────────────────
+# Main config template (rename to lab_config_local.yaml for custom settings)
+!lab_config.yaml
+# Proto definitions (not generated code)
+!SiLA2/**/*.proto
+# Documentation
+!docs/
+!README.md
+!*.md

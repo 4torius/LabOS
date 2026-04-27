@@ -1,0 +1,22 @@
+{
+  "ProtocolName": "Test_Case3_SelfContained_NoPipettes",
+  "Description": "Caso 3: Ricetta autodichiarata SENZA Pipettes (HAL aggiunge)",
+  "Trash": {
+    "default": { "Type": "TrashBin", "Slot": "A3" }
+  },
+  "Labware": {
+    "plate1": { "LoadName": "corning_96_wellplate_360ul_flat", "Slot": "D1" }
+  },
+  "Steps": [
+    {
+      "Command": "Comment",
+      "Type": "Comment",
+      "Text": "TEST CASE 3: Ricetta autodichiarata senza Pipettes"
+    },
+    {
+      "Command": "Comment",
+      "Type": "Comment",
+      "Text": "I Pipettes devono essere aggiunti dalla HAL config"
+    }
+  ]
+}

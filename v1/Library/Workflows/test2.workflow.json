@@ -1,0 +1,65 @@
+{
+  "WorkflowName": "test2",
+  "Description": "test2",
+  "Author": "BicoccaLab",
+  "Version": "1.0",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "Tecan",
+      "Action": "Connect",
+      "Description": "Connessione allo strumento Tecan"
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "Opentrons",
+      "Action": "ExecuteRecipe",
+      "Parameters": {
+        "Recipe": "test_case3_selfcontained_no_pipettes",
+        "UseHAL": true
+      },
+      "Description": "Esegue ricetta test_case3_selfcontained_no_pipettes"
+    },
+    {
+      "StepNumber": 3,
+      "Instrument": "Tecan",
+      "Action": "PlateOut",
+      "Description": "Espulsione piastra dal lettore"
+    },
+    {
+      "StepNumber": 4,
+      "Instrument": "Tecan",
+      "Action": "PlateIn",
+      "Description": "Inserimento piastra nel lettore"
+    },
+    {
+      "StepNumber": 5,
+      "Instrument": "Tecan",
+      "Action": "RunMeasurement",
+      "Parameters": {
+        "ProtocolFile": "Script1.mdfx",
+        "ProtocolPath": "C:\\Users\\andre\\Desktop\\BicoccaLab\\v7\\Library\\Analysis\\Script1.mdfx"
+      },
+      "Description": "Esegue analisi Script1"
+    },
+    {
+      "StepNumber": 6,
+      "Instrument": "Tecan",
+      "Action": "SetTemperature",
+      "Parameters": {
+        "Temperature": 37.0
+      },
+      "Description": "Impostazione temperatura 37.0°C"
+    },
+    {
+      "StepNumber": 7,
+      "Instrument": "Tecan",
+      "Action": "RunMeasurement",
+      "Parameters": {
+        "ProtocolFile": "Script1.mdfx",
+        "ProtocolPath": "C:\\Users\\andre\\Desktop\\BicoccaLab\\v7\\Library\\Analysis\\Script1.mdfx"
+      },
+      "Description": "Esegue analisi Script1"
+    }
+  ]
+}

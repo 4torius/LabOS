@@ -1,0 +1,374 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid" style="padding-top: 50px;">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-clock-history"></i> History & Logs</h2>
+        <div>
+            <button class="btn btn-outline-secondary me-2" onclick="refreshAll()">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+            <div class="btn-group">
+                <button class="btn btn-outline-danger dropdown-toggle" data-bs-toggle="dropdown">
+                    <i class="bi bi-trash"></i> Clear
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="#" onclick="clearHistory()">Clear Commands</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="clearLogs()">Clear Logs</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item text-danger" href="#" onclick="clearAll()">Clear All</a></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Tabs -->
+    <ul class="nav nav-tabs mb-3" id="historyTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="commands-tab" data-bs-toggle="tab" data-bs-target="#commands" type="button">
+                <i class="bi bi-terminal"></i> Commands <span class="badge bg-primary" id="commandCount">0</span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="logs-tab" data-bs-toggle="tab" data-bs-target="#logs" type="button">
+                <i class="bi bi-journal-text"></i> Logs <span class="badge bg-secondary" id="logCount">0</span>
+            </button>
+        </li>
+    </ul>
+    
+    <div class="tab-content" id="historyTabContent">
+        <!-- Commands Tab -->
+        <div class="tab-pane fade show active" id="commands" role="tabpanel">
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <input type="text" class="form-control" id="commandFilter" placeholder="Filter by device or command..." onkeyup="filterCommands()">
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" id="statusFilter" onchange="filterCommands()">
+                        <option value="">All Status</option>
+                        <option value="success">Success</option>
+                        <option value="error">Error</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover table-sm mb-0" id="commandsTable">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width: 160px;">Timestamp</th>
+                                    <th style="width: 140px;">Device</th>
+                                    <th style="width: 160px;">Command</th>
+                                    <th>Parameters</th>
+                                    <th style="width: 80px;">Status</th>
+                                    <th style="width: 60px;">Details</th>
+                                </tr>
+                            </thead>
+                            <tbody id="commandsBody">
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted py-4">
+                                        <i class="bi bi-inbox" style="font-size: 32px;"></i>
+                                        <p class="mb-0 mt-2">No commands executed yet</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Logs Tab -->
+        <div class="tab-pane fade" id="logs" role="tabpanel">
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <input type="text" class="form-control" id="logFilter" placeholder="Filter logs..." onkeyup="filterLogs()">
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" id="levelFilter" onchange="filterLogs()">
+                        <option value="">All Levels</option>
+                        <option value="info">Info</option>
+                        <option value="warning">Warning</option>
+                        <option value="error">Error</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" id="sourceFilter" onchange="filterLogs()">
+                        <option value="">All Sources</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-body p-0">
+                    <div class="log-container" id="logContainer" style="max-height: 600px; overflow-y: auto; font-family: monospace; font-size: 13px;">
+                        <table class="table table-sm mb-0" id="logsTable">
+                            <tbody id="logsBody">
+                                <tr>
+                                    <td colspan="4" class="text-center text-muted py-4">
+                                        <i class="bi bi-journal" style="font-size: 32px;"></i>
+                                        <p class="mb-0 mt-2">No logs yet</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Command Details Modal -->
+<div class="modal fade" id="commandModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-terminal"></i> Command Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="commandModalBody">
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .log-info { color: #0d6efd; }
+    .log-warning { color: #ffc107; }
+    .log-error { color: #dc3545; }
+    .log-row:hover { background-color: #f8f9fa; }
+    .param-badge { 
+        font-size: 11px; 
+        margin-right: 4px;
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        display: inline-block;
+        vertical-align: middle;
+    }
+</style>
+
+<script>
+let allCommands = [];
+let allLogs = [];
+
+async function loadHistory() {
+    try {
+        const [commandsResp, logsResp] = await Promise.all([
+            fetch('/api/history?limit=500'),
+            fetch('/api/logs?limit=1000')
+        ]);
+        
+        allCommands = await commandsResp.json();
+        allLogs = await logsResp.json();
+        
+        // Update counts
+        document.getElementById('commandCount').textContent = allCommands.length;
+        document.getElementById('logCount').textContent = allLogs.length;
+        
+        // Populate source filter
+        const sources = [...new Set(allLogs.map(l => l.source))];
+        const sourceSelect = document.getElementById('sourceFilter');
+        sourceSelect.innerHTML = '<option value="">All Sources</option>';
+        sources.forEach(s => {
+            sourceSelect.innerHTML += `<option value="${s}">${s}</option>`;
+        });
+        
+        renderCommands(allCommands);
+        renderLogs(allLogs);
+        
+    } catch (e) {
+        console.error('Failed to load history:', e);
+    }
+}
+
+function renderCommands(commands) {
+    const tbody = document.getElementById('commandsBody');
+    
+    if (commands.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center text-muted py-4">
+                    <i class="bi bi-inbox" style="font-size: 32px;"></i>
+                    <p class="mb-0 mt-2">No commands match the filter</p>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    tbody.innerHTML = commands.map(cmd => {
+        const time = new Date(cmd.timestamp).toLocaleString();
+        const statusClass = cmd.success ? 'bg-success' : 'bg-danger';
+        const statusText = cmd.success ? 'OK' : 'ERR';
+        
+        // Format parameters as badges
+        const paramBadges = Object.entries(cmd.parameters || {}).slice(0, 3).map(([k, v]) => {
+            const val = typeof v === 'object' ? JSON.stringify(v).substring(0, 20) : String(v).substring(0, 20);
+            return `<span class="badge bg-secondary param-badge" title="${k}: ${v}">${k}: ${val}</span>`;
+        }).join('');
+        const moreParams = Object.keys(cmd.parameters || {}).length > 3 ? `<span class="badge bg-light text-muted">+${Object.keys(cmd.parameters).length - 3}</span>` : '';
+        
+        return `
+            <tr class="command-row" data-device="${cmd.device}" data-command="${cmd.command}" data-success="${cmd.success}">
+                <td><small>${time}</small></td>
+                <td><code class="text-primary">${cmd.device}</code></td>
+                <td><strong>${cmd.command}</strong></td>
+                <td>${paramBadges}${moreParams}</td>
+                <td><span class="badge ${statusClass}">${statusText}</span></td>
+                <td>
+                    <button class="btn btn-sm btn-outline-secondary" onclick='showCommandDetails(${JSON.stringify(cmd).replace(/'/g, "&#39;")})'>
+                        <i class="bi bi-eye"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function renderLogs(logs) {
+    const tbody = document.getElementById('logsBody');
+    
+    if (logs.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="4" class="text-center text-muted py-4">
+                    <i class="bi bi-journal" style="font-size: 32px;"></i>
+                    <p class="mb-0 mt-2">No logs match the filter</p>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    // Reverse to show newest first
+    const reversedLogs = [...logs].reverse();
+    
+    tbody.innerHTML = reversedLogs.map(log => {
+        const time = new Date(log.timestamp).toLocaleTimeString();
+        const levelIcon = {
+            'info': '<i class="bi bi-info-circle log-info"></i>',
+            'warning': '<i class="bi bi-exclamation-triangle log-warning"></i>',
+            'error': '<i class="bi bi-x-circle log-error"></i>'
+        }[log.level] || '<i class="bi bi-dot"></i>';
+        
+        const levelClass = `log-${log.level}`;
+        
+        return `
+            <tr class="log-row" data-level="${log.level}" data-source="${log.source}">
+                <td style="width: 80px;" class="text-muted">${time}</td>
+                <td style="width: 30px;">${levelIcon}</td>
+                <td style="width: 100px;"><span class="badge bg-secondary">${log.source}</span></td>
+                <td class="${levelClass}">${escapeHtml(log.message)}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function filterCommands() {
+    const textFilter = document.getElementById('commandFilter').value.toLowerCase();
+    const statusFilter = document.getElementById('statusFilter').value;
+    
+    const filtered = allCommands.filter(cmd => {
+        const matchText = !textFilter || 
+            cmd.device.toLowerCase().includes(textFilter) || 
+            cmd.command.toLowerCase().includes(textFilter);
+        const matchStatus = !statusFilter || 
+            (statusFilter === 'success' && cmd.success) || 
+            (statusFilter === 'error' && !cmd.success);
+        return matchText && matchStatus;
+    });
+    
+    renderCommands(filtered);
+}
+
+function filterLogs() {
+    const textFilter = document.getElementById('logFilter').value.toLowerCase();
+    const levelFilter = document.getElementById('levelFilter').value;
+    const sourceFilter = document.getElementById('sourceFilter').value;
+    
+    const filtered = allLogs.filter(log => {
+        const matchText = !textFilter || log.message.toLowerCase().includes(textFilter);
+        const matchLevel = !levelFilter || log.level === levelFilter;
+        const matchSource = !sourceFilter || log.source === sourceFilter;
+        return matchText && matchLevel && matchSource;
+    });
+    
+    renderLogs(filtered);
+}
+
+function showCommandDetails(cmd) {
+    const modal = document.getElementById('commandModal');
+    const body = document.getElementById('commandModalBody');
+    
+    const time = new Date(cmd.timestamp).toLocaleString();
+    const statusBadge = cmd.success 
+        ? '<span class="badge bg-success">Success</span>' 
+        : '<span class="badge bg-danger">Error</span>';
+    
+    body.innerHTML = `
+        <div class="row">
+            <div class="col-md-6">
+                <h6>Command Info</h6>
+                <table class="table table-sm">
+                    <tr><th>Device</th><td><code>${cmd.device}</code></td></tr>
+                    <tr><th>Command</th><td><strong>${cmd.command}</strong></td></tr>
+                    <tr><th>Timestamp</th><td>${time}</td></tr>
+                    <tr><th>Status</th><td>${statusBadge}</td></tr>
+                    ${cmd.duration_ms ? `<tr><th>Duration</th><td>${cmd.duration_ms.toFixed(0)} ms</td></tr>` : ''}
+                </table>
+            </div>
+            <div class="col-md-6">
+                <h6>Parameters</h6>
+                <pre class="bg-light p-2 rounded" style="max-height: 200px; overflow: auto;">${JSON.stringify(cmd.parameters, null, 2)}</pre>
+            </div>
+        </div>
+        <hr>
+        <h6>Result</h6>
+        <pre class="bg-${cmd.success ? 'light' : 'danger bg-opacity-10'} p-2 rounded" style="max-height: 250px; overflow: auto;">${JSON.stringify(cmd.result, null, 2)}</pre>
+    `;
+    
+    new bootstrap.Modal(modal).show();
+}
+
+async function clearHistory() {
+    if (!confirm('Clear all command history?')) return;
+    await fetch('/api/history', { method: 'DELETE' });
+    loadHistory();
+}
+
+async function clearLogs() {
+    if (!confirm('Clear all logs?')) return;
+    await fetch('/api/logs', { method: 'DELETE' });
+    loadHistory();
+}
+
+async function clearAll() {
+    if (!confirm('Clear ALL history and logs?')) return;
+    await Promise.all([
+        fetch('/api/history', { method: 'DELETE' }),
+        fetch('/api/logs', { method: 'DELETE' })
+    ]);
+    loadHistory();
+}
+
+function refreshAll() {
+    loadHistory();
+}
+
+// Auto-refresh every 10 seconds
+setInterval(loadHistory, 10000);
+
+// Initial load
+document.addEventListener('DOMContentLoaded', loadHistory);
+</script>
+{% endblock %}

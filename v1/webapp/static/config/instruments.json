@@ -1,0 +1,58 @@
+{
+    "_comment": "FALLBACK CONFIG - Real commands come from SiLA2 servers!",
+    "_note": "This file is only used when SiLA2 discovery fails.",
+    "_note2": "Edit lab_config.yaml -> important_commands to set which commands are shown by default.",
+    "instruments": {
+        "opentrons": {
+            "name": "Opentrons Flex",
+            "icon": "bi-droplet-fill",
+            "color": "primary",
+            "commands": [
+                {"id": "ExecuteRecipe", "label": "📜 Execute Recipe", "needsRecipe": true},
+                {"id": "Transfer", "label": "💧 Transfer", "params": ["source_well", "dest_well", "volume_ul"]},
+                {"id": "Home", "label": "🏠 Home"},
+                {"id": "GetStatus", "label": "📊 Status"},
+                {"id": "LoadHardwareConfig", "label": "⚙️ Load HAL Config", "needsHal": true}
+            ]
+        },
+        "tecan": {
+            "name": "Tecan Infinite M200 Pro",
+            "icon": "bi-eye-fill",
+            "color": "success",
+            "commands": [
+                {"id": "Connect", "label": "🔌 Connect"},
+                {"id": "Disconnect", "label": "🔌 Disconnect"},
+                {"id": "RunMeasurement", "label": "📊 Run Measurement", "needsProtocol": true},
+                {"id": "PlateIn", "label": "📥 Plate In"},
+                {"id": "PlateOut", "label": "📤 Plate Out"},
+                {"id": "SetTemperature", "label": "🌡️ Set Temperature", "params": ["target_temperature"]},
+                {"id": "ListProtocols", "label": "📑 List Protocols"},
+                {"id": "GetStatus", "label": "ℹ️ Status"}
+            ]
+        },
+        "mobile": {
+            "name": "Mobile Robot",
+            "icon": "bi-robot",
+            "color": "warning",
+            "commands": [
+                {"id": "TransportPlate", "label": "🚗 Transport Plate", "params": ["source", "destination"]},
+                {"id": "PickPlate", "label": "🤏 Pick Plate", "params": ["location"]},
+                {"id": "PlacePlate", "label": "📥 Place Plate", "params": ["location"]},
+                {"id": "GoHome", "label": "🏠 Go Home"},
+                {"id": "GetPosition", "label": "📍 Get Position"}
+            ]
+        },
+        "incubator": {
+            "name": "Incubator",
+            "icon": "bi-thermometer-half",
+            "color": "danger",
+            "commands": [
+                {"id": "SetTemperature", "label": "🌡️ Set Temperature", "params": ["target_temperature"]},
+                {"id": "SetCO2", "label": "💨 Set CO2", "params": ["co2_percent"]},
+                {"id": "SetHumidity", "label": "💧 Set Humidity", "params": ["humidity_percent"]},
+                {"id": "StartIncubation", "label": "▶️ Start Incubation", "params": ["duration_minutes"]},
+                {"id": "GetStatus", "label": "ℹ️ Status"}
+            ]
+        }
+    }
+}

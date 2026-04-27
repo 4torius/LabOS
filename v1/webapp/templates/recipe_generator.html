@@ -1,0 +1,1128 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid" style="padding-top: 50px;">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-magic"></i> Recipe Generator</h2>
+        <div class="text-muted small">
+            Generate Opentrons recipes from Excel chemical formulations
+        </div>
+    </div>
+    
+    <div class="row g-4">
+        <!-- Left Panel: File Selection and Options -->
+        <div class="col-lg-4">
+            <!-- File Selection -->
+            <div class="card">
+                <div class="card-header bg-success text-white">
+                    <i class="bi bi-file-earmark-excel"></i> Excel Source File
+                </div>
+                <div class="card-body">
+                    <p class="small text-muted mb-3">
+                        Select an Excel file from the library or upload a new one.
+                    </p>
+                    
+                    <!-- Dropdown for Library files -->
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">
+                            <i class="bi bi-folder"></i> Library/Recipes/excel
+                        </label>
+                        <div class="input-group">
+                            <select class="form-select" id="libraryExcelFile">
+                                <option value="">-- Select file --</option>
+                            </select>
+                            <button class="btn btn-outline-secondary" type="button" onclick="refreshLibraryFiles()">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Or upload new file -->
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">
+                            <i class="bi bi-upload"></i> Or upload from disk
+                        </label>
+                        <input type="file" class="form-control form-control-sm" id="excelFile" accept=".xlsx,.xls">
+                    </div>
+                    
+                    <!-- Format hint -->
+                    <div class="alert alert-secondary py-2 small mb-0">
+                        <i class="bi bi-info-circle"></i> 
+                        <strong>Expected format:</strong><br>
+                        Well | Reagent1 (uL) | Reagent2 (uL) | ...<br>
+                        Each sheet = one recipe base
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Generation Mode -->
+            <div class="card mt-3">
+                <div class="card-header">
+                    <i class="bi bi-sliders"></i> Generation Mode
+                </div>
+                <div class="card-body">
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="radio" name="generationMode" 
+                               id="modeMultiRecipe" value="multi" checked onchange="updateModeUI()">
+                        <label class="form-check-label" for="modeMultiRecipe">
+                            <strong>Multi-Recipe + Workflow</strong>
+                            <div class="small text-muted">
+                                One recipe per phase, with an orchestrated workflow that handles delays.
+                                Best when you need to insert other steps during waits.
+                            </div>
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="generationMode" 
+                               id="modeSingleRecipe" value="single" onchange="updateModeUI()">
+                        <label class="form-check-label" for="modeSingleRecipe">
+                            <strong>Single Recipe with Delays</strong>
+                            <div class="small text-muted">
+                                All phases in one recipe, delays embedded as Opentrons protocol.delay() commands.
+                                Simpler, self-contained execution.
+                            </div>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Save Options -->
+            <div class="card mt-3">
+                <div class="card-header">
+                    <i class="bi bi-save"></i> Output Options
+                </div>
+                <div class="card-body">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="saveRecipes" checked>
+                        <label class="form-check-label small" for="saveRecipes">
+                            <i class="bi bi-file-earmark-code"></i> Save recipes to Library/Recipes
+                        </label>
+                    </div>
+                    <div class="form-check mb-2" id="workflowSaveOption">
+                        <input class="form-check-input" type="checkbox" id="saveWorkflow" checked>
+                        <label class="form-check-label small" for="saveWorkflow">
+                            <i class="bi bi-diagram-3"></i> Save workflow to Library/Workflows
+                        </label>
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="generateHAL" checked>
+                        <label class="form-check-label small" for="generateHAL">
+                            <i class="bi bi-cpu"></i> Generate HAL Config (auto slot assignment)
+                        </label>
+                    </div>
+                    <div class="form-check mb-2 ms-4" id="halSaveOption">
+                        <input class="form-check-input" type="checkbox" id="saveHAL" checked>
+                        <label class="form-check-label small" for="saveHAL">
+                            Save HAL to Library/HardwareConfig
+                        </label>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Parse Button -->
+            <div class="d-grid mt-3">
+                <button class="btn btn-lg btn-success" onclick="parseExcelFile()">
+                    <i class="bi bi-arrow-right-circle"></i> Parse Excel File
+                </button>
+            </div>
+        </div>
+        
+        <!-- Center: Configuration Panel -->
+        <div class="col-lg-5">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-layers"></i> Phase Configuration</span>
+                    <span class="badge bg-secondary" id="sheetBadge">No file loaded</span>
+                </div>
+                <div class="card-body" style="max-height: 70vh; overflow-y: auto;">
+                    <div id="configPanel">
+                        <div class="text-center text-muted py-5">
+                            <i class="bi bi-file-earmark-excel" style="font-size: 64px;"></i>
+                            <h5 class="mt-3">Load an Excel file</h5>
+                            <p>Select a file from the library or upload one to configure phases</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Right: Results/Output -->
+        <div class="col-lg-3">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="bi bi-box-arrow-down"></i> Generated Output
+                </div>
+                <div class="card-body" style="max-height: 70vh; overflow-y: auto;">
+                    <div id="outputPanel">
+                        <div class="text-center text-muted py-5">
+                            <i class="bi bi-gear" style="font-size: 48px;"></i>
+                            <p class="mt-3">Output will appear here after generation</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// State
+let parsedSheets = [];
+let groupConfigs = {};
+let generatedRecipes = [];
+let generatedWorkflow = null;
+let generatedHAL = null;
+
+// Config-loaded options — populated from /api/plates (Library/Labware/Plates/*.plate.json)
+let TARGET_PLATES = {};        // id → display_name
+let PLATE_CATALOG = {};        // id → full plate definition object
+let LIQUID_CLASSES = {
+    'Aqueous': '💧 Aqueous',
+    'Viscous': '🍯 Viscous (glycerol)',
+    'HighlyViscous': '🍯🍯 Highly Viscous',
+    'Volatile': '💨 Volatile (ethanol)',
+    'Foaming': '🫧 Foaming'
+};
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    loadConfigOptions();
+    refreshLibraryFiles();
+    updateModeUI();
+});
+
+// Load plate catalog from Library/Labware/Plates/ and liquid classes
+async function loadConfigOptions() {
+    // Plates from dynamic catalog
+    try {
+        const platesResp = await fetch('/api/library/plates');
+        const platesData = await platesResp.json();
+        PLATE_CATALOG = {};
+        TARGET_PLATES = {};
+        for (const p of (platesData.plates || [])) {
+            PLATE_CATALOG[p.id] = p;
+            // Only show wellPlates in the target plate dropdown (not tips/reservoirs)
+            if (p.category === 'wellPlate') {
+                TARGET_PLATES[p.id] = `${p.display_name} (${p.total_wells} well)`;
+            }
+        }
+    } catch (e) {
+        console.warn('Could not load plate catalog, using fallback:', e);
+        TARGET_PLATES = {
+            'corning_96_wellplate_360ul_flat': 'Corning 96 Well Plate 360 µL (96 well)',
+            'greiner_96_wellplate_382ul': 'Greiner 96 Well Plate 382 µL (96 well)',
+            'corning_384_wellplate_112ul_flat': 'Corning 384 Well Plate 112 µL (384 well)',
+            'biorad_384_wellplate_50ul': 'Bio-Rad 384 Well Plate 50 µL (384 well)',
+        };
+    }
+
+    // Liquid classes
+    try {
+        const lcResp = await fetch('/api/files/liquidclasses');
+        const lcData = await lcResp.json();
+        if (lcData.classes && Object.keys(lcData.classes).length > 0) {
+            LIQUID_CLASSES = {};
+            for (const [name, info] of Object.entries(lcData.classes)) {
+                LIQUID_CLASSES[name] = info.displayName || name;
+            }
+        }
+    } catch (e) {
+        console.warn('Could not load liquid classes:', e);
+    }
+}
+
+// Return plate info card HTML for a given plate_id
+function buildPlateInfoBadge(plateId) {
+    const p = PLATE_CATALOG[plateId];
+    if (!p) return '';
+    const instrs = p.instruments || [];
+    const hasTecan = instrs.includes('tecan');
+    const instrBadge = hasTecan
+        ? '<span class="badge bg-success ms-1" title="Opentrons + Tecan compatible">✅ Tecan</span>'
+        : '';
+    return `<small class="text-muted d-block mt-1">
+        <span class="badge bg-secondary">${p.rows}×${p.columns}</span>
+        <span class="badge bg-dark border border-secondary">${p.total_wells} wells</span>
+        <span class="badge bg-dark border border-secondary">max ${p.max_volume_ul} µL</span>
+        ${instrBadge}
+        ${(p.catalog_numbers || []).slice(0,2).map(c => `<span class="badge bg-dark text-muted">#${c}</span>`).join('')}
+    </small>`;
+}
+
+// Build HTML options for target plates
+function buildTargetPlateOptions(selectedValue = '') {
+    let html = '';
+    for (const [value, label] of Object.entries(TARGET_PLATES)) {
+        const selected = value === selectedValue ? ' selected' : '';
+        html += `<option value="${value}"${selected}>${label}</option>`;
+    }
+    return html;
+}
+
+// Build HTML options for liquid classes
+function buildLiquidClassOptions(selectedValue = '') {
+    let html = '';
+    for (const [value, label] of Object.entries(LIQUID_CLASSES)) {
+        const selected = value === selectedValue ? ' selected' : '';
+        html += `<option value="${value}"${selected}>${label}</option>`;
+    }
+    return html;
+}
+
+function updatePlateInfo(sheetIdx, plateId) {
+    const el = document.getElementById(`plateInfo-${sheetIdx}`);
+    if (el) el.innerHTML = buildPlateInfoBadge(plateId);
+}
+
+// Update UI based on generation mode
+function updateModeUI() {
+    const isMultiMode = document.getElementById('modeMultiRecipe').checked;
+    document.getElementById('workflowSaveOption').style.display = isMultiMode ? 'block' : 'none';
+    
+    // Re-render groups if we have data
+    if (parsedSheets.length > 0) {
+        parsedSheets.forEach((sheet, idx) => {
+            if (!sheet.error) {
+                renderGroups(idx);
+            }
+        });
+    }
+}
+
+// Refresh library files
+async function refreshLibraryFiles() {
+    const select = document.getElementById('libraryExcelFile');
+    select.innerHTML = '<option value="">Loading...</option>';
+    
+    try {
+        const resp = await fetch('/api/batch/library-excel-files');
+        const data = await resp.json();
+        
+        select.innerHTML = '<option value="">-- Select file --</option>';
+        
+        if (data.files && data.files.length > 0) {
+            data.files.forEach(f => {
+                const opt = document.createElement('option');
+                opt.value = f.filename;
+                opt.textContent = `${f.filename} (${(f.size/1024).toFixed(1)} KB)`;
+                select.appendChild(opt);
+            });
+        } else {
+            select.innerHTML = '<option value="">No files in Library/Recipes/excel</option>';
+        }
+    } catch (e) {
+        console.error('Error loading files:', e);
+        select.innerHTML = '<option value="">Error loading files</option>';
+    }
+}
+
+// Parse Excel file
+async function parseExcelFile() {
+    const libraryFile = document.getElementById('libraryExcelFile').value;
+    const fileInput = document.getElementById('excelFile');
+    
+    if (!libraryFile && (!fileInput.files || !fileInput.files[0])) {
+        alert('Please select a file from the library or upload one');
+        return;
+    }
+    
+    const configPanel = document.getElementById('configPanel');
+    configPanel.innerHTML = '<div class="text-center py-5"><div class="spinner-border"></div><p class="mt-3">Parsing Excel file...</p></div>';
+    
+    try {
+        let response;
+        
+        if (libraryFile) {
+            response = await fetch('/api/batch/parse-chemical-excel', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ library_file: libraryFile })
+            });
+        } else {
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            response = await fetch('/api/batch/parse-chemical-excel', {
+                method: 'POST',
+                body: formData
+            });
+        }
+        
+        const result = await response.json();
+        
+        if (result.error) {
+            configPanel.innerHTML = `<div class="alert alert-danger">${result.error}</div>`;
+            return;
+        }
+        
+        // Store parsed data
+        parsedSheets = result.sheets || [];
+        
+        // Update badge
+        document.getElementById('sheetBadge').textContent = `${parsedSheets.length} sheet(s)`;
+        
+        // Render configuration UI
+        renderConfigPanel();
+        
+    } catch (e) {
+        configPanel.innerHTML = `<div class="alert alert-danger">Error: ${e.message}</div>`;
+    }
+}
+
+// Render configuration panel
+function renderConfigPanel() {
+    const configPanel = document.getElementById('configPanel');
+    
+    if (parsedSheets.length === 0) {
+        configPanel.innerHTML = '<div class="alert alert-warning">No sheets found in the Excel file</div>';
+        return;
+    }
+    
+    let html = '';
+    
+    parsedSheets.forEach((sheet, sheetIdx) => {
+        if (sheet.error) {
+            html += `
+                <div class="alert alert-danger py-2 small mb-3">
+                    <i class="bi bi-x-circle"></i> <strong>${sheet.sheet_name}:</strong> ${sheet.error}
+                </div>
+            `;
+            return;
+        }
+        
+        const reagents = sheet.summary?.reagents || [];
+        const wellCount = sheet.summary?.total_wells || 0;
+        
+        html += `
+            <div class="card bg-dark mb-3" id="sheetConfig-${sheetIdx}">
+                <div class="card-header py-2 d-flex justify-content-between">
+                    <span><i class="bi bi-table text-success"></i> ${sheet.sheet_name}</span>
+                    <span class="badge bg-secondary">${wellCount} wells</span>
+                </div>
+                <div class="card-body py-3">
+                    <!-- Detected reagents -->
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Detected Reagents:</label>
+                        <div class="d-flex flex-wrap gap-1">
+                            ${reagents.map(r => `<span class="badge bg-info">${r}</span>`).join('')}
+                        </div>
+                    </div>
+                    
+                    <!-- Quick Templates -->
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Quick Setup:</label>
+                        <div class="btn-group btn-group-sm d-flex">
+                            <button class="btn btn-outline-secondary" onclick="applyTemplate(${sheetIdx}, 'all')">
+                                All in one phase
+                            </button>
+                            <button class="btn btn-outline-secondary" onclick="applyTemplate(${sheetIdx}, 'split-half')">
+                                Split half (30min)
+                            </button>
+                            <button class="btn btn-outline-secondary" onclick="applyTemplate(${sheetIdx}, 'each')">
+                                One per reagent
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Phase Groups -->
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">
+                            <i class="bi bi-layers"></i> Phases
+                        </label>
+                        <div id="groupsContainer-${sheetIdx}"></div>
+                        <button class="btn btn-sm btn-outline-success mt-2" onclick="addGroup(${sheetIdx})">
+                            <i class="bi bi-plus"></i> Add Phase
+                        </button>
+                    </div>
+                    
+                    <!-- Liquid Classes per reagent (collapsible) -->
+                    <div class="mb-3">
+                        <a class="small fw-bold text-decoration-none" data-bs-toggle="collapse" 
+                           href="#liquidClassContainer-${sheetIdx}" role="button">
+                            <i class="bi bi-droplet"></i> Liquid Classes (Advanced) 
+                            <i class="bi bi-chevron-down"></i>
+                        </a>
+                        <div class="collapse mt-2" id="liquidClassContainer-${sheetIdx}">
+                            <div class="card card-body bg-secondary py-2">
+                                <div class="small text-muted mb-2">
+                                    Specify liquid type to optimize aspiration/dispensing
+                                </div>
+                                <div id="liquidClassList-${sheetIdx}">
+                                    ${reagents.map(r => `
+                                        <div class="d-flex align-items-center gap-2 mb-1">
+                                            <span class="badge bg-info" style="width: 80px;">${r}</span>
+                                            <select class="form-select form-select-sm liquid-class-select" style="width: auto;"
+                                                    onchange="updateReagentLiquidClass(${sheetIdx}, '${r}', this.value)">
+                                                <option value="">Default (Aqueous)</option>
+                                                ${buildLiquidClassOptions()}
+                                            </select>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Pipette selection -->
+                    <div class="row">
+                        <div class="col-6">
+                            <label class="form-label small">Pipette:</label>
+                            <select class="form-select form-select-sm" id="pipette-${sheetIdx}">
+                                <option value="left">Left (1-channel)</option>
+                                <option value="right">Right (8-channel)</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Target Plate:</label>
+                            <select class="form-select form-select-sm" id="targetPlate-${sheetIdx}"
+                                    onchange="updatePlateInfo(${sheetIdx}, this.value)">
+                                ${buildTargetPlateOptions()}
+                            </select>
+                            <div id="plateInfo-${sheetIdx}">${buildPlateInfoBadge(Object.keys(TARGET_PLATES)[0] || '')}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Initialize group config
+        initializeGroupConfig(sheetIdx, sheet);
+    });
+    
+    // Generate button
+    html += `
+        <div class="d-grid mt-4">
+            <button class="btn btn-lg btn-primary" onclick="generateRecipes()">
+                <i class="bi bi-magic"></i> Generate Recipes
+            </button>
+        </div>
+    `;
+    
+    configPanel.innerHTML = html;
+    
+    // Render groups for each sheet
+    parsedSheets.forEach((sheet, idx) => {
+        if (!sheet.error) {
+            renderGroups(idx);
+        }
+    });
+}
+
+// Initialize group configuration
+function initializeGroupConfig(sheetIdx, sheet) {
+    const defaultConfig = sheet.default_config || {
+        groups: [{
+            name: 'All Reagents',
+            columns: sheet.summary?.reagents || [],
+            delay_after_seconds: 0,
+            strategy: 'smart'
+        }],
+        pipette: 'left',
+        reagent_liquid_classes: {}  // Maps reagent name -> LiquidClass
+    };
+    
+    // Ensure all groups have strategy
+    defaultConfig.groups.forEach(g => {
+        if (!g.strategy) g.strategy = 'smart';
+    });
+    
+    // Ensure reagent_liquid_classes exists
+    if (!defaultConfig.reagent_liquid_classes) {
+        defaultConfig.reagent_liquid_classes = {};
+    }
+    
+    groupConfigs[sheetIdx] = defaultConfig;
+}
+
+// Update liquid class for a reagent
+function updateReagentLiquidClass(sheetIdx, reagent, liquidClass) {
+    if (!groupConfigs[sheetIdx].reagent_liquid_classes) {
+        groupConfigs[sheetIdx].reagent_liquid_classes = {};
+    }
+    if (liquidClass) {
+        groupConfigs[sheetIdx].reagent_liquid_classes[reagent] = liquidClass;
+    } else {
+        delete groupConfigs[sheetIdx].reagent_liquid_classes[reagent];
+    }
+}
+
+// Render groups
+function renderGroups(sheetIdx) {
+    const container = document.getElementById(`groupsContainer-${sheetIdx}`);
+    if (!container) return;
+    
+    const config = groupConfigs[sheetIdx];
+    const sheet = parsedSheets[sheetIdx];
+    const allReagents = sheet.summary?.reagents || [];
+    const isMultiMode = document.getElementById('modeMultiRecipe').checked;
+    
+    let html = '';
+    
+    config.groups.forEach((group, groupIdx) => {
+        html += `
+            <div class="card bg-secondary mb-2">
+                <div class="card-body py-2">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <input type="text" class="form-control form-control-sm" style="width: 60%;"
+                               value="${group.name}" 
+                               onchange="updateGroupName(${sheetIdx}, ${groupIdx}, this.value)"
+                               placeholder="Phase name">
+                        <button class="btn btn-sm btn-outline-danger" onclick="removeGroup(${sheetIdx}, ${groupIdx})">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="mb-2">
+                        <label class="form-label small text-muted mb-1">Click reagents to assign:</label>
+                        <div class="d-flex flex-wrap gap-1">
+                            ${allReagents.map(r => `
+                                <span class="badge ${group.columns.includes(r) ? 'bg-primary' : 'bg-dark border border-secondary'}" 
+                                      style="cursor: pointer;"
+                                      onclick="toggleReagent(${sheetIdx}, ${groupIdx}, '${r}')">
+                                    ${r}
+                                </span>
+                            `).join('')}
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <label class="form-label small mb-0 text-nowrap">Strategy:</label>
+                        <select class="form-select form-select-sm" style="width: auto;"
+                                onchange="updateGroupStrategy(${sheetIdx}, ${groupIdx}, this.value)">
+                            <option value="smart" ${group.strategy === 'smart' || !group.strategy ? 'selected' : ''}>
+                                🧠 Smart (auto)
+                            </option>
+                            <option value="distribute" ${group.strategy === 'distribute' ? 'selected' : ''}>
+                                🚀 Distribute (1→N)
+                            </option>
+                            <option value="transfer" ${group.strategy === 'transfer' ? 'selected' : ''}>
+                                🔄 Transfer (1→1)
+                            </option>
+                        </select>
+                        <span class="small text-muted ms-2" id="strategyHint-${sheetIdx}-${groupIdx}">
+                            ${getStrategyHint(group.strategy || 'smart')}
+                        </span>
+                    </div>
+                    
+                    <div class="d-flex align-items-center gap-2">
+                        <label class="form-label small mb-0 text-nowrap">
+                            ${isMultiMode ? 'Delay before next phase:' : 'Delay after this phase:'}
+                        </label>
+                        <input type="number" class="form-control form-control-sm" style="width: 80px;"
+                               value="${group.delay_after_seconds || 0}"
+                               onchange="updateGroupDelay(${sheetIdx}, ${groupIdx}, this.value)"
+                               min="0" step="60">
+                        <span class="small text-muted">sec</span>
+                        <span class="badge bg-info ms-auto">${formatDuration(group.delay_after_seconds || 0)}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html || '<div class="text-muted small">No phases. Click "Add Phase" to start.</div>';
+}
+
+// Format duration
+function formatDuration(seconds) {
+    if (seconds === 0) return 'No delay';
+    if (seconds < 60) return `${seconds}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return secs > 0 ? `${mins}m ${secs}s` : `${mins}min`;
+}
+
+// Group management functions
+function addGroup(sheetIdx) {
+    groupConfigs[sheetIdx].groups.push({
+        name: `Phase ${groupConfigs[sheetIdx].groups.length + 1}`,
+        columns: [],
+        delay_after_seconds: 0,
+        strategy: 'smart'
+    });
+    renderGroups(sheetIdx);
+}
+
+function removeGroup(sheetIdx, groupIdx) {
+    if (groupConfigs[sheetIdx].groups.length <= 1) {
+        alert('At least one phase is required');
+        return;
+    }
+    groupConfigs[sheetIdx].groups.splice(groupIdx, 1);
+    renderGroups(sheetIdx);
+}
+
+function updateGroupName(sheetIdx, groupIdx, name) {
+    groupConfigs[sheetIdx].groups[groupIdx].name = name;
+}
+
+function updateGroupDelay(sheetIdx, groupIdx, seconds) {
+    groupConfigs[sheetIdx].groups[groupIdx].delay_after_seconds = parseInt(seconds) || 0;
+    renderGroups(sheetIdx);
+}
+
+function updateGroupStrategy(sheetIdx, groupIdx, strategy) {
+    groupConfigs[sheetIdx].groups[groupIdx].strategy = strategy;
+    // Update hint
+    const hint = document.getElementById(`strategyHint-${sheetIdx}-${groupIdx}`);
+    if (hint) hint.textContent = getStrategyHint(strategy);
+}
+
+function getStrategyHint(strategy) {
+    switch(strategy) {
+        case 'distribute': return '1 aspirate → many dispenses (fast)';
+        case 'transfer': return '1 aspirate → 1 dispense (safe)';
+        default: return 'Auto-select based on volumes';
+    }
+}
+
+function toggleReagent(sheetIdx, groupIdx, reagent) {
+    const group = groupConfigs[sheetIdx].groups[groupIdx];
+    
+    // Remove from all groups first
+    groupConfigs[sheetIdx].groups.forEach(g => {
+        const idx = g.columns.indexOf(reagent);
+        if (idx !== -1) g.columns.splice(idx, 1);
+    });
+    
+    // Add to clicked group if wasn't already there
+    const idx = group.columns.indexOf(reagent);
+    if (idx === -1) {
+        group.columns.push(reagent);
+    }
+    
+    renderGroups(sheetIdx);
+}
+
+// Apply template
+function applyTemplate(sheetIdx, template) {
+    const sheet = parsedSheets[sheetIdx];
+    const reagents = sheet.summary?.reagents || [];
+    
+    if (template === 'all') {
+        groupConfigs[sheetIdx] = {
+            groups: [{
+                name: 'All Reagents',
+                columns: [...reagents],
+                delay_after_seconds: 0,
+                strategy: 'smart'
+            }],
+            pipette: 'left'
+        };
+    } else if (template === 'split-half') {
+        const half = Math.ceil(reagents.length / 2);
+        groupConfigs[sheetIdx] = {
+            groups: [
+                {
+                    name: 'Phase A',
+                    columns: reagents.slice(0, half),
+                    delay_after_seconds: 1800, // 30 minutes
+                    strategy: 'distribute'
+                },
+                {
+                    name: 'Phase B',
+                    columns: reagents.slice(half),
+                    delay_after_seconds: 0,
+                    strategy: 'distribute'
+                }
+            ],
+            pipette: 'left'
+        };
+    } else if (template === 'each') {
+        groupConfigs[sheetIdx] = {
+            groups: reagents.map((r, i) => ({
+                name: r,
+                columns: [r],
+                delay_after_seconds: i < reagents.length - 1 ? 300 : 0,
+                strategy: 'distribute'
+            })),
+            pipette: 'left'
+        };
+    }
+    
+    renderGroups(sheetIdx);
+}
+
+// Generate recipes
+async function generateRecipes() {
+    const isMultiMode = document.getElementById('modeMultiRecipe').checked;
+    const saveRecipes = document.getElementById('saveRecipes').checked;
+    const saveWorkflow = document.getElementById('saveWorkflow')?.checked || false;
+    const generateHAL = document.getElementById('generateHAL').checked;
+    const saveHAL = document.getElementById('saveHAL').checked;
+    
+    const outputPanel = document.getElementById('outputPanel');
+    outputPanel.innerHTML = '<div class="text-center py-5"><div class="spinner-border"></div><p class="mt-3">Generating...</p></div>';
+    
+    // Reset state
+    generatedRecipes = [];
+    generatedWorkflow = null;
+    generatedHAL = null;
+    
+    const errors = [];
+    let maxSources = 0;  // Track max sources needed across all recipes
+    let targetPlate = 'corning_96_wellplate_360ul_flat';
+    
+    for (let i = 0; i < parsedSheets.length; i++) {
+        const sheet = parsedSheets[i];
+        if (sheet.error) continue;
+        
+        const config = groupConfigs[i];
+        config.pipette = document.getElementById(`pipette-${i}`)?.value || 'left';
+        config.target_plate = document.getElementById(`targetPlate-${i}`)?.value || 'corning_96_wellplate_360ul_flat';
+        targetPlate = config.target_plate;
+        // Pass plate geometry so backend can use it for auto-generation
+        const plateInfo = PLATE_CATALOG[config.target_plate] || {};
+        config.plate_rows = plateInfo.rows || 8;
+        config.plate_columns = plateInfo.columns || 12;
+        config.plate_total_wells = plateInfo.total_wells || 96;
+        config.plate_row_labels = plateInfo.row_labels || ['A','B','C','D','E','F','G','H'];
+        
+        // Count total reagents for this sheet (= number of sources needed)
+        const totalReagents = config.groups.reduce((sum, g) => sum + g.columns.length, 0);
+        maxSources = Math.max(maxSources, totalReagents);
+        
+        // Validate: all reagents must be assigned
+        const usedReagents = config.groups.flatMap(g => g.columns);
+        const allReagents = sheet.summary?.reagents || [];
+        const unused = allReagents.filter(r => !usedReagents.includes(r));
+        
+        if (unused.length > 0) {
+            errors.push(`${sheet.sheet_name}: Unassigned reagents: ${unused.join(', ')}`);
+            continue;
+        }
+        
+        // Validate: no empty groups
+        const emptyGroups = config.groups.filter(g => g.columns.length === 0);
+        if (emptyGroups.length > 0) {
+            errors.push(`${sheet.sheet_name}: Empty phases: ${emptyGroups.map(g => g.name).join(', ')}`);
+            continue;
+        }
+        
+        try {
+            if (isMultiMode) {
+                // Generate multiple recipes (one per phase)
+                await generateMultiRecipes(sheet, config, i, saveRecipes);
+            } else {
+                // Generate single recipe with embedded delays
+                await generateSingleRecipe(sheet, config, i, saveRecipes);
+            }
+        } catch (e) {
+            errors.push(`${sheet.sheet_name}: ${e.message}`);
+        }
+    }
+    
+    // Generate workflow if multi-mode and requested
+    if (isMultiMode && generatedRecipes.length > 0 && saveWorkflow) {
+        try {
+            await generateWorkflow(saveWorkflow);
+        } catch (e) {
+            errors.push(`Workflow generation: ${e.message}`);
+        }
+    }
+    
+    // Generate generic HAL if requested (after all recipes to know max sources)
+    if (generateHAL && generatedRecipes.length > 0) {
+        try {
+            await generateGenericHAL(maxSources, targetPlate, saveHAL);
+        } catch (e) {
+            errors.push(`HAL generation: ${e.message}`);
+        }
+    }
+    
+    // Show results
+    showResults(errors);
+}
+
+// Generate multiple recipes (one per phase)
+async function generateMultiRecipes(sheet, config, sheetIdx, saveRecipes) {
+    for (let groupIdx = 0; groupIdx < config.groups.length; groupIdx++) {
+        const group = config.groups[groupIdx];
+        
+        // Create a config with just this group (no delay - workflow handles it)
+        const singleGroupConfig = {
+            groups: [{
+                name: group.name,
+                columns: group.columns,
+                delay_after_seconds: 0  // No delay in individual recipes
+            }],
+            pipette: config.pipette,
+            target_plate: config.target_plate,
+            reagent_liquid_classes: config.reagent_liquid_classes || {}  // Include liquid classes
+        };
+        
+        const recipeName = `${sheet.sheet_name}_${group.name}`;
+        
+        const resp = await fetch('/api/batch/generate-recipe-with-config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                sheet_data: sheet,
+                config: singleGroupConfig,
+                recipe_name: recipeName,
+                save_to_library: saveRecipes
+            })
+        });
+        
+        const result = await resp.json();
+        
+        if (result.error) {
+            throw new Error(result.error);
+        }
+        
+        // Store with delay info for workflow
+        generatedRecipes.push({
+            recipe: result.recipe,
+            delay_after: group.delay_after_seconds,
+            saved_file: result.saved_recipe
+        });
+    }
+}
+
+// Generate single recipe with embedded delays
+async function generateSingleRecipe(sheet, config, sheetIdx, saveRecipes) {
+    const recipeName = sheet.sheet_name;
+    
+    const resp = await fetch('/api/batch/generate-recipe-with-config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            sheet_data: sheet,
+            config: config,  // Full config with all groups and delays
+            recipe_name: recipeName,
+            save_to_library: saveRecipes
+        })
+    });
+    
+    const result = await resp.json();
+    
+    if (result.error) {
+        throw new Error(result.error);
+    }
+    
+    generatedRecipes.push({
+        recipe: result.recipe,
+        delay_after: 0,
+        saved_file: result.saved_recipe
+    });
+}
+
+// Generate generic HAL configuration (reusable for any recipe)
+async function generateGenericHAL(numSources, targetPlate, saveToLibrary) {
+    const resp = await fetch('/api/batch/generate-hal', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            hal_name: 'Generic_HAL',
+            num_sources: numSources,
+            target_plate: targetPlate,
+            save_to_library: saveToLibrary
+        })
+    });
+    
+    const result = await resp.json();
+    
+    if (result.error) {
+        throw new Error(result.error);
+    }
+    
+    generatedHAL = result.hal_config;
+}
+
+// Generate workflow
+async function generateWorkflow(saveToLibrary) {
+    const recipes = generatedRecipes.map(r => ({
+        ...r.recipe,
+        _delay_after: r.delay_after
+    }));
+    
+    const resp = await fetch('/api/batch/generate-workflow', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            recipes: recipes,
+            save_to_library: saveToLibrary
+        })
+    });
+    
+    const result = await resp.json();
+    
+    if (result.error) {
+        throw new Error(result.error);
+    }
+    
+    generatedWorkflow = result.workflow;
+}
+
+// Show results
+function showResults(errors) {
+    const outputPanel = document.getElementById('outputPanel');
+    let html = '';
+    
+    // Errors
+    if (errors.length > 0) {
+        html += `
+            <div class="alert alert-warning py-2 small mb-3">
+                <i class="bi bi-exclamation-triangle"></i> <strong>${errors.length} issue(s):</strong>
+                <ul class="mb-0 mt-1">${errors.map(e => `<li>${e}</li>`).join('')}</ul>
+            </div>
+        `;
+    }
+    
+    // Recipes
+    if (generatedRecipes.length > 0) {
+        html += `
+            <div class="alert alert-success py-2 mb-3">
+                <i class="bi bi-check-circle"></i> Generated <strong>${generatedRecipes.length}</strong> recipe(s)
+            </div>
+        `;
+        
+        html += '<div class="list-group list-group-flush small mb-3">';
+        generatedRecipes.forEach((item, idx) => {
+            const recipe = item.recipe;
+            const metadata = recipe.Metadata || {};
+            const hasDelays = metadata.HasDelays || false;
+            const reagentMapping = metadata.ReagentMapping || {};
+            
+            // Build mapping display (e.g., "Source_1=HA, Source_2=DMTMM")
+            const mappingStr = Object.entries(reagentMapping)
+                .map(([reagent, source]) => `${source}=${reagent}`)
+                .join(', ');
+            
+            html += `
+                <div class="list-group-item px-2 py-2 bg-dark">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <strong>${recipe.ProtocolName}</strong>
+                            ${hasDelays ? '<span class="badge bg-warning text-dark ms-1">With delays</span>' : ''}
+                            ${item.delay_after > 0 ? `<span class="badge bg-info ms-1">→ ${formatDuration(item.delay_after)}</span>` : ''}
+                        </div>
+                        <span class="badge bg-secondary">${metadata.TotalWells || 0} wells</span>
+                    </div>
+                    <div class="small text-muted mt-1">
+                        <i class="bi bi-droplet"></i> ${mappingStr || (metadata.Reagents || []).join(', ')}
+                    </div>
+                    ${item.saved_file ? `<div class="small text-success"><i class="bi bi-check"></i> ${item.saved_file}</div>` : ''}
+                </div>
+            `;
+        });
+        html += '</div>';
+    }
+    
+    // Workflow
+    if (generatedWorkflow) {
+        html += `
+            <div class="card bg-info bg-opacity-10 mb-3">
+                <div class="card-body py-2">
+                    <h6 class="mb-2"><i class="bi bi-diagram-3"></i> Workflow: ${generatedWorkflow.name}</h6>
+                    <div class="small">
+                        <span class="badge bg-secondary">${generatedWorkflow.steps?.length || 0} steps</span>
+                        ${generatedWorkflow.saved_file ? 
+                            `<span class="text-success ms-2"><i class="bi bi-check"></i> Saved</span>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // HAL
+    if (generatedHAL) {
+        const numSources = generatedHAL.Metadata?.total_sources || 0;
+        const labware = generatedHAL.Labware || {};
+        
+        // Build source list for display
+        let sourceList = '';
+        for (let i = 1; i <= numSources; i++) {
+            const sourceKey = `Source_${i}`;
+            const slot = labware[sourceKey]?.Slot || '?';
+            sourceList += `<li class="list-group-item py-1 small"><code>${sourceKey}</code> → Slot ${slot}</li>`;
+        }
+        
+        html += `
+            <div class="card bg-success bg-opacity-10 mb-3">
+                <div class="card-body py-2">
+                    <h6 class="mb-2"><i class="bi bi-cpu"></i> HAL: ${generatedHAL.ConfigName}</h6>
+                    <div class="small mb-2">
+                        <span class="badge bg-success">${numSources} source slots</span>
+                        <span class="badge bg-secondary ms-1">Reusable</span>
+                        ${generatedHAL.saved_file ? 
+                            `<span class="text-success ms-2"><i class="bi bi-check"></i> Saved</span>` : ''}
+                    </div>
+                    <details class="small">
+                        <summary class="text-muted">Source slot assignments</summary>
+                        <ul class="list-group list-group-flush mt-2">
+                            ${sourceList}
+                        </ul>
+                        <div class="alert alert-info py-1 px-2 mt-2 mb-0">
+                            <i class="bi bi-info-circle"></i> 
+                            Check each recipe's <code>Metadata.ReagentMapping</code> to see which reagent goes in each Source slot.
+                        </div>
+                    </details>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Download buttons
+    if (generatedRecipes.length > 0) {
+        html += `
+            <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-sm btn-outline-primary" onclick="downloadRecipes()">
+                    <i class="bi bi-download"></i> Recipes JSON
+                </button>
+                ${generatedWorkflow ? `
+                    <button class="btn btn-sm btn-outline-info" onclick="downloadWorkflow()">
+                        <i class="bi bi-download"></i> Workflow
+                    </button>
+                ` : ''}
+                ${generatedHAL ? `
+                    <button class="btn btn-sm btn-outline-success" onclick="downloadHAL()">
+                        <i class="bi bi-download"></i> HAL
+                    </button>
+                ` : ''}
+            </div>
+        `;
+    }
+    
+    if (!html) {
+        html = '<div class="text-center text-muted py-5"><p>No output generated</p></div>';
+    }
+    
+    outputPanel.innerHTML = html;
+}
+
+// Download functions
+function downloadRecipes() {
+    const recipes = generatedRecipes.map(r => r.recipe);
+    const blob = new Blob([JSON.stringify(recipes, null, 2)], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'generated_recipes.json';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function downloadWorkflow() {
+    if (!generatedWorkflow) return;
+    const blob = new Blob([JSON.stringify(generatedWorkflow, null, 2)], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${generatedWorkflow.name || 'workflow'}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function downloadHAL() {
+    if (!generatedHAL) return;
+    const blob = new Blob([JSON.stringify(generatedHAL, null, 2)], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${generatedHAL.ConfigName || generatedHAL.HALName || 'hal_config'}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+</script>
+{% endblock %}

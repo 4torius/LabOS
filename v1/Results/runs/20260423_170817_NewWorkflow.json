@@ -1,0 +1,14 @@
+{
+  "run_id": "20260423_170817_NewWorkflow",
+  "workflow_name": "NewWorkflow",
+  "started_at": "2026-04-23T17:08:17.438326",
+  "status": "failed",
+  "steps_completed": 0,
+  "steps_failed": 1,
+  "steps_skipped": 1,
+  "duration_seconds": 14.640465,
+  "errors": [
+    "Step 1: Cannot execute ExecuteRecipe on OpentronsFlex. Server needs to implement SiLA2Common.ExecuteCommand or provide gRPC stubs."
+  ],
+  "step_results": []
+}

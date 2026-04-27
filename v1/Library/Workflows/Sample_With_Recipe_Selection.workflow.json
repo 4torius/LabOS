@@ -1,0 +1,48 @@
+{
+  "workflow": {
+    "id": "sample_workflow_with_recipes",
+    "name": "Sample Workflow with Recipe Selection",
+    "description": "Demonstrates how to select recipes from Library/Recipes",
+    "version": "1.0.0",
+    "author": "BicoccaLab",
+    "tags": ["example", "opentrons", "tecan"]
+  },
+  
+  "variables": {
+    "plate_id": "PLATE_001",
+    "temperature": 37.0
+  },
+  
+  "steps": [
+    {
+      "id": "prepare_samples",
+      "name": "Prepare Samples with Recipe",
+      "instrument": "opentrons",
+      "action": "run_recipe",
+      "params": {
+        "recipe": "test_case1_requirements.json",
+        "hal_config": "Standard_Flex_Setup",
+        "use_hal": true
+      },
+      "description": "Runs the test_case1 recipe using HAL configuration"
+    },
+    {
+      "id": "read_plate",
+      "name": "Read Plate on Tecan",
+      "instrument": "tecan",
+      "action": "run_analysis",
+      "params": {
+        "analysis": "TestAbs.mdfx",
+        "plate_id": "${plate_id}"
+      },
+      "depends_on": ["prepare_samples"],
+      "description": "Reads absorbance after sample preparation"
+    }
+  ],
+  
+  "on_complete": {
+    "notify": true,
+    "archive_results": true,
+    "results_folder": "Results/"
+  }
+}

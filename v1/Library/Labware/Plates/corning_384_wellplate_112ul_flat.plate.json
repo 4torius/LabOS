@@ -1,0 +1,62 @@
+{
+  "id": "corning_384_wellplate_112ul_flat",
+  "display_name": "Corning 384 Well Plate 112 µL Flat",
+  "category": "wellPlate",
+  "format": "384Standard",
+  "rows": 16,
+  "columns": 24,
+  "total_wells": 384,
+  "row_labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P"
+  ],
+  "max_volume_ul": 112,
+  "working_volume_ul": 90,
+  "well_shape": "square",
+  "well_diameter_mm": null,
+  "well_width_mm": 3.63,
+  "well_length_mm": 3.63,
+  "well_depth_mm": 11.43,
+  "dimensions_mm": {
+    "x": 127.76,
+    "y": 85.47,
+    "z": 14.22
+  },
+  "bottom_type": "flat",
+  "instruments": [
+    "opentrons",
+    "tecan"
+  ],
+  "opentrons_load_name": "corning_384_wellplate_112ul_flat",
+  "tecan_compatible": true,
+  "brand": "Corning",
+  "catalog_numbers": [
+    "3640",
+    "3662",
+    "3680",
+    "3700",
+    "3701",
+    "3702"
+  ],
+  "tags": [
+    "384-well",
+    "flat-bottom",
+    "high-throughput",
+    "screening"
+  ],
+  "notes": "Standard 384-well plate. 16 rows (A-P) × 24 columns. Requires multichannel or 384-channel pipette for efficient use."
+}

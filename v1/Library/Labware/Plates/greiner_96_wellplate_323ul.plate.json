@@ -1,0 +1,53 @@
+{
+  "id": "greiner_96_wellplate_323ul",
+  "display_name": "Greiner 96 Well Plate 323 µL Flat (F-bottom)",
+  "category": "wellPlate",
+  "format": "96Standard",
+  "rows": 8,
+  "columns": 12,
+  "total_wells": 96,
+  "row_labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H"
+  ],
+  "max_volume_ul": 323,
+  "working_volume_ul": 270,
+  "well_shape": "circular",
+  "well_diameter_mm": 6.99,
+  "well_depth_mm": 10.3,
+  "dimensions_mm": {
+    "x": 127.76,
+    "y": 85.48,
+    "z": 14.2
+  },
+  "bottom_type": "flat",
+  "instruments": [
+    "opentrons",
+    "tecan"
+  ],
+  "opentrons_load_name": "greiner_96_wellplate_323ul",
+  "tecan_compatible": true,
+  "brand": "Greiner Bio-One",
+  "catalog_numbers": [
+    "650101",
+    "650160",
+    "650161",
+    "650162",
+    "650173",
+    "650180",
+    "650185"
+  ],
+  "tags": [
+    "flat-bottom",
+    "transparent",
+    "cell-culture",
+    "greiner"
+  ],
+  "notes": "Greiner F-bottom 96-well. Slightly smaller volume than 655-series."
+}

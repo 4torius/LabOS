@@ -1,0 +1,54 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<TecanFile xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="tecan.at.schema.documents Main.xsd" fileformat="Tecan.At.Measurement" fileversion="2.0" xmlns="tecan.at.schema.documents">
+    <FileInfo type="" instrument="infinite 200Pro" version="" createdFrom="inspection" createdAt="2025-11-14T13:01:47.7806505Z" createdWith="Tecan.At.XFluor.ReaderEditor.XFluorReaderEditor" description="" />
+    <TecanMeasurement id="1" class="">
+        <MeasurementManualCycle id="2" number="1" type="Standard">
+            <CyclePlate id="3" file="COS24ft" plateWithCover="False">
+                <PlateRange id="0" range="A1~D6" auto="true">
+                    <MeasurementAbsorbance id="4" mode="Normal" type="" name="ABS" longname="" description="">
+                        <Well id="5" auto="true">
+                            <MeasurementReading id="6" name="" beamDiameter="700" beamGridType="Single" beamGridSize="1" beamEdgeDistance="auto">
+                                <ReadingLabel id="7" name="Label1" scanType="ScanFixed" refID="0">
+                                    <ReadingSettings number="25" rate="25000" />
+                                    <ReadingTime integrationTime="0" lagTime="0" readDelay="0" flash="0" dark="0" excitationTime="0" />
+                                    <ReadingFilter id="0" type="Ex" wavelength="2300" bandwidth="50" attenuation="0" usage="ABS" compatibility="" />
+                                </ReadingLabel>
+                            </MeasurementReading>
+                        </Well>
+                        <CustomData id="8" />
+                    </MeasurementAbsorbance>
+                    <MeasurementFluoInt readingMode="Top" id="9" mode="Normal" type="" name="FluoInt" longname="" description="">
+                        <Well id="10" auto="true">
+                            <MeasurementReading id="11" name="" beamDiameter="3000" beamGridType="Single" beamGridSize="1" beamEdgeDistance="auto">
+                                <ReadingLabel id="12" name="Label2" scanType="ScanFixed" refID="0">
+                                    <ReadingSettings number="25" rate="25000" />
+                                    <ReadingGain type="" gain="100" optimalGainPercentage="0" automaticGain="False" mode="Manual" />
+                                    <ReadingTime integrationTime="20" lagTime="0" readDelay="0" flash="0" dark="0" excitationTime="0" />
+                                    <ReadingFilter id="13" type="Ex" wavelength="2300" bandwidth="50" attenuation="0" usage="FI" compatibility="" />
+                                    <ReadingFilter id="14" type="Em" wavelength="2800" bandwidth="200" attenuation="0" usage="FI" compatibility="" />
+                                    <ReadingZPosition mode="Manual" zPosition="20000" />
+                                </ReadingLabel>
+                            </MeasurementReading>
+                        </Well>
+                    </MeasurementFluoInt>
+                    <MeasurementLuminescence id="15" mode="Normal" type="" name="LUMI" longname="" description="" dualColor="false">
+                        <Well id="16" auto="true">
+                            <MeasurementReading id="17" name="" beamDiameter="0" beamGridType="Single" beamGridSize="0" beamEdgeDistance="">
+                                <ReadingLabel id="18" name="Label3" scanType="ScanFixed" refID="0">
+                                    <ReadingTime integrationTime="1000000" lagTime="0" readDelay="0" flash="0" dark="0" excitationTime="0" />
+                                    <ReadingFilter id="19" type="Em" wavelength="0" bandwidth="0" attenuation="0" usage="EMPTY" compatibility="" />
+                                </ReadingLabel>
+                            </MeasurementReading>
+                        </Well>
+                    </MeasurementLuminescence>
+                </PlateRange>
+            </CyclePlate>
+        </MeasurementManualCycle>
+        <MeasurementInfo id="0" description="">
+            <ScriptTemplateSettings id="0">
+                <ScriptTemplateGeneralSettings id="0" Title="" Group="" Info="" Image="" />
+                <ScriptTemplateDescriptionSettings id="0" Internal="" External="" IsExternal="False" />
+            </ScriptTemplateSettings>
+        </MeasurementInfo>
+    </TecanMeasurement>
+</TecanFile>

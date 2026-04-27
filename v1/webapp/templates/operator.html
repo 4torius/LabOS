@@ -1,0 +1,829 @@
+{% extends "base.html" %}
+
+{% block extra_css %}
+<style>
+    /* ── Workflow Live Status ──────────────────────────────────── */
+    #wf-status-card {
+        border-left: 5px solid var(--labos-primary);
+        transition: border-color 0.4s;
+    }
+    #wf-status-card.paused  { border-color: #ffc107; }
+    #wf-status-card.failed  { border-color: #dc3545; }
+    #wf-status-card.idle    { border-color: var(--bs-border-color); }
+    #wf-status-card.done    { border-color: #198754; }
+
+    #wf-step-bar { height: 14px; border-radius: 7px; }
+
+    /* ── Pending Actions ──────────────────────────────────────── */
+    .action-card {
+        border-left: 6px solid var(--bs-info);
+        transition: transform 0.15s;
+    }
+    .action-card:hover { transform: translateX(3px); }
+    .action-card.urgent  { border-color: #dc3545; }
+    .action-card.warning { border-color: #ffc107; }
+    .action-card .action-title  { font-size: 1.1rem; font-weight: 600; }
+    .action-card .action-msg    { font-size: 0.95rem; white-space: pre-line; }
+    .action-card .btn-confirm   { min-width: 110px; font-weight: 600; }
+
+    /* ── Quick Actions ────────────────────────────────────────── */
+    .quick-btn {
+        border-radius: 10px;
+        padding: 14px 10px;
+        font-weight: 500;
+        text-align: center;
+        cursor: pointer;
+        transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .quick-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    .quick-btn .bi   { font-size: 1.6rem; display: block; margin-bottom: 6px; }
+
+    /* ── Emergency Stop Button ────────────────────────────────── */
+    #btn-estop {
+        font-size: 1.1rem;
+        letter-spacing: 0.05em;
+        padding: 14px;
+        border-radius: 10px;
+    }
+
+    /* ── Tip progress bars ────────────────────────────────────── */
+    .tip-bar { height: 10px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="padding-top: 50px;">
+
+    <!-- ══════════════ WORKFLOW LIVE STATUS ══════════════ -->
+    <div class="card mb-4" id="wf-status-card">
+        <div class="card-body">
+            <div class="row align-items-center g-3">
+                <!-- Name + state icon -->
+                <div class="col-auto">
+                    <span id="wf-icon" style="font-size:2rem;">
+                        <i class="bi bi-moon text-secondary"></i>
+                    </span>
+                </div>
+                <div class="col">
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <h5 class="mb-0" id="wf-name">No active workflow</h5>
+                        <span class="badge" id="wf-state-badge" style="display:none;"></span>
+                    </div>
+                    <small class="text-muted" id="wf-action-label">—</small>
+                    <!-- Step progress bar -->
+                    <div class="mt-2" id="wf-bar-wrap" style="display:none;">
+                        <div class="progress" style="height:14px; border-radius:7px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                 id="wf-step-bar" style="width:0%;"></div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Counters -->
+                <div class="col-auto text-center px-3">
+                    <div class="fw-bold fs-5" id="wf-step-label">—</div>
+                    <small class="text-muted">Steps</small>
+                </div>
+                <div class="col-auto text-center px-3">
+                    <div class="fw-bold fs-5" id="wf-elapsed">00:00:00</div>
+                    <small class="text-muted">Elapsed</small>
+                </div>
+                <!-- Controls -->
+                <div class="col-auto d-flex gap-2">
+                    <button class="btn btn-outline-warning" id="btn-pause" onclick="pauseWorkflow()" title="Pause">
+                        <i class="bi bi-pause-circle"></i> Pause
+                    </button>
+                    <button class="btn btn-outline-success" id="btn-resume" onclick="resumeWorkflow()" title="Resume" style="display:none;">
+                        <i class="bi bi-play-circle"></i> Resume
+                    </button>
+                    <button class="btn btn-danger" id="btn-estop" onclick="showEmergencyStopModal()">
+                        <i class="bi bi-stop-circle-fill"></i> STOP
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══════════════ MAIN CONTENT ══════════════ -->
+    <div class="row g-4">
+
+        <!-- LEFT: Pending Actions + History -->
+        <div class="col-md-8">
+
+            <!-- Required Actions -->
+            <div class="card">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-exclamation-triangle text-warning fs-5"></i>
+                    <span class="fw-semibold">Required Actions</span>
+                    <span class="badge bg-warning text-dark ms-auto" id="pending-count">0</span>
+                    <button class="btn btn-sm btn-outline-success ms-1" onclick="acknowledgeAll()" title="Confirm All">
+                        <i class="bi bi-check-all"></i> All
+                    </button>
+                </div>
+                <div class="card-body p-3" id="pending-actions">
+                    <div class="text-center text-muted py-5" id="no-pending">
+                        <i class="bi bi-check-circle" style="font-size:3rem;"></i>
+                        <p class="mt-3 mb-0">No actions required</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notification History -->
+            <div class="card mt-4">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-clock-history"></i>
+                    <span>Notification History</span>
+                    <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="clearHistory()">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+                <div class="card-body p-0">
+                    <div style="max-height:340px; overflow-y:auto;" id="notification-history">
+                        <div class="text-center text-muted py-4" id="no-history">
+                            <p class="mb-0">No recent notifications</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT: Quick Actions + Tip Status -->
+        <div class="col-md-4">
+
+            <!-- Quick Actions grid -->
+            <div class="card">
+                <div class="card-header"><i class="bi bi-lightning"></i> Quick Actions</div>
+                <div class="card-body">
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <div class="quick-btn btn btn-outline-warning w-100" onclick="refillTipRack()">
+                                <i class="bi bi-arrow-repeat"></i>
+                                Refill Tips
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="quick-btn btn btn-outline-info w-100" onclick="showManualInput()">
+                                <i class="bi bi-keyboard"></i>
+                                Manual Input
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="quick-btn btn btn-outline-secondary w-100" onclick="sendTestNotification()">
+                                <i class="bi bi-send"></i>
+                                Test Notif
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="quick-btn btn btn-outline-danger w-100" onclick="sendTestTipRefill()">
+                                <i class="bi bi-exclamation-triangle"></i>
+                                Test Refill
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tip Status -->
+            <div class="card mt-3">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-eyedropper"></i> Tip Status
+                    <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadTipStatus()">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+                <div class="card-body" id="tipStatusContent">
+                    <div class="text-center text-muted">
+                        <div class="spinner-border spinner-border-sm"></div> Loading...
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+
+<!-- ══════════════ MODALS ══════════════ -->
+
+<!-- Emergency Stop Modal -->
+<div class="modal fade" id="emergencyStopModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-danger">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-octagon-fill"></i> Emergency Stop
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center py-4">
+                <i class="bi bi-stop-circle-fill text-danger" style="font-size:3.5rem;"></i>
+                <h4 class="mt-3">Stop the entire system?</h4>
+                <p class="text-muted mb-0">This will immediately halt all running instruments and abort the active workflow. This action cannot be undone.</p>
+            </div>
+            <div class="modal-footer justify-content-center gap-3">
+                <button type="button" class="btn btn-secondary btn-lg px-4" data-bs-dismiss="modal">
+                    <i class="bi bi-x"></i> Cancel
+                </button>
+                <button type="button" class="btn btn-danger btn-lg px-4" onclick="confirmEmergencyStop()">
+                    <i class="bi bi-stop-circle-fill"></i> STOP NOW
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Pause Confirm Modal -->
+<div class="modal fade" id="pauseModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-warning">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title"><i class="bi bi-pause-circle"></i> Pause Workflow</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body py-4 text-center">
+                <p>The workflow will pause after the current step completes.</p>
+                <p class="text-muted small mb-0">Use Resume to continue from where it stopped.</p>
+            </div>
+            <div class="modal-footer justify-content-center gap-3">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-warning" onclick="confirmPause()">
+                    <i class="bi bi-pause-circle"></i> Pause
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Manual Input Modal -->
+<div class="modal fade" id="manualInputModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="bi bi-keyboard"></i> Manual Input</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Type</label>
+                    <select class="form-select" id="manual-step-type">
+                        <option value="note">Add Note</option>
+                        <option value="measurement">Record Measurement</option>
+                        <option value="observation">Record Observation</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Description <span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="manual-description" rows="3" placeholder="Describe the action performed..."></textarea>
+                </div>
+                <div class="mb-3" id="measurement-value-group" style="display:none;">
+                    <label class="form-label fw-semibold">Value</label>
+                    <input type="text" class="form-control" id="manual-value" placeholder="e.g. 37.5 °C">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="submitManualInput()">
+                    <i class="bi bi-check-lg"></i> Record
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tip Rack Refill Modal -->
+<div class="modal fade" id="refillTipRackModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title"><i class="bi bi-arrow-repeat"></i> Refill Tip Rack</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3">Select the rack to refill or reset all:</p>
+                <div id="tipRackList" class="list-group">
+                    <div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Loading...</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let pendingActions = [];
+let notificationHistory = [];
+let recentlyAcknowledgedIds = {};
+let startTime = null;
+let wfRunning = false;
+
+// ── WebSocket handler override ─────────────────────────────────────────────
+const origHandler = window.handleWebSocketMessage || function() {};
+window.handleWebSocketMessage = function(data) {
+    origHandler(data);
+    if (data.type === 'operator_notification') {
+        addPendingAction(data);
+        try { new Audio('/static/notification.mp3').play(); } catch(e) {}
+    } else if (data.type === 'workflow_start') {
+        onWorkflowStart(data);
+    } else if (data.type === 'workflow_update' || data.type === 'workflow_progress') {
+        onWorkflowProgress(data);
+    } else if (data.type === 'workflow_paused') {
+        onWorkflowPaused(data);
+    } else if (data.type === 'workflow_resumed') {
+        onWorkflowResumed(data);
+    } else if (data.type === 'workflow_complete' || data.type === 'batch_complete') {
+        onWorkflowDone(data);
+    } else if (data.type === 'workflow_failed') {
+        onWorkflowFailed(data);
+    } else if (data.type === 'action_acknowledged') {
+        recentlyAcknowledgedIds[data.action_id] = Date.now();
+        pendingActions = pendingActions.filter(a => a.id !== data.action_id);
+        renderPendingActions();
+    } else if (data.type === 'intervention_required') {
+        onInterventionRequired(data);
+    } else if (data.type === 'intervention_resolved') {
+        pendingActions = pendingActions.filter(a => a.id !== data.intervention_id);
+        renderPendingActions();
+    }
+};
+
+// ── Workflow Status Card ───────────────────────────────────────────────────
+function setWfCard(state, icon, badgeClass, badgeText, name, action, step, total) {
+    const card = document.getElementById('wf-status-card');
+    card.className = 'card mb-4 ' + state;
+    document.getElementById('wf-icon').innerHTML = icon;
+    document.getElementById('wf-name').textContent = name || 'No active workflow';
+    document.getElementById('wf-action-label').textContent = action || '—';
+
+    const badge = document.getElementById('wf-state-badge');
+    if (badgeText) {
+        badge.className = 'badge ' + badgeClass;
+        badge.textContent = badgeText;
+        badge.style.display = '';
+    } else {
+        badge.style.display = 'none';
+    }
+
+    const barWrap = document.getElementById('wf-bar-wrap');
+    const bar = document.getElementById('wf-step-bar');
+    const stepLabel = document.getElementById('wf-step-label');
+    if (total > 0) {
+        barWrap.style.display = '';
+        const pct = Math.round((step / total) * 100);
+        bar.style.width = pct + '%';
+        bar.className = 'progress-bar ' + (state === 'running' ? 'progress-bar-striped progress-bar-animated' : '');
+        stepLabel.textContent = step + '/' + total;
+    } else {
+        barWrap.style.display = 'none';
+        stepLabel.textContent = '—';
+    }
+}
+
+function onWorkflowStart(data) {
+    wfRunning = true;
+    startTime = Date.now();
+    document.getElementById('btn-pause').style.display = '';
+    document.getElementById('btn-resume').style.display = 'none';
+    setWfCard('running',
+        '<i class="bi bi-play-circle-fill text-success"></i>',
+        'bg-success', 'Running',
+        data.workflow_name, 'Starting…', 0, data.total_steps || 0
+    );
+    addNotificationToHistory({ title: 'Workflow Started', message: data.workflow_name });
+}
+
+function onWorkflowProgress(data) {
+    if (!wfRunning) return;  // ignore late progress events after done/failed
+    const step = data.step || data.current_step || 0;
+    const total = data.total || data.total_steps || 0;
+    const action = data.action ? `${data.instrument} → ${data.action}` : '';
+    const wfName = data.workflow_name || document.getElementById('wf-name').textContent;
+
+    if (data.status === 'waiting_intervention') {
+        document.getElementById('btn-pause').style.display = 'none';
+        document.getElementById('btn-resume').style.display = 'none';
+        setWfCard('paused',
+            '<i class="bi bi-exclamation-circle-fill text-warning"></i>',
+            'bg-warning text-dark', 'Intervention Required',
+            wfName, `Step ${step}: ${action} — ${data.message || 'failed'}`, step, total
+        );
+        return;
+    }
+
+    setWfCard('running',
+        '<i class="bi bi-play-circle-fill text-success"></i>',
+        'bg-success', 'Running',
+        wfName, action, step, total
+    );
+}
+
+function onWorkflowPaused(data) {
+    document.getElementById('btn-pause').style.display = 'none';
+    document.getElementById('btn-resume').style.display = '';
+    setWfCard('paused',
+        '<i class="bi bi-pause-circle-fill text-warning"></i>',
+        'bg-warning text-dark', 'Paused',
+        document.getElementById('wf-name').textContent,
+        data.message || 'Paused', null, null
+    );
+    addNotificationToHistory({ title: 'Workflow Paused', message: data.message || '' });
+}
+
+function onWorkflowResumed(data) {
+    document.getElementById('btn-pause').style.display = '';
+    document.getElementById('btn-resume').style.display = 'none';
+    setWfCard('running',
+        '<i class="bi bi-play-circle-fill text-success"></i>',
+        'bg-success', 'Running',
+        document.getElementById('wf-name').textContent,
+        'Resuming…', null, null
+    );
+}
+
+function onWorkflowDone(data) {
+    wfRunning = false;
+    document.getElementById('btn-pause').style.display = '';
+    document.getElementById('btn-resume').style.display = 'none';
+    setWfCard('done',
+        '<i class="bi bi-check-circle-fill text-success"></i>',
+        'bg-success', 'Completed',
+        data.workflow_name || document.getElementById('wf-name').textContent,
+        data.message || 'Completed successfully', null, null
+    );
+    addNotificationToHistory({ title: 'Workflow Completed', message: data.message || '' });
+}
+
+function onWorkflowFailed(data) {
+    wfRunning = false;
+    setWfCard('failed',
+        '<i class="bi bi-x-circle-fill text-danger"></i>',
+        'bg-danger', 'Failed',
+        data.workflow_name || document.getElementById('wf-name').textContent,
+        `Step ${data.step || '?'}: ${data.reason || data.message || 'Error'}`,
+        null, null
+    );
+    addNotificationToHistory({ title: 'Workflow Failed', message: data.message || '' });
+}
+
+// ── Emergency Stop ─────────────────────────────────────────────────────────
+function showEmergencyStopModal() {
+    new bootstrap.Modal(document.getElementById('emergencyStopModal')).show();
+}
+
+function confirmEmergencyStop() {
+    bootstrap.Modal.getInstance(document.getElementById('emergencyStopModal')).hide();
+    fetch('/api/emergency/stop', { method: 'POST' })
+        .then(r => r.json())
+        .then(result => showToast('danger', 'System Stopped', result.message || 'Emergency stop executed'))
+        .catch(e => showToast('danger', 'Error', e.message));
+}
+
+// ── Pause / Resume ─────────────────────────────────────────────────────────
+function pauseWorkflow() {
+    new bootstrap.Modal(document.getElementById('pauseModal')).show();
+}
+
+function confirmPause() {
+    bootstrap.Modal.getInstance(document.getElementById('pauseModal')).hide();
+    fetch('/api/workflows/pause', { method: 'POST' })
+        .then(r => r.json())
+        .then(result => showToast('warning', 'Paused', result.message || 'Workflow will pause after current step'))
+        .catch(e => showToast('danger', 'Error', e.message));
+}
+
+function resumeWorkflow() {
+    fetch('/api/workflows/resume', { method: 'POST' })
+        .then(r => r.json())
+        .then(result => showToast('success', 'Resumed', result.message || 'Workflow resumed'))
+        .catch(e => showToast('danger', 'Error', e.message));
+}
+
+// ── Pending Actions ────────────────────────────────────────────────────────
+function addPendingAction(action) {
+    const id = action.id || Date.now();
+    if (recentlyAcknowledgedIds[id] && (Date.now() - recentlyAcknowledgedIds[id]) < 60000) return;
+    if (pendingActions.some(a => a.id === id)) return;
+    pendingActions.push({ id, ...action, timestamp: new Date() });
+    renderPendingActions();
+}
+
+function renderPendingActions() {
+    const container = document.getElementById('pending-actions');
+    const countBadge = document.getElementById('pending-count');
+    if (!container || !countBadge) return;
+
+    countBadge.textContent = pendingActions.length;
+
+    if (pendingActions.length === 0) {
+        container.innerHTML = `
+            <div class="text-center text-muted py-5" id="no-pending">
+                <i class="bi bi-check-circle" style="font-size:3rem;"></i>
+                <p class="mt-3 mb-0">No actions required</p>
+            </div>`;
+        return;
+    }
+
+    container.innerHTML = pendingActions.map((action, i) => {
+        const cls = action.priority === 'urgent' ? 'urgent' :
+                    action.priority === 'warning' ? 'warning' : '';
+        const badgeHtml = action.priority === 'urgent'
+            ? '<span class="badge bg-danger ms-2">URGENT</span>'
+            : action.priority === 'warning'
+            ? '<span class="badge bg-warning text-dark ms-2">Attention</span>' : '';
+        let ts = '';
+        try { ts = (action.timestamp instanceof Date ? action.timestamp : new Date(action.timestamp)).toLocaleTimeString(); }
+        catch(e) { ts = ''; }
+
+        const btns = action.is_intervention
+            ? `<div class="d-flex gap-2 flex-column">
+                 <button class="btn btn-warning btn-sm" onclick="interventionAction('${action.intervention_id}','retry')">
+                   <i class="bi bi-arrow-clockwise"></i> Retry
+                 </button>
+                 <button class="btn btn-secondary btn-sm" onclick="interventionAction('${action.intervention_id}','skip')">
+                   <i class="bi bi-skip-forward"></i> Skip
+                 </button>
+                 <button class="btn btn-danger btn-sm" onclick="interventionAction('${action.intervention_id}','abort')">
+                   <i class="bi bi-stop-circle"></i> Abort
+                 </button>
+               </div>`
+            : `<button class="btn btn-success btn-confirm" onclick="acknowledgeAction(${i})">
+                 <i class="bi bi-check-lg"></i> Confirm
+               </button>`;
+
+        return `
+        <div class="card mb-3 action-card ${cls}">
+            <div class="card-body py-3">
+                <div class="d-flex align-items-start gap-3">
+                    <div class="flex-grow-1">
+                        <div class="action-title">${action.title || 'Action Required'} ${badgeHtml}</div>
+                        <div class="action-msg text-muted mt-1" style="white-space:pre-line">${action.message || ''}</div>
+                        <small class="text-muted">${ts}</small>
+                    </div>
+                    ${btns}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    const badge = document.getElementById('notif-badge');
+    if (badge) {
+        badge.textContent = pendingActions.length;
+        badge.style.display = pendingActions.length > 0 ? 'inline-block' : 'none';
+    }
+}
+
+function acknowledgeAction(index) {
+    const action = pendingActions[index];
+    if (!action) return;
+    if (action.is_intervention) return; // Interventions use interventionAction()
+    recentlyAcknowledgedIds[action.id] = Date.now();
+    const removed = pendingActions.splice(index, 1)[0];
+    renderPendingActions();
+    notificationHistory.unshift({ ...removed, acknowledged_at: new Date() });
+    renderHistory();
+
+    fetch('/api/operator/acknowledge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action_id: removed.id,
+            action_type: removed.action || removed.type,
+            extra_data: { title: removed.title, params: removed.params }
+        })
+    }).then(r => r.json()).then(result => {
+        const isRefill = removed.action === 'RefillTipRack' ||
+                         (removed.title || '').toLowerCase().includes('refill');
+        if (isRefill && result.success !== false) {
+            showToast('success', 'Tips Confirmed', 'Tip rack refilled successfully');
+        }
+    }).catch(() => {});
+}
+
+function onInterventionRequired(data) {
+    addPendingAction({
+        id: data.intervention_id,
+        is_intervention: true,
+        intervention_id: data.intervention_id,
+        title: `Step ${data.step || data.step_number} failed — Intervention Required`,
+        message: `${data.instrument || ''} → ${data.action || ''}\nError: ${data.error || data.error_message || ''}`,
+        priority: 'urgent',
+        timestamp: new Date(),
+    });
+}
+
+function interventionAction(interventionId, action) {
+    fetch('/api/intervention/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intervention_id: interventionId, action: action })
+    }).then(r => r.json()).then(result => {
+        pendingActions = pendingActions.filter(a => a.id !== interventionId);
+        renderPendingActions();
+        const labels = { retry: 'Retrying step…', skip: 'Step skipped', abort: 'Workflow aborted' };
+        showToast(action === 'abort' ? 'danger' : 'warning', 'Intervention', labels[action] || action);
+    }).catch(e => showToast('danger', 'Error', e.message));
+}
+
+function acknowledgeAll() {
+    while (pendingActions.length > 0) acknowledgeAction(0);
+}
+
+// ── Notification History ───────────────────────────────────────────────────
+function addNotificationToHistory(item) {
+    notificationHistory.unshift({ ...item, acknowledged_at: new Date() });
+    if (notificationHistory.length > 50) notificationHistory = notificationHistory.slice(0, 50);
+    renderHistory();
+}
+
+function renderHistory() {
+    const container = document.getElementById('notification-history');
+    if (!container) return;
+    if (notificationHistory.length === 0) {
+        container.innerHTML = '<div class="text-center text-muted py-4" id="no-history"><p class="mb-0">No recent notifications</p></div>';
+        return;
+    }
+    container.innerHTML = notificationHistory.map(item => `
+        <div class="d-flex justify-content-between align-items-start px-3 py-2 border-bottom">
+            <div>
+                <small class="fw-semibold">${item.title || 'Notification'}</small>
+                <p class="mb-0 small text-muted">${item.message || ''}</p>
+            </div>
+            <small class="text-muted text-nowrap ms-3">${item.acknowledged_at.toLocaleTimeString()}</small>
+        </div>`).join('');
+}
+
+function clearHistory() {
+    notificationHistory = [];
+    renderHistory();
+}
+
+// ── Toast helper ───────────────────────────────────────────────────────────
+function showToast(type, title, message) {
+    const t = document.createElement('div');
+    t.className = 'toast show position-fixed';
+    t.style.cssText = 'top:70px; right:20px; z-index:9999; min-width:270px;';
+    const bg = type === 'success' ? 'bg-success' : type === 'danger' ? 'bg-danger' :
+               type === 'warning' ? 'bg-warning text-dark' : 'bg-info';
+    t.innerHTML = `
+        <div class="toast-header ${bg} text-white">
+            <strong class="me-auto">${title}</strong>
+            <button type="button" class="btn-close btn-close-white" onclick="this.closest('.toast').remove()"></button>
+        </div>
+        <div class="toast-body">${message}</div>`;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 5000);
+}
+
+// ── Tip Rack ───────────────────────────────────────────────────────────────
+function refillTipRack() {
+    const modal = new bootstrap.Modal(document.getElementById('refillTipRackModal'));
+    const listEl = document.getElementById('tipRackList');
+    listEl.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div></div>';
+    modal.show();
+    fetch('/api/opentrons/tip-status').then(r => r.json()).then(data => {
+        if (data.success && data.status && Object.keys(data.status).length > 0) {
+            const status = data.status;
+            let html = data.hal_file ? `<div class="text-muted small px-2 py-1">HAL: ${data.hal_file}</div>` : '';
+            for (const [name, info] of Object.entries(status)) {
+                const avail = info.available || (info.max - (info.used || 0));
+                const pct = Math.round((avail / info.max) * 100);
+                const cls = avail === 0 ? 'danger' : avail < 20 ? 'warning' : 'success';
+                html += `
+                    <a href="#" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="doRefill('${info.load_name}')">
+                        <div>
+                            <strong>${info.display_name || name} (${info.slot})</strong>
+                            <div class="small text-muted">${info.load_name}</div>
+                            <div class="progress mt-1 tip-bar" style="width:150px;">
+                                <div class="progress-bar bg-${cls}" style="width:${pct}%"></div>
+                            </div>
+                        </div>
+                        <span class="badge bg-${cls}">${avail}/${info.max}</span>
+                    </a>`;
+            }
+            html += `<a href="#" class="list-group-item list-group-item-action list-group-item-warning d-flex justify-content-between align-items-center" onclick="doRefill('all')">
+                        <strong><i class="bi bi-arrow-repeat"></i> REFILL ALL</strong>
+                        <span class="badge bg-warning text-dark">Reset all</span>
+                     </a>`;
+            listEl.innerHTML = html;
+        } else {
+            listEl.innerHTML = `<p class="text-muted p-3">No tip racks in HAL config.</p>
+                <a href="#" class="list-group-item list-group-item-action" onclick="doRefill('all')"><i class="bi bi-arrow-repeat"></i> Refill All</a>`;
+        }
+    }).catch(e => { listEl.innerHTML = `<p class="text-danger p-3">Error: ${e.message}</p>`; });
+}
+
+function doRefill(rackType) {
+    bootstrap.Modal.getInstance(document.getElementById('refillTipRackModal')).hide();
+    showToast('info', 'Refilling…', rackType);
+    fetch('/api/opentrons/refill-tips', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rack_type: rackType })
+    }).then(r => r.json()).then(result => {
+        showToast(result.success ? 'success' : 'danger', result.success ? 'Refilled' : 'Error', result.message || result.error || '');
+        if (result.success) loadTipStatus();
+    }).catch(e => showToast('danger', 'Error', e.message));
+}
+
+function loadTipStatus() {
+    const content = document.getElementById('tipStatusContent');
+    content.innerHTML = '<div class="text-center text-muted p-2"><div class="spinner-border spinner-border-sm"></div></div>';
+    fetch('/api/opentrons/tip-status').then(r => r.json()).then(data => {
+        if (data.success && data.status && Object.keys(data.status).length > 0) {
+            content.innerHTML = Object.entries(data.status).map(([name, info]) => {
+                const used = info.used || 0;
+                const max = info.max || 96;
+                const avail = info.available || (max - used);
+                const pct = Math.round((used / max) * 100);
+                const cls = pct > 80 ? 'bg-danger' : pct > 50 ? 'bg-warning' : 'bg-success';
+                return `<div class="mb-3 px-1">
+                    <div class="d-flex justify-content-between small mb-1">
+                        <span>${info.display_name || name} <span class="text-muted">(${info.slot || '?'})</span></span>
+                        <span class="${avail === 0 ? 'text-danger fw-bold' : ''}">${avail}/${max}</span>
+                    </div>
+                    <div class="progress tip-bar"><div class="progress-bar ${cls}" style="width:${pct}%"></div></div>
+                </div>`;
+            }).join('');
+        } else {
+            content.innerHTML = '<p class="text-muted small p-2 mb-0">' + (data.error || 'No tip racks found') + '</p>';
+        }
+    }).catch(e => { content.innerHTML = `<p class="text-danger small p-2 mb-0">Error: ${e.message}</p>`; });
+}
+
+// ── Manual Input ───────────────────────────────────────────────────────────
+function showManualInput() {
+    new bootstrap.Modal(document.getElementById('manualInputModal')).show();
+}
+
+function submitManualInput() {
+    const desc = document.getElementById('manual-description').value.trim();
+    if (!desc) {
+        document.getElementById('manual-description').classList.add('is-invalid');
+        return;
+    }
+    document.getElementById('manual-description').classList.remove('is-invalid');
+    fetch('/api/operator/manual-step', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            type: document.getElementById('manual-step-type').value,
+            description: desc,
+            value: document.getElementById('manual-value').value
+        })
+    }).then(r => r.json()).then(() => {
+        bootstrap.Modal.getInstance(document.getElementById('manualInputModal')).hide();
+        document.getElementById('manual-description').value = '';
+        showToast('success', 'Recorded', 'Manual step saved');
+    }).catch(e => showToast('danger', 'Error', e.message));
+}
+
+document.getElementById('manual-step-type').addEventListener('change', function() {
+    document.getElementById('measurement-value-group').style.display =
+        this.value === 'measurement' ? 'block' : 'none';
+});
+
+// ── Test helpers ───────────────────────────────────────────────────────────
+function sendTestNotification() {
+    fetch('/api/operator/test-notification', { method: 'POST' })
+        .then(r => r.json()).then(() => refreshPendingActions())
+        .catch(() => addPendingAction({ id: Date.now(), title: 'Test Notification', message: 'Test of the operator system.', priority: 'info' }));
+}
+
+function sendTestTipRefill() {
+    fetch('/api/operator/test-tip-refill', { method: 'POST' })
+        .then(r => r.json()).then(() => { showToast('info', 'Sent', 'Tip refill notification sent'); refreshPendingActions(); })
+        .catch(() => addPendingAction({ id: Date.now(), title: 'Refill Tip Rack (TEST)', message: 'Replace the tiprack and confirm.', priority: 'urgent', action: 'RefillTipRack' }));
+}
+
+// ── Polling & init ─────────────────────────────────────────────────────────
+function refreshPendingActions() {
+    fetch('/api/operator/pending').then(r => r.json()).then(data => {
+        const now = Date.now();
+        for (const id in recentlyAcknowledgedIds) {
+            if (now - recentlyAcknowledgedIds[id] > 60000) delete recentlyAcknowledgedIds[id];
+        }
+        pendingActions = (data.actions || [])
+            .filter(a => !recentlyAcknowledgedIds[a.id] || now - recentlyAcknowledgedIds[a.id] >= 60000)
+            .map(a => ({ ...a, timestamp: new Date(a.timestamp || Date.now()) }));
+        renderPendingActions();
+    }).catch(() => {});
+}
+
+refreshPendingActions();
+setInterval(refreshPendingActions, 3000);
+loadTipStatus();
+
+// Elapsed time
+setInterval(() => {
+    if (!startTime) return;
+    const s = Math.floor((Date.now() - startTime) / 1000);
+    const h = String(Math.floor(s / 3600)).padStart(2, '0');
+    const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+    const sec = String(s % 60).padStart(2, '0');
+    document.getElementById('wf-elapsed').textContent = `${h}:${m}:${sec}`;
+}, 1000);
+</script>
+{% endblock %}

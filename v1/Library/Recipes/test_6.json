@@ -1,0 +1,71 @@
+{
+  "ProtocolName": "Test_6_Tips",
+  "Description": "Test per esaurimento tip rack - usa 6 tips (1 rack completo)",
+  "Requirements": {
+    "MyTips": "MyTips",
+    "MyPlate": "MyPlate",
+    "MyTrash": "MyTrash"
+  },
+  "Steps": [
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    }
+  ]
+}

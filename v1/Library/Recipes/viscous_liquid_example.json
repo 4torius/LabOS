@@ -1,0 +1,143 @@
+{
+  "ProtocolName": "Viscous_Liquid_Transfer",
+  "Description": "Esempio trasferimento liquido viscoso (50% glicerolo) - 3 metodi disponibili",
+  "Requirements": {
+    "MyReservoir": "MyReservoir",
+    "MyPlate": "MyPlate",
+    "MyTips": "MyTips"
+  },
+  "Steps": [
+    {
+      "Comment": "=== METODO 1: Native Opentrons API (RACCOMANDATO per API 2.24+) ==="
+    },
+    {
+      "Comment": "Usa TransferWithLiquidClass per precisione ottimale"
+    },
+    {
+      "Comment": "LiquidClass: 'Viscous' o 'glycerol_50' (load name)"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "TransferWithLiquidClass",
+      "PipetteMount": "left",
+      "Volume": 100,
+      "Source": "MyReservoir:A1",
+      "Dest": "MyPlate:A1",
+      "LiquidClass": "Viscous",
+      "NewTip": "never"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left"
+    },
+    {
+      "Comment": "=== METODO 2: Transfer con LiquidClass preset ==="
+    },
+    {
+      "Comment": "Applica automaticamente: Rate 0.25, BlowOut, TouchTip, MixAfter"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "Transfer",
+      "PipetteMount": "left",
+      "Volume": 100,
+      "Source": "MyReservoir:A1",
+      "Dest": "MyPlate:B1",
+      "LiquidClass": "Viscous"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left"
+    },
+    {
+      "Comment": "=== METODO 3: Aspirate/Dispense con LiquidClass ==="
+    },
+    {
+      "Comment": "Per controllo granulare di ogni step"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "Aspirate",
+      "PipetteMount": "left",
+      "Volume": 100,
+      "Location": "MyReservoir:A1",
+      "LiquidClass": "Viscous"
+    },
+    {
+      "Command": "Dispense",
+      "PipetteMount": "left",
+      "Volume": 100,
+      "Location": "MyPlate:C1",
+      "LiquidClass": "Viscous"
+    },
+    {
+      "Command": "BlowOut",
+      "PipetteMount": "left",
+      "Location": "MyPlate:C1"
+    },
+    {
+      "Command": "TouchTip",
+      "PipetteMount": "left",
+      "Location": "MyPlate:C1",
+      "Speed": 30
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left"
+    },
+    {
+      "Comment": "=== METODO 4: Parametri manuali completi ==="
+    },
+    {
+      "Comment": "Per personalizzazione totale senza LiquidClass"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "Aspirate",
+      "PipetteMount": "left",
+      "Volume": 100,
+      "Location": "MyReservoir:A1",
+      "Rate": 0.25,
+      "DelayAfter": 1.0
+    },
+    {
+      "Command": "Dispense",
+      "PipetteMount": "left",
+      "Volume": 100,
+      "Location": "MyPlate:D1",
+      "Rate": 0.25,
+      "PushOut": 5.0,
+      "DelayAfter": 0.5
+    },
+    {
+      "Command": "BlowOut",
+      "PipetteMount": "left",
+      "Location": "MyPlate:D1"
+    },
+    {
+      "Command": "TouchTip",
+      "PipetteMount": "left",
+      "Location": "MyPlate:D1"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left"
+    }
+  ]
+}

@@ -1,0 +1,633 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid" style="padding-top: 50px;">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-speedometer2"></i> Instrument Control</h2>
+        <div>
+            <span class="badge bg-info me-2" id="discovery-status">Discovering...</span>
+            <button class="btn btn-outline-primary" onclick="refreshDevices()">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+        </div>
+    </div>
+    
+    <!-- TRUE Plug & Play Dashboard - Cards generated from discovered instruments -->
+    <div class="row g-4" id="devices-container">
+        <div class="col-12 text-center py-5" id="loading-placeholder">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="mt-2 text-muted">Discovering SiLA2 servers...</p>
+        </div>
+    </div>
+    
+    <!-- Output Console -->
+    <div class="mt-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-terminal"></i> Output Console
+                <button class="btn btn-sm btn-outline-secondary float-end" onclick="clearConsole()">Clear</button>
+            </div>
+            <div class="card-body bg-dark text-light" style="height: 200px; overflow-y: auto; font-family: monospace;" id="console-output">
+                <span class="text-success">[System]</span> WebApp ready. Discovering instruments...
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Dynamic Modal Container -->
+<div id="dynamic-modals"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ============================================================================
+// INSTRUMENT STYLES - Same approach as workflows.html
+// ============================================================================
+var INSTRUMENT_STYLES = {
+    tecan: { bg: 'bg-success', icon: 'bi-eye-fill', name: 'Tecan Plate Reader' },
+    opentrons: { bg: 'bg-primary', icon: 'bi-droplet-fill', name: 'Opentrons Flex' },
+    mobile: { bg: 'bg-warning text-dark', icon: 'bi-robot', name: 'Mobile Robot' },
+    incubator: { bg: 'bg-danger', icon: 'bi-thermometer-half', name: 'Incubator' },
+    manual: { bg: 'bg-info', icon: 'bi-hand-index-thumb', name: 'Manual Station' },
+    _default: { bg: 'bg-secondary', icon: 'bi-gear-fill', name: 'Device' }
+};
+
+// Map any instrument name to a style key (same logic as workflows.html)
+function getInstrumentKey(name) {
+    var lower = name.toLowerCase();
+    if (lower.indexOf('tecan') !== -1) return 'tecan';
+    if (lower.indexOf('opentrons') !== -1) return 'opentrons';
+    if (lower.indexOf('mobile') !== -1) return 'mobile';  // Catches MobileManipulator, mobile-robot, etc.
+    if (lower.indexOf('incubator') !== -1) return 'incubator';
+    if (lower.indexOf('manual') !== -1) return 'manual';
+    return '_default';
+}
+
+var COMMAND_ICONS = {
+    'ExecuteRecipe': '📜', 'Transfer': '💧', 'TransferLiquid': '💧',
+    'Aspirate': '⬆️', 'Dispense': '⬇️', 'Home': '🏠', 'GetStatus': '📊',
+    'LoadHardwareConfig': '⚙️', 'Connect': '🔌', 'Disconnect': '🔌',
+    'RunMeasurement': '📊', 'PlateIn': '📥', 'PlateOut': '📤',
+    'SetTemperature': '🌡️', 'ListProtocols': '📑', 'TransportPlate': '🚚',
+    'PickPlate': '📥', 'PlacePlate': '📤', 'GoHome': '🏠', 'GetPosition': '📍',
+    'MoveToStation': '🚚', 'PickFromStation': '📥', 'PlaceAtStation': '📤',
+    'SetCO2': '💨', 'SetHumidity': '💧', 'StartIncubation': '⏱️',
+    'NotifyOperator': '📢', 'RequestAction': '✋', 'WaitForConfirmation': '⏳',
+    'LogManualStep': '📝', 'Initialize': '🔄', 'Reset': '🔃', 'Stop': '🛑'
+};
+
+// ============================================================================
+// PRE-LOADED FILE LISTS (same approach as workflows.html)
+// ============================================================================
+var recipes = [];
+var protocols = [];
+var halConfigs = [];
+var liquidClasses = [];
+var workflows = [];
+var analyses = [];  // Tecan .mdfx files
+
+// Predefined options
+var LOCATIONS = ['opentrons', 'tecan', 'incubator', 'storage', 'manual_station', 'rack_1', 'rack_2', 'rack_3'];
+var LABWARE_TYPES = ['tiprack_1000ul', 'tiprack_200ul', 'tiprack_50ul', 'reservoir_12', 'wellplate_96', 'wellplate_384'];
+
+// Tip racks from HAL config (dynamically loaded)
+var halTipRacks = [];  // Array of {logical_name, load_name, slot, display_name}
+
+// Mobile robot tasks (fetched from MobileSiLA2Server)
+var mobileTasks = [];
+
+// Parameter classification (camelCase + snake_case for API compatibility)
+var LOCATION_PARAMS = ['source', 'destination', 'location', 'from', 'to', 'source_location', 'dest_location', 'station', 'newlocation', 'sourcelocation', 'destlocation', 'sourceloc', 'destloc'];
+var TIP_RACK_PARAMS = ['rackslot', 'rack_slot', 'racktype', 'rack_type', 'tiprack', 'tip_rack'];
+var LABWARE_PARAMS = ['labware', 'plate', 'labware_type', 'labwaretype', 'labwareid'];
+var RECIPE_PARAMS = ['recipe', 'recipe_file', 'recipe_name', 'recipename', 'recipefile'];
+var PROTOCOL_PARAMS = ['protocol', 'protocol_file', 'measurement_protocol', 'analysis', 'protocolname', 'protocolcontent', 'protocolfile'];
+var HAL_PARAMS = ['hal_config', 'hardware_config', 'hal', 'halconfig', 'hardwareconfig', 'setupfile', 'setup_file', 'configfile', 'config_file', 'configname'];
+var LIQUID_CLASS_PARAMS = ['liquid_class', 'liquidclass', 'liquidclassname'];
+
+// Store discovered instruments
+var discoveredInstruments = {};
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 Dashboard initialized');
+    loadFiles();
+    loadTipRacksFromHAL();  // Load tip racks from HAL config
+    refreshDevices();
+});
+
+function loadFiles() {
+    // Load recipes
+    fetch('/api/files/recipes')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) { recipes = data.files || []; })
+        .catch(function(e) { console.error('Error loading recipes:', e); });
+    
+    // Load protocols
+    fetch('/api/files/protocols')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) { protocols = data.files || []; })
+        .catch(function(e) { console.error('Error loading protocols:', e); });
+    
+    // Load analyses (.mdfx files for Tecan)
+    fetch('/api/files/analyses')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) { analyses = data.files || []; })
+        .catch(function(e) { console.error('Error loading analyses:', e); });
+    
+    // Load HAL configs
+    fetch('/api/files/hal')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) { halConfigs = data.files || []; })
+        .catch(function(e) { console.error('Error loading HAL configs:', e); });
+}
+
+// Load tip racks from HAL config for RefillTipRack dropdown
+function loadTipRacksFromHAL() {
+    fetch('/api/opentrons/tip-status')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) {
+            if (data.success && data.status) {
+                halTipRacks = [];
+                for (var logicalName in data.status) {
+                    var info = data.status[logicalName];
+                    halTipRacks.push({
+                        logical_name: logicalName,
+                        load_name: info.load_name || logicalName,
+                        slot: info.slot || '?',
+                        display_name: info.display_name || logicalName,
+                        available: info.available || 96,
+                        max: info.max || 96
+                    });
+                }
+                console.log('Loaded ' + halTipRacks.length + ' tip racks from HAL');
+            }
+        })
+        .catch(function(e) { console.error('Error loading tip racks from HAL:', e); });
+    
+    // Load liquid classes
+    fetch('/api/files/liquidclasses')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) { liquidClasses = data.files || []; })
+        .catch(function(e) { console.error('Error loading liquid classes:', e); });
+    
+    // Load workflows
+    fetch('/api/files/workflows')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) { workflows = data.files || []; })
+        .catch(function(e) { console.error('Error loading workflows:', e); });
+    
+    // Load mobile robot tasks (from MobileSiLA2Server)
+    fetch('/api/mobile/tasks')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) { 
+            mobileTasks = data.tasks || [];
+            console.log('📱 Loaded ' + mobileTasks.length + ' mobile tasks');
+        })
+        .catch(function(e) { console.error('Error loading mobile tasks:', e); });
+}
+
+// Refresh mobile tasks (called via WebSocket after RefreshTasks command)
+function refreshMobileTasks() {
+    fetch('/api/mobile/tasks')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) {
+            mobileTasks = data.tasks || [];
+            console.log('📱 Refreshed: ' + mobileTasks.length + ' mobile tasks');
+        })
+        .catch(function(e) { console.error('Error refreshing mobile tasks:', e); });
+}
+
+// ============================================================================
+// CONSOLE OUTPUT
+// ============================================================================
+function log(message, type) {
+    type = type || 'info';
+    var consoleEl = document.getElementById('console-output');
+    var timestamp = new Date().toLocaleTimeString();
+    var colorClass = {
+        'info': 'text-info',
+        'success': 'text-success',
+        'error': 'text-danger',
+        'warning': 'text-warning'
+    }[type] || 'text-light';
+    
+    consoleEl.innerHTML += '<div><span class="text-muted">[' + timestamp + ']</span> <span class="' + colorClass + '">' + message + '</span></div>';
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+}
+
+function clearConsole() {
+    document.getElementById('console-output').innerHTML = '';
+}
+
+// ============================================================================
+// DEVICE DISCOVERY & CARD GENERATION
+// ============================================================================
+function refreshDevices() {
+    log('🔍 Discovering SiLA2 servers...', 'info');
+    document.getElementById('discovery-status').textContent = 'Discovering...';
+    document.getElementById('discovery-status').className = 'badge bg-info me-2';
+    
+    var container = document.getElementById('devices-container');
+    container.innerHTML = '<div class="col-12 text-center py-5"><div class="spinner-border text-primary"></div><p class="mt-2 text-muted">Discovering...</p></div>';
+    
+    fetch('/api/instruments/commands')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) {
+            log('📡 Discovery source: ' + data.source, 'info');
+            
+            var instruments = data.instruments || {};
+            discoveredInstruments = instruments;
+            
+            container.innerHTML = '';
+            
+            var instrumentIds = Object.keys(instruments);
+            
+            if (instrumentIds.length === 0) {
+                container.innerHTML = '<div class="col-12 text-center py-5">' +
+                    '<i class="bi bi-wifi-off display-1 text-muted"></i>' +
+                    '<h4 class="mt-3 text-muted">No Instruments Discovered</h4>' +
+                    '<p class="text-muted">Make sure SiLA2 servers are running.</p>' +
+                    '<button class="btn btn-primary mt-2" onclick="refreshDevices()"><i class="bi bi-arrow-clockwise"></i> Try Again</button>' +
+                    '</div>';
+                document.getElementById('discovery-status').textContent = 'No devices';
+                document.getElementById('discovery-status').className = 'badge bg-warning me-2';
+            } else {
+                for (var i = 0; i < instrumentIds.length; i++) {
+                    var id = instrumentIds[i];
+                    var cardHtml = generateInstrumentCard(id, instruments[id]);
+                    container.insertAdjacentHTML('beforeend', cardHtml);
+                    var instStatus = instruments[id].status || 'unknown';
+                    if (instStatus === 'online') {
+                        log('📡 ' + (instruments[id].name || id) + ': Online', 'success');
+                    } else {
+                        log('📡 ' + (instruments[id].name || id) + ': Offline', 'warning');
+                    }
+                }
+                
+                // Count online devices
+                var onlineCount = 0;
+                for (var j = 0; j < instrumentIds.length; j++) {
+                    if ((instruments[instrumentIds[j]].status || 'unknown') === 'online') onlineCount++;
+                }
+                
+                document.getElementById('discovery-status').textContent = onlineCount + '/' + instrumentIds.length + ' online';
+                document.getElementById('discovery-status').className = onlineCount > 0 ? 'badge bg-success me-2' : 'badge bg-warning me-2';
+            }
+            
+            log('✅ Discovery complete (' + instrumentIds.length + ' instruments)', 'success');
+        })
+        .catch(function(e) {
+            log('❌ Error: ' + e.message, 'error');
+            container.innerHTML = '<div class="col-12 text-center py-5">' +
+                '<i class="bi bi-exclamation-triangle display-1 text-danger"></i>' +
+                '<h4 class="mt-3 text-muted">Discovery Error</h4>' +
+                '<p class="text-muted">' + e.message + '</p>' +
+                '</div>';
+            document.getElementById('discovery-status').textContent = 'Error';
+            document.getElementById('discovery-status').className = 'badge bg-danger me-2';
+        });
+}
+
+function generateInstrumentCard(instrumentId, instrumentData) {
+    var styleKey = getInstrumentKey(instrumentId);
+    var style = INSTRUMENT_STYLES[styleKey] || INSTRUMENT_STYLES._default;
+    var displayName = instrumentData.name || instrumentData.display_name || style.name || instrumentId;
+    var commands = instrumentData.commands || [];
+    var serverStatus = instrumentData.status || 'unknown';
+    var isOnline = serverStatus === 'online';
+    var statusBadge = isOnline 
+        ? '<span class="badge bg-success float-end">Online</span>'
+        : '<span class="badge bg-secondary float-end">Offline</span>';
+    var cardOpacity = isOnline ? '' : 'opacity: 0.6;';
+    
+    // Generate command list HTML
+    var commandsHtml = '';
+    var maxShow = 8;
+    for (var i = 0; i < Math.min(commands.length, maxShow); i++) {
+        var cmd = commands[i];
+        // Use cmd.id for API calls, cmd.name for display
+        var cmdId = typeof cmd === 'string' ? cmd : (cmd.id || cmd.name);
+        var cmdName = typeof cmd === 'string' ? cmd : (cmd.name || cmd.id);
+        var icon = COMMAND_ICONS[cmdId] || COMMAND_ICONS[cmdName] || '▶️';
+        var hasParams = cmd.parameters && cmd.parameters.length > 0;
+        
+        commandsHtml += '<a href="#" class="list-group-item list-group-item-action" ' +
+            'onclick="executeCommand(\'' + instrumentId + '\', \'' + cmdId + '\', ' + hasParams + ', \'' + instrumentId + '_' + cmdId + '\'); return false;">' +
+            icon + ' ' + cmdName + '</a>';
+    }
+    
+    if (commands.length > maxShow) {
+        commandsHtml += '<a href="#" class="list-group-item list-group-item-action text-muted" onclick="showAllCommands(\'' + instrumentId + '\'); return false;">' +
+            '... ' + (commands.length - maxShow) + ' more commands</a>';
+    }
+    
+    return '<div class="col-md-6 col-lg-4">' +
+        '<div class="card device-card h-100" data-device-id="' + instrumentId + '" style="' + cardOpacity + '">' +
+        '<div class="card-header ' + style.bg + ' text-white">' +
+        '<i class="bi ' + style.icon + '"></i> ' + displayName +
+        statusBadge +
+        '</div>' +
+        '<div class="card-body">' +
+        '<p class="text-muted small">' + (instrumentData.address || 'Discovered') + '</p>' +
+        (isOnline ? '<div class="list-group list-group-flush">' + commandsHtml + '</div>' : '<p class="text-muted"><i class="bi bi-wifi-off"></i> Server not responding</p>') +
+        '</div></div></div>';
+}
+
+// ============================================================================
+// COMMAND EXECUTION
+// ============================================================================
+function executeCommand(instrumentId, commandName, hasParams, cmdKey) {
+    log(instrumentId + ': ' + commandName, 'info');
+    
+    if (hasParams) {
+        showParameterModal(instrumentId, commandName);
+    } else {
+        executeDeviceCommand(instrumentId, commandName, {});
+    }
+}
+
+function executeDeviceCommand(device, command, params) {
+    log('Executing: ' + device + '/' + command + '...', 'warning');
+    
+    fetch('/api/devices/' + device + '/command', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({command: command, parameters: params})
+    })
+    .then(function(resp) { return resp.json(); })
+    .then(function(result) {
+        if (result.status === 'completed') {
+            var resultStr = result.result != null ? JSON.stringify(result.result) : '';
+            var displayStr = resultStr.length > 200 ? resultStr.substring(0, 200) + '…' : resultStr;
+            log('✅ ' + command + ' completed' + (displayStr ? ': ' + displayStr : ''), 'success');
+        } else {
+            log('❌ ' + command + ' failed: ' + result.error, 'error');
+        }
+    })
+    .catch(function(e) {
+        log('❌ Error: ' + e.message, 'error');
+    });
+}
+
+// ============================================================================
+// PARAMETER MODAL (with dropdowns like workflows.html)
+// ============================================================================
+function showParameterModal(instrumentId, commandId) {
+    var instrument = discoveredInstruments[instrumentId];
+    if (!instrument) return;
+    
+    // Find the command by id
+    var cmd = null;
+    for (var i = 0; i < instrument.commands.length; i++) {
+        var c = instrument.commands[i];
+        var cId = typeof c === 'string' ? c : (c.id || c.name);
+        if (cId === commandId) {
+            cmd = c;
+            break;
+        }
+    }
+    
+    if (!cmd || !cmd.parameters) {
+        executeDeviceCommand(instrumentId, commandId, {});
+        return;
+    }
+    
+    var styleKey = getInstrumentKey(instrumentId);
+    var style = INSTRUMENT_STYLES[styleKey] || INSTRUMENT_STYLES._default;
+    var commandName = cmd.name || commandId;  // Display name for UI
+    var modalId = 'modal-' + instrumentId + '-' + commandId.replace(/[^a-zA-Z0-9]/g, '');
+    
+    // Generate form fields with dropdowns
+    var fieldsHtml = '';
+    for (var pi = 0; pi < cmd.parameters.length; pi++) {
+        var param = cmd.parameters[pi];
+        var paramName = param.name || param;
+        var paramLower = paramName.toLowerCase();
+        var paramType = (param.type || 'string').toLowerCase();
+        var paramDefault = param.default || '';
+        var paramDesc = param.description || '';
+        var uiHint = param.ui_hint || '';  // Server tells us what dropdown to show
+        
+        fieldsHtml += '<div class="mb-3"><label class="form-label">' + (param.displayName || paramName) + '</label>';
+        
+        // Check parameter type and generate appropriate input
+        if (paramType === 'boolean') {
+            fieldsHtml += '<div class="form-check">' +
+                '<input class="form-check-input param-input" type="checkbox" data-param="' + paramName + '" ' + (paramDefault ? 'checked' : '') + '>' +
+                '<label class="form-check-label">' + (paramDesc || 'Enable') + '</label></div>';
+        }
+        else if (paramType === 'integer' || paramType === 'float' || paramType === 'number' || paramType === 'real') {
+            fieldsHtml += '<input type="number" class="form-control param-input" data-param="' + paramName + '" value="' + paramDefault + '" ' +
+                (paramType === 'float' || paramType === 'real' ? 'step="0.01"' : '') + '>';
+        }
+        else if (param.options && param.options.length > 0) {
+            // Server provided predefined options
+            fieldsHtml += '<select class="form-select param-input" data-param="' + paramName + '">';
+            fieldsHtml += '<option value="">-- Select --</option>';
+            for (var oi = 0; oi < param.options.length; oi++) {
+                var opt = param.options[oi];
+                fieldsHtml += '<option value="' + opt + '"' + (opt === paramDefault ? ' selected' : '') + '>' + opt + '</option>';
+            }
+            fieldsHtml += '</select>';
+        }
+        // USE ui_hint FROM SERVER (preferred) or fallback to name matching
+        else if (uiHint === 'recipe' || RECIPE_PARAMS.indexOf(paramLower) !== -1) {
+            fieldsHtml += '<select class="form-select param-input" data-param="' + paramName + '">';
+            fieldsHtml += '<option value="">-- Select Recipe --</option>';
+            for (var ri = 0; ri < recipes.length; ri++) {
+                fieldsHtml += '<option value="' + recipes[ri] + '">' + recipes[ri] + '</option>';
+            }
+            fieldsHtml += '</select>';
+        }
+        else if (uiHint === 'analysis' || PROTOCOL_PARAMS.indexOf(paramLower) !== -1) {
+            fieldsHtml += '<select class="form-select param-input" data-param="' + paramName + '">';
+            fieldsHtml += '<option value="">-- Select Protocol/Analysis --</option>';
+            for (var pr = 0; pr < protocols.length; pr++) {
+                fieldsHtml += '<option value="' + protocols[pr] + '">' + protocols[pr] + '</option>';
+            }
+            // Also include analysis files (.mdfx)
+            for (var ai = 0; ai < analyses.length; ai++) {
+                fieldsHtml += '<option value="' + analyses[ai] + '">' + analyses[ai] + '</option>';
+            }
+            fieldsHtml += '</select>';
+        }
+        else if (uiHint === 'hal_config' || HAL_PARAMS.indexOf(paramLower) !== -1) {
+            fieldsHtml += '<select class="form-select param-input" data-param="' + paramName + '">';
+            fieldsHtml += '<option value="">-- Select HAL Config --</option>';
+            for (var hi = 0; hi < halConfigs.length; hi++) {
+                fieldsHtml += '<option value="' + halConfigs[hi] + '">' + halConfigs[hi] + '</option>';
+            }
+            fieldsHtml += '</select>';
+        }
+        else if (uiHint === 'liquid_class' || LIQUID_CLASS_PARAMS.indexOf(paramLower) !== -1) {
+            fieldsHtml += '<select class="form-select param-input" data-param="' + paramName + '">';
+            fieldsHtml += '<option value="">-- Select Liquid Class --</option>';
+            for (var lc = 0; lc < liquidClasses.length; lc++) {
+                fieldsHtml += '<option value="' + liquidClasses[lc] + '">' + liquidClasses[lc] + '</option>';
+            }
+            fieldsHtml += '</select>';
+        }
+        else if (uiHint === 'location' || LOCATION_PARAMS.indexOf(paramLower) !== -1) {
+            fieldsHtml += '<select class="form-select param-input" data-param="' + paramName + '">';
+            fieldsHtml += '<option value="">-- Select Location --</option>';
+            for (var li = 0; li < LOCATIONS.length; li++) {
+                fieldsHtml += '<option value="' + LOCATIONS[li] + '">' + LOCATIONS[li] + '</option>';
+            }
+            fieldsHtml += '</select>';
+        }
+        else if (uiHint === 'tip_rack' || TIP_RACK_PARAMS.indexOf(paramLower) !== -1) {
+            // Tip rack dropdown - shows tip racks from current HAL config
+            fieldsHtml += '<select class="form-select param-input" data-param="' + paramName + '">';
+            fieldsHtml += '<option value="">-- Select Tip Rack --</option>';
+            if (halTipRacks.length > 0) {
+                for (var tr = 0; tr < halTipRacks.length; tr++) {
+                    var rack = halTipRacks[tr];
+                    var displayText = rack.display_name + ' (' + rack.slot + ') - ' + rack.available + '/' + rack.max;
+                    fieldsHtml += '<option value="' + rack.load_name + '">' + displayText + '</option>';
+                }
+                // Add "all" option to refill all racks
+                fieldsHtml += '<option value="all">🔄 REFILL ALL</option>';
+            } else {
+                fieldsHtml += '<option value="" disabled>No tip racks in HAL</option>';
+            }
+            fieldsHtml += '</select>';
+        }
+        else if (uiHint === 'labware' || LABWARE_PARAMS.indexOf(paramLower) !== -1) {
+            fieldsHtml += '<select class="form-select param-input" data-param="' + paramName + '">';
+            fieldsHtml += '<option value="">-- Select Labware --</option>';
+            for (var lw = 0; lw < LABWARE_TYPES.length; lw++) {
+                fieldsHtml += '<option value="' + LABWARE_TYPES[lw] + '">' + LABWARE_TYPES[lw] + '</option>';
+            }
+            fieldsHtml += '</select>';
+        }
+        else if (uiHint === 'mobile_task' || paramLower === 'task_id' || paramLower === 'taskid') {
+            // Mobile robot task dropdown - fetched from MobileSiLA2Server
+            fieldsHtml += '<select class="form-select param-input" data-param="' + paramName + '">';
+            fieldsHtml += '<option value="">-- Select Mobile Task --</option>';
+            for (var mt = 0; mt < mobileTasks.length; mt++) {
+                var task = mobileTasks[mt];
+                var taskId = task.id || task.task_id || task;
+                var taskName = task.name || task.task_name || taskId;
+                var subtaskCount = task.subtask_count || 0;
+                var displayText = taskName + (subtaskCount > 0 ? ' (' + subtaskCount + ' subtasks)' : '');
+                fieldsHtml += '<option value="' + taskId + '">' + displayText + '</option>';
+            }
+            fieldsHtml += '</select>';
+        }
+        else {
+            // Default text input
+            fieldsHtml += '<input type="text" class="form-control param-input" data-param="' + paramName + '" ' +
+                'value="' + paramDefault + '" placeholder="' + (paramDesc || 'Enter ' + paramName) + '">';
+        }
+        
+        if (paramDesc && paramType !== 'boolean') {
+            fieldsHtml += '<small class="text-muted">' + paramDesc + '</small>';
+        }
+        fieldsHtml += '</div>';
+    }
+    
+    var modalHtml = '<div class="modal fade" id="' + modalId + '" tabindex="-1">' +
+        '<div class="modal-dialog">' +
+        '<div class="modal-content">' +
+        '<div class="modal-header ' + style.bg + ' text-white">' +
+        '<h5 class="modal-title">' + (COMMAND_ICONS[commandId] || COMMAND_ICONS[commandName] || '▶️') + ' ' + commandName + '</h5>' +
+        '<button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>' +
+        '</div>' +
+        '<div class="modal-body">' + fieldsHtml + '</div>' +
+        '<div class="modal-footer">' +
+        '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>' +
+        '<button type="button" class="btn btn-primary" onclick="submitCommand(\'' + instrumentId + '\', \'' + commandId + '\', \'' + modalId + '\')">' +
+        '<i class="bi bi-play"></i> Execute</button>' +
+        '</div></div></div></div>';
+    
+    // Remove existing modal if any
+    var existing = document.getElementById(modalId);
+    if (existing) existing.remove();
+    
+    document.getElementById('dynamic-modals').insertAdjacentHTML('beforeend', modalHtml);
+    
+    var modal = new bootstrap.Modal(document.getElementById(modalId));
+    modal.show();
+}
+
+function submitCommand(instrumentId, commandName, modalId) {
+    var params = {};
+    var inputs = document.querySelectorAll('#' + modalId + ' .param-input');
+    
+    for (var i = 0; i < inputs.length; i++) {
+        var input = inputs[i];
+        var paramName = input.getAttribute('data-param');
+        
+        if (input.type === 'checkbox') {
+            params[paramName] = input.checked;
+        } else if (input.type === 'number') {
+            params[paramName] = parseFloat(input.value) || 0;
+        } else {
+            params[paramName] = input.value;
+        }
+    }
+    
+    // Hide modal
+    var modal = bootstrap.Modal.getInstance(document.getElementById(modalId));
+    if (modal) modal.hide();
+    
+    // Execute command
+    executeDeviceCommand(instrumentId, commandName, params);
+}
+
+// ============================================================================
+// SHOW ALL COMMANDS MODAL
+// ============================================================================
+function showAllCommands(instrumentId) {
+    var instrument = discoveredInstruments[instrumentId];
+    if (!instrument) return;
+    
+    var commands = instrument.commands || [];
+    var styleKey = getInstrumentKey(instrumentId);
+    var style = INSTRUMENT_STYLES[styleKey] || INSTRUMENT_STYLES._default;
+    
+    var commandsListHtml = '';
+    for (var i = 0; i < commands.length; i++) {
+        var cmd = commands[i];
+        // Use cmd.id for API calls, cmd.name for display
+        var cmdId = typeof cmd === 'string' ? cmd : (cmd.id || cmd.name);
+        var cmdName = typeof cmd === 'string' ? cmd : (cmd.name || cmd.id);
+        var icon = COMMAND_ICONS[cmdId] || COMMAND_ICONS[cmdName] || '▶️';
+        var hasParams = cmd.parameters && cmd.parameters.length > 0;
+        
+        commandsListHtml += '<a href="#" class="list-group-item list-group-item-action" ' +
+            'onclick="hideAllCommandsModal(); executeCommand(\'' + instrumentId + '\', \'' + cmdId + '\', ' + hasParams + ', \'' + instrumentId + '_' + cmdId + '\'); return false;">' +
+            icon + ' ' + cmdName +
+            (hasParams ? ' <span class="badge bg-secondary float-end">params</span>' : '') +
+            '</a>';
+    }
+    
+    var modalHtml = '<div class="modal fade" id="allCommandsModal" tabindex="-1">' +
+        '<div class="modal-dialog modal-dialog-scrollable">' +
+        '<div class="modal-content">' +
+        '<div class="modal-header ' + style.bg + ' text-white">' +
+        '<h5 class="modal-title"><i class="bi ' + style.icon + '"></i> ' + (instrument.display_name || instrumentId) + ' - All Commands</h5>' +
+        '<button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>' +
+        '</div>' +
+        '<div class="modal-body p-0">' +
+        '<div class="list-group list-group-flush">' + commandsListHtml + '</div>' +
+        '</div></div></div></div>';
+    
+    // Remove existing
+    var existing = document.getElementById('allCommandsModal');
+    if (existing) existing.remove();
+    
+    document.getElementById('dynamic-modals').insertAdjacentHTML('beforeend', modalHtml);
+    
+    var modal = new bootstrap.Modal(document.getElementById('allCommandsModal'));
+    modal.show();
+}
+
+function hideAllCommandsModal() {
+    var modal = bootstrap.Modal.getInstance(document.getElementById('allCommandsModal'));
+    if (modal) modal.hide();
+}
+</script>
+{% endblock %}

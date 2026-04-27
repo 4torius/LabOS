@@ -1,0 +1,29 @@
+{
+  "ProtocolName": "EMERGENCY_RESET",
+  "SafetyCleanup": true,
+  "Labware": {},
+  "Trash": {
+    "Bin": {
+      "Type": "TrashBin",
+      "Slot": "A3"
+    }
+  },
+  "Pipettes": {
+    "left": "flex_1channel_1000"
+  },
+  "Steps": [
+    {
+      "Command": "Comment",
+      "Text": "SAFETY RESET"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "Bin",
+      "Force": true
+    },
+    {
+      "Command": "Home"
+    }
+  ]
+}

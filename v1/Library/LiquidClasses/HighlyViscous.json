@@ -1,0 +1,26 @@
+{
+  "$schema": "./liquidclass.schema.json",
+  "name": "HighlyViscous",
+  "loadName": "glycerol_50",
+  "description": "Highly viscous liquids (>70% glycerol, dense oils, honey)",
+  "basedOn": "Custom - extended from glycerol_50",
+  
+  "parameters": {
+    "aspirate_rate": 0.1,
+    "dispense_rate": 0.1,
+    "blow_out": true,
+    "touch_tip": true,
+    "mix_after": [5, 0.5],
+    "air_gap": 0,
+    "push_out": 10.0,
+    "delay_aspirate": 2.0,
+    "delay_dispense": 1.0
+  },
+  
+  "notes": [
+    "Very slow speed (10%) to avoid cavitation",
+    "2 second delay after aspiration",
+    "Maximum push out to fully empty",
+    "5 mix cycles to homogenize"
+  ]
+}

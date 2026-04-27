@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+================================================================================
+  SiLA2 Feature Definition Template
+================================================================================
+
+  INSTRUCTIONS:
+  1. Rename this file to YourInstrument.sila.xml
+  2. Update the Feature Identifier and DisplayName
+  3. Add your commands (copy and modify the examples below)
+  4. The PnP system will auto-discover these commands!
+
+  IMPORTANT: This file IS your API definition. Commands defined here will
+  automatically appear in the console, webapp, and workflow system.
+
+================================================================================
+-->
+<Feature xmlns="http://www.sila-standard.org"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         Category="instruments"
+         FeatureVersion="1.0.0"
+         Originator="org.silastandard"
+         SiLA2Version="1.1"
+         xsi:schemaLocation="http://www.sila-standard.org https://gitlab.com/SiLA2/sila_base/-/raw/master/schema/FeatureDefinition.xsd"
+         MaturityLevel="Draft">
+
+    <!-- Feature Identity -->
+    <Identifier>NewInstrument</Identifier>
+    <DisplayName>New Instrument</DisplayName>
+    <Description>
+        Template feature for new instruments.
+        Replace this description with your instrument's purpose.
+    </Description>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         COMMANDS - Define your instrument's operations here
+         ═══════════════════════════════════════════════════════════════════════ -->
+
+    <!-- Example: Command with no parameters -->
+    <Command>
+        <Identifier>Initialize</Identifier>
+        <DisplayName>Initialize</DisplayName>
+        <Description>Initialize the instrument and establish connection</Description>
+        <Observable>No</Observable>
+        <Response>
+            <Identifier>Success</Identifier>
+            <DisplayName>Success</DisplayName>
+            <Description>Whether initialization was successful</Description>
+            <DataType>
+                <Basic>Boolean</Basic>
+            </DataType>
+        </Response>
+    </Command>
+
+    <!-- Example: Command with parameters -->
+    <Command>
+        <Identifier>SetParameter</Identifier>
+        <DisplayName>Set Parameter</DisplayName>
+        <Description>Set an instrument parameter</Description>
+        <Observable>No</Observable>
+        <Parameter>
+            <Identifier>ParameterName</Identifier>
+            <DisplayName>Parameter Name</DisplayName>
+            <Description>Name of the parameter to set</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Parameter>
+            <Identifier>Value</Identifier>
+            <DisplayName>Value</DisplayName>
+            <Description>New value for the parameter</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Response>
+            <Identifier>PreviousValue</Identifier>
+            <DisplayName>Previous Value</DisplayName>
+            <Description>The previous value before change</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+    </Command>
+
+    <!-- Example: Observable command (long-running operation) -->
+    <Command>
+        <Identifier>RunOperation</Identifier>
+        <DisplayName>Run Operation</DisplayName>
+        <Description>Execute a long-running operation with progress updates</Description>
+        <Observable>Yes</Observable>
+        <Parameter>
+            <Identifier>Duration</Identifier>
+            <DisplayName>Duration (seconds)</DisplayName>
+            <Description>How long to run the operation</Description>
+            <DataType>
+                <Basic>Integer</Basic>
+            </DataType>
+        </Parameter>
+        <IntermediateResponse>
+            <Identifier>Progress</Identifier>
+            <DisplayName>Progress</DisplayName>
+            <Description>Current progress percentage (0-100)</Description>
+            <DataType>
+                <Basic>Integer</Basic>
+            </DataType>
+        </IntermediateResponse>
+        <Response>
+            <Identifier>Result</Identifier>
+            <DisplayName>Result</DisplayName>
+            <Description>Operation result data</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+    </Command>
+
+    <!-- Basic utility commands (recommended for all instruments) -->
+    <Command>
+        <Identifier>GetStatus</Identifier>
+        <DisplayName>Get Status</DisplayName>
+        <Description>Get current instrument status</Description>
+        <Observable>No</Observable>
+        <Response>
+            <Identifier>Status</Identifier>
+            <DisplayName>Status</DisplayName>
+            <Description>Current status (idle, running, error, etc.)</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+    </Command>
+
+    <Command>
+        <Identifier>Stop</Identifier>
+        <DisplayName>Stop</DisplayName>
+        <Description>Emergency stop - halt all operations</Description>
+        <Observable>No</Observable>
+        <Response>
+            <Identifier>Stopped</Identifier>
+            <DisplayName>Stopped</DisplayName>
+            <Description>Whether stop was successful</Description>
+            <DataType>
+                <Basic>Boolean</Basic>
+            </DataType>
+        </Response>
+    </Command>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         PROPERTIES - Readable/writable values
+         ═══════════════════════════════════════════════════════════════════════ -->
+
+    <Property>
+        <Identifier>InstrumentName</Identifier>
+        <DisplayName>Instrument Name</DisplayName>
+        <Description>The name/model of this instrument</Description>
+        <Observable>No</Observable>
+        <DataType>
+            <Basic>String</Basic>
+        </DataType>
+    </Property>
+
+    <Property>
+        <Identifier>IsConnected</Identifier>
+        <DisplayName>Is Connected</DisplayName>
+        <Description>Whether the instrument is connected and ready</Description>
+        <Observable>Yes</Observable>
+        <DataType>
+            <Basic>Boolean</Basic>
+        </DataType>
+    </Property>
+
+</Feature>

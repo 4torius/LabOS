@@ -1,0 +1,129 @@
+system:
+  name: LabOS
+  version: 2.0.0
+  language: en
+  log_level: INFO
+  auto_start_servers: true
+paths:
+  library: Library
+  labware: Library/Labware
+  plates: Library/Labware/Plates
+  templates: Library/Templates
+  tipracks: Library/Labware/TipRacks
+  pipettes: Library/Labware/Pipettes
+  recipes: Library/Recipes
+  hardware_config: Library/HardwareConfig
+  analysis: Library/Analysis
+  workflows: Library/Workflows
+  results: Results
+servers:
+  tecan:
+    name: Tecan M200 Pro
+    enabled: true
+    host: localhost
+    port: 50051
+    directory: SiLA2/TecanSiLA2Server
+    command_windows:
+    - dotnet
+    - run
+    command_unix:
+    - dotnet
+    - run
+    startup_timeout: 30
+    check_file: Program.cs
+  opentrons:
+    name: Opentrons Flex
+    enabled: true
+    host: localhost
+    port: 50057
+    directory: SiLA2/OpentronsSiLA2Server
+    command_windows:
+    - python
+    - main.py
+    command_unix:
+    - python
+    - main.py
+    startup_timeout: 45
+    check_file: main.py
+  mobile:
+    name: Mobile Robot
+    enabled: true
+    host: 192.168.11.22
+    port: 50053
+    directory: SiLA2/MobileSiLA2Server
+    command_windows: []
+    command_unix: []
+    startup_timeout: 20
+    check_file: ''
+    remote: true
+    network:
+      connection_timeout: 5
+      retry_count: 3
+      ros_master_uri: http://localhost:11311
+      ros_namespace: /setup1
+  manual_station:
+    name: Manual Station
+    enabled: true
+    host: localhost
+    port: 50360
+    directory: SiLA2/ManualStationSiLA2Server
+    command_windows:
+    - python
+    - main.py
+    command_unix:
+    - python
+    - main.py
+    startup_timeout: 10
+    check_file: main.py
+discovery:
+  enabled: true
+  scan_interval: 30
+  service_type: _sila2._tcp.local.
+workflow:
+  parallel_execution: false
+  default_timeout: 600
+  retry_on_failure: false
+  max_retries: 3
+error_handling:
+  retry_strategy: exponential
+  base_delay_seconds: 1
+  max_delay_seconds: 60
+  max_retries: 3
+  enable_human_intervention: true
+ui_dropdowns:
+  recipe:
+    folder: Library/Recipes
+    file_extension: .json
+  analysis:
+    folder: Library/Analysis
+    file_extension: .mdfx
+  hal_config:
+    folder: Library/HardwareConfig
+    file_extension: .json
+  liquid_class:
+    folder: Library/LiquidClasses
+    file_extension: .json
+  pipette:
+    folder: Library/Labware/Pipettes
+    file_extension: .json
+  plate:
+    folder: Library/Labware/Plates
+    file_extension: .json
+  tiprack:
+    folder: Library/Labware/TipRacks
+    file_extension: .json
+  mobile_task:
+    dynamic: true
+    server: mobile
+    command: Get_AvailableTasks
+webapp:
+  nodered_url: http://localhost:1880
+  timeouts:
+    intervention_timeout: 3600
+    manual_action_timeout: 600
+    tip_refill_timeout: 600
+    discovery_timeout: 1
+  ui:
+    auto_refresh_interval: 3
+    toast_duration: 15
+    workflow_status_auto_hide: 10

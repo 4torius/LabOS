@@ -1,0 +1,45 @@
+# =============================================================================
+#  New Instrument SiLA2 Server Configuration
+# =============================================================================
+#
+#  INSTRUCTIONS:
+#  1. Rename this file to match your instrument
+#  2. Change the port (must be unique, use 50061-50099)
+#  3. Update server_name and other metadata
+#
+# =============================================================================
+
+server:
+  # Network configuration
+  host: "0.0.0.0"      # Listen on all interfaces
+  port: 50061          # TODO: Change to unique port (50061-50099)
+
+# Logging configuration
+logging:
+  level: INFO          # DEBUG, INFO, WARNING, ERROR
+
+# Hardware connection (customize for your instrument)
+hardware:
+  # Serial connection example:
+  # serial_port: "COM3"
+  # baud_rate: 9600
+  
+  # Network connection example:
+  # host: "192.168.1.100"
+  # port: 8080
+  
+  # Simulation mode (no real hardware)
+  simulation: true
+
+# SiLA2 metadata (shown in discovery)
+sila2:
+  server_name: "New Instrument"     # TODO: Change this
+  server_uuid: "new-instrument-001" # TODO: Unique identifier
+  vendor_url: "https://github.com/BicoccaLab"
+  description: "Template server for new instruments"
+
+# Instrument-specific settings
+# Add your own configuration here:
+# settings:
+#   temperature_range: [4, 100]
+#   default_speed: 1000

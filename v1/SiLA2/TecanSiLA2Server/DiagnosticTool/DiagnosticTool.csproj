@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</ProjectGuid>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>TecanDiagnostic</RootNamespace>
+    <AssemblyName>TecanDiagnostic</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <OutputPath>..\bin\Debug\net48\</OutputPath>
+    <PlatformTarget>x86</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="Tecan.At.Common.DocumentManagement">
+      <HintPath>..\lib\Tecan.At.Common.DocumentManagement.dll</HintPath>
+    </Reference>
+    <Reference Include="Tecan.At.Common.DocumentManagement.Reader">
+      <HintPath>..\lib\Tecan.At.Common.DocumentManagement.Reader.dll</HintPath>
+    </Reference>
+    <Reference Include="Tecan.At.Instrument.Common">
+      <HintPath>..\lib\Tecan.At.Instrument.Common.dll</HintPath>
+    </Reference>
+    <Reference Include="Tecan.At.Measurement.Server">
+      <HintPath>..\lib\Tecan.At.Measurement.Server.dll</HintPath>
+    </Reference>
+    <Reference Include="Tecan.At.Measurement.Common">
+      <HintPath>..\lib\Tecan.At.Measurement.Common.dll</HintPath>
+    </Reference>
+    <Reference Include="Tecan.At.XFluor.Connect.Reader">
+      <HintPath>..\lib\Tecan.At.XFluor.Connect.Reader.dll</HintPath>
+    </Reference>
+    <Reference Include="Tecan.At.XFluor.Core">
+      <HintPath>..\lib\Tecan.At.XFluor.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="Tecan.At.Communication.Server">
+      <HintPath>..\lib\Tecan.At.Communication.Server.dll</HintPath>
+    </Reference>
+    <Reference Include="Tecan.At.Instrument.Server">
+      <HintPath>..\lib\Tecan.At.Instrument.Server.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="DiagnoseConnection.cs" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

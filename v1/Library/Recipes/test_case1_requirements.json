@@ -1,0 +1,22 @@
+﻿{
+  "ProtocolName": "Test_Case1_Requirements",
+  "Description": "Caso 1: Ricetta con Requirements (richiede HAL)",
+  "Requirements": {
+    "MyPlate": "MyPlate",
+    "MyTips": "MyTips",
+    "MyTrash": "MyTrash"
+  },
+  "Steps": [
+    {
+      "Command": "Comment",
+      "Type": "Comment",
+      "Text": "TEST CASE 1: Ricetta con Requirements"
+    },
+    {
+      "Command": "Comment",
+      "Type": "Comment",
+      "Text": "Questa ricetta usa nomi logici che vengono risolti dalla HAL"
+    }
+  ]
+}
+

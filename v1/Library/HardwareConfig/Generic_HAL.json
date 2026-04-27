@@ -1,0 +1,53 @@
+{
+  "ConfigName": "Generic_HAL",
+  "Description": "Generic reusable HAL with canonical logical names (MyTips/MyTrash/MyPlate/MyReservoir) and numbered source reservoirs.",
+  "Modules": {
+    "HeaterShaker": { 
+      "Type": "heaterShakerModuleV1", 
+      "Slot": "A1" 
+    }
+  },
+  "Trash": {
+    "MyTrash": {
+      "Type": "TrashBin",
+      "Slot": "A3"
+    }
+  },
+  "Labware": {
+    "MyTips": {
+      "LoadName": "opentrons_flex_96_tiprack_1000ul",
+      "Slot": "B3"
+    },
+    "MyTips_2": {
+      "LoadName": "opentrons_flex_96_tiprack_1000ul",
+      "Slot": "C3"
+    },
+    "MyReservoir": {
+      "LoadName": "nest_12_reservoir_15ml",
+      "Slot": "A2"
+    },
+    "MyPlate": {
+      "LoadName": "corning_96_wellplate_360ul_flat",
+      "Slot": "D2"
+    },
+    "Source_1": {
+      "LoadName": "nest_12_reservoir_15ml",
+      "Slot": "C1"
+    },
+    "Source_2": {
+      "LoadName": "nest_12_reservoir_15ml",
+      "Slot": "C2"
+    },
+    "Source_3": {
+      "LoadName": "nest_12_reservoir_15ml",
+      "Slot": "B1"
+    },
+    "Source_4": {
+      "LoadName": "nest_12_reservoir_15ml",
+      "Slot": "B2"
+    }
+  },
+  "Pipettes": {
+    "left": "flex_1channel_1000"
+  }
+}

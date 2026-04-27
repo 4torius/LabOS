@@ -1,0 +1,36 @@
+{
+  "WorkflowName": "Simple_PlateRead",
+  "Description": "Solo lettura piastra su Tecan (per test)",
+  "Author": "BicoccaLab", 
+  "Version": "1.0",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "Tecan",
+      "Action": "Connect",
+      "Description": "Connessione al lettore"
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "Tecan",
+      "Action": "PlateIn",
+      "Description": "Inserimento piastra"
+    },
+    {
+      "StepNumber": 3,
+      "Instrument": "Tecan",
+      "Action": "ReadAbsorbance",
+      "Parameters": {
+        "Wavelength": 450,
+        "PlateType": "96_well"
+      },
+      "Description": "Lettura assorbanza"
+    },
+    {
+      "StepNumber": 4,
+      "Instrument": "Tecan",
+      "Action": "PlateOut",
+      "Description": "Espulsione piastra"
+    }
+  ]
+}

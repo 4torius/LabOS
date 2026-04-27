@@ -1,0 +1,18 @@
+{
+  "ConfigName": "Standard_Flex_Setup",
+  "Description": "Standard setup with unified logical names (MyTips/MyTrash/MyPlate/MyReservoir) and legacy aliases for compatibility",
+  "Modules": {
+    "HeaterShaker": { "Type": "heaterShakerModuleV1", "Slot": "A1" }
+  },
+  "Trash": {
+    "MyTrash": { "Type": "TrashBin", "Slot": "A3" }
+    },
+  "Labware": {
+    "MyTips": { "LoadName": "opentrons_flex_96_filtertiprack_1000ul", "Slot": "B3" },
+    "MyReservoir": { "LoadName": "nest_1_reservoir_290ml", "Slot": "C2" },
+    "MyPlate": { "LoadName": "corning_24_wellplate_3.4ml_flat", "Slot": "D2" }
+    },
+  "Pipettes": {
+    "left": "flex_1channel_1000"
+  }
+}

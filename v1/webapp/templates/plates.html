@@ -1,0 +1,568 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid" style="padding-top: 50px;">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-grid-3x3-gap"></i> Plate Management</h2>
+        <button class="btn btn-outline-primary" onclick="refreshPlates()">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+    </div>
+
+    <div class="row g-4">
+        <!-- Plates List -->
+        <div class="col-md-7 col-lg-8">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-list"></i> Tracked Plates</span>
+                    <span class="badge bg-secondary" id="plateCount">0 plates</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0" id="platesTable">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Plate ID</th>
+                                    <th>Created</th>
+                                    <th>Wells</th>
+                                    <th>Status</th>
+                                    <th>Analysis</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="platesTableBody">
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted py-4">
+                                        <i class="bi bi-inbox" style="font-size: 32px;"></i>
+                                        <p class="mb-0 mt-2">No plates tracked yet</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column -->
+        <div class="col-md-5 col-lg-4">
+
+            <!-- Plate Details / Timeline -->
+            <div class="card" id="plateDetailsCard" style="display: none;">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-diagram-3"></i> Timeline — <code id="detailPlateId"></code></span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="closeDetails()">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+                <div class="card-body" id="plateDetailsBody"></div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="card mt-3" id="quickActionsCard">
+                <div class="card-header">
+                    <i class="bi bi-lightning"></i> Quick Actions
+                </div>
+                <div class="card-body">
+                    <button class="btn btn-outline-primary w-100 mb-2" onclick="showAddPlateModal()">
+                        <i class="bi bi-plus"></i> Add Plate Manually
+                    </button>
+                    <button class="btn btn-outline-success w-100 mb-2" onclick="exportPlatesCSV()">
+                        <i class="bi bi-download"></i> Export to CSV
+                    </button>
+                </div>
+            </div>
+
+            <!-- Status Legend -->
+            <div class="card mt-3">
+                <div class="card-header">
+                    <i class="bi bi-palette"></i> Status Legend
+                </div>
+                <div class="card-body small">
+                    <div class="d-flex align-items-center mb-2">
+                        <span class="badge bg-secondary me-2">pending</span> Created, awaiting pipetting
+                    </div>
+                    <div class="d-flex align-items-center mb-2">
+                        <span class="badge bg-warning text-dark me-2">executing</span> Pipetting in progress
+                    </div>
+                    <div class="d-flex align-items-center mb-2">
+                        <span class="badge bg-primary me-2">pipetted</span> Pipetting complete
+                    </div>
+                    <div class="d-flex align-items-center mb-2">
+                        <span class="badge bg-info text-dark me-2">incubating</span> In incubator
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <span class="badge bg-success me-2">analyzed</span> Analysis complete
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Plate Modal -->
+<div class="modal fade" id="addPlateModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plus-circle"></i> Add Plate</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Plate ID <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="newPlateId" placeholder="e.g., PLATE-20240101-001">
+                    <div class="invalid-feedback">Plate ID is required.</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Well Count</label>
+                    <select class="form-select" id="newPlateWells">
+                        <option value="96">96-well</option>
+                        <option value="384">384-well</option>
+                        <option value="24">24-well</option>
+                        <option value="48">48-well</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Notes</label>
+                    <textarea class="form-control" id="newPlateNotes" rows="2"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="addPlateManually()">Add Plate</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Link Analysis Modal -->
+<div class="modal fade" id="linkAnalysisModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="bi bi-link-45deg"></i> Link Analysis</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info py-2 small mb-3">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Durante un workflow il collegamento avviene <strong>automaticamente</strong>.
+                    Usa questo form solo per analisi eseguite manualmente o per correzioni retroattive.
+                </div>
+                <input type="hidden" id="linkAnalysisPlateId">
+                <div class="mb-3">
+                    <label class="form-label">Measurement Type</label>
+                    <select class="form-select" id="analysisType">
+                        <option value="absorbance">Absorbance</option>
+                        <option value="fluorescence">Fluorescence</option>
+                        <option value="luminescence">Luminescence</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Protocol Used</label>
+                    <select class="form-select" id="analysisProtocol">
+                        <option value="">— loading protocols… —</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Result File</label>
+                    <div class="input-group">
+                        <select class="form-select" id="analysisResultFilePicker">
+                            <option value="">— pick from library —</option>
+                        </select>
+                        <input type="text" class="form-control" id="analysisResultFile" placeholder="or type path manually">
+                    </div>
+                    <div class="form-text">Select an AnIML file from the Results library, or type a path manually.</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Notes</label>
+                    <textarea class="form-control" id="analysisNotes" rows="2"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-success" onclick="linkAnalysis()">Link Analysis</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div class="modal fade" id="deletePlateModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content border-danger">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-trash"></i> Delete Plate</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Delete plate <strong id="deletePlateIdLabel"></strong>?</p>
+                <p class="text-danger mb-0 small"><i class="bi bi-exclamation-triangle"></i> This cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="deletePlateConfirmBtn">Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<style>
+/* Vertical timeline */
+.plate-timeline { position: relative; padding-left: 1.5rem; }
+.plate-timeline::before {
+    content: '';
+    position: absolute; left: .55rem; top: .4rem; bottom: .4rem;
+    width: 2px; background: var(--bs-border-color);
+}
+.tl-item { position: relative; margin-bottom: 1.1rem; }
+.tl-item:last-child { margin-bottom: 0; }
+.tl-dot {
+    position: absolute; left: -1.5rem; top: .2rem;
+    width: 1rem; height: 1rem; border-radius: 50%;
+    border: 2px solid var(--bs-border-color);
+    background: var(--bs-body-bg);
+}
+.tl-dot.done { border-color: transparent; }
+.tl-body { padding-left: .25rem; }
+.tl-title { font-weight: 600; font-size: .9rem; }
+.tl-meta { font-size: .8rem; color: var(--bs-secondary-color); }
+.tl-pending .tl-title { color: var(--bs-secondary-color); }
+.tl-link-btn { font-size: .75rem; }
+</style>
+
+<script>
+let plates = [];
+let _pendingDeleteId = null;
+
+// ─── Data loading ──────────────────────────────────────────────────────────
+
+async function refreshPlates() {
+    try {
+        const resp = await fetch('/api/plates');
+        const data = await resp.json();
+        plates = data.plates || [];
+        renderPlatesTable();
+    } catch (e) {
+        showToast('error', 'Error', 'Could not load plates: ' + e.message);
+    }
+}
+
+// ─── Table ─────────────────────────────────────────────────────────────────
+
+const STATUS_COLORS = {
+    pending: 'secondary', executing: 'warning', pipetted: 'primary',
+    incubating: 'info', analyzed: 'success', completed: 'success'
+};
+
+function renderPlatesTable() {
+    const tbody = document.getElementById('platesTableBody');
+    document.getElementById('plateCount').textContent = `${plates.length} plates`;
+
+    if (plates.length === 0) {
+        tbody.innerHTML = `
+            <tr><td colspan="6" class="text-center text-muted py-4">
+                <i class="bi bi-inbox" style="font-size:32px"></i>
+                <p class="mb-0 mt-2">No plates tracked yet</p>
+            </td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = plates.map(p => `
+        <tr onclick="showPlateDetails('${p.plate_id}')" style="cursor:pointer" class="${_activeId === p.plate_id ? 'table-active' : ''}">
+            <td><code>${p.plate_id}</code></td>
+            <td>${p.created ? new Date(p.created).toLocaleDateString() : '—'}</td>
+            <td>${p.well_count || '—'}</td>
+            <td><span class="badge bg-${STATUS_COLORS[p.status] || 'secondary'}">${p.status || 'unknown'}</span></td>
+            <td class="text-center">${p.has_analysis ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-dash text-muted"></i>'}</td>
+            <td>
+                <button class="btn btn-sm btn-outline-success" title="Link Analysis"
+                    onclick="event.stopPropagation(); showLinkAnalysisModal('${p.plate_id}')">
+                    <i class="bi bi-link-45deg"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-danger ms-1" title="Delete"
+                    onclick="event.stopPropagation(); confirmDeletePlate('${p.plate_id}')">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+// ─── Timeline detail ───────────────────────────────────────────────────────
+
+let _activeId = null;
+
+async function showPlateDetails(plateId) {
+    try {
+        const resp = await fetch(`/api/plates/${plateId}`);
+        if (!resp.ok) throw new Error(await resp.text());
+        const plate = await resp.json();
+        _activeId = plateId;
+        renderPlatesTable(); // re-highlight active row
+
+        document.getElementById('detailPlateId').textContent = plateId;
+        document.getElementById('plateDetailsBody').innerHTML = buildTimeline(plate);
+        document.getElementById('plateDetailsCard').style.display = '';
+    } catch (e) {
+        showToast('error', 'Error', 'Could not load plate: ' + e.message);
+    }
+}
+
+function closeDetails() {
+    _activeId = null;
+    document.getElementById('plateDetailsCard').style.display = 'none';
+    renderPlatesTable();
+}
+
+function buildTimeline(plate) {
+    const fmt = ts => ts ? new Date(ts).toLocaleString() : null;
+
+    // Created step
+    const createdHtml = `
+        <div class="tl-item">
+            <div class="tl-dot done bg-success"></div>
+            <div class="tl-body">
+                <div class="tl-title text-success">Created</div>
+                <div class="tl-meta">
+                    ${fmt(plate.created) || '—'}<br>
+                    Source: ${plate.source_file || 'manual'} &nbsp;|&nbsp; Wells: ${plate.well_count || '—'}
+                </div>
+            </div>
+        </div>`;
+
+    // Pipetting step
+    const pip = plate.pipetting_info;
+    const pipDone = !!pip;
+    const pipHtml = `
+        <div class="tl-item ${pipDone ? '' : 'tl-pending'}">
+            <div class="tl-dot done bg-${pipDone ? 'primary' : 'secondary'}"></div>
+            <div class="tl-body">
+                <div class="tl-title text-${pipDone ? 'primary' : 'secondary'}">Pipetted</div>
+                ${pipDone ? `
+                <div class="tl-meta">
+                    ${fmt(pip.timestamp) || '—'}<br>
+                    Recipe: ${pip.recipe || '—'} &nbsp;|&nbsp; Instrument: ${pip.instrument || '—'}
+                </div>` : '<div class="tl-meta">Not yet executed</div>'}
+            </div>
+        </div>`;
+
+    // Analysis steps
+    const analyses = plate.analysis_results || [];
+    let analysisHtml = '';
+    if (analyses.length === 0) {
+        analysisHtml = `
+            <div class="tl-item tl-pending">
+                <div class="tl-dot done bg-secondary"></div>
+                <div class="tl-body">
+                    <div class="tl-title text-secondary">Analyzed</div>
+                    <div class="tl-meta">No analysis linked yet —
+                        <a href="#" class="tl-link-btn" onclick="showLinkAnalysisModal('${plate.plate_id}'); return false;">
+                            <i class="bi bi-link-45deg"></i> Link now
+                        </a>
+                    </div>
+                </div>
+            </div>`;
+    } else {
+        analysisHtml = analyses.map((a, i) => {
+            const fname = a.result_file ? a.result_file.split('/').pop().split('\\').pop() : null;
+            const viewBtn = fname ? `
+                <a href="/results#${encodeURIComponent(fname)}" class="btn btn-sm btn-outline-success tl-link-btn ms-1" target="_blank">
+                    <i class="bi bi-graph-up"></i> View
+                </a>` : '';
+            return `
+                <div class="tl-item">
+                    <div class="tl-dot done bg-success"></div>
+                    <div class="tl-body">
+                        <div class="tl-title text-success">
+                            Analysis ${analyses.length > 1 ? i + 1 : ''} — ${a.measurement_type || 'unknown'}
+                        </div>
+                        <div class="tl-meta">
+                            ${fmt(a.timestamp) || '—'}<br>
+                            Protocol: ${a.protocol || '—'} &nbsp;|&nbsp; Instrument: ${a.instrument || '—'}
+                            ${fname ? `<br>File: <code>${fname}</code> ${viewBtn}` : ''}
+                            ${a.notes ? `<br><em>${a.notes}</em>` : ''}
+                        </div>
+                    </div>
+                </div>`;
+        }).join('');
+    }
+
+    // Status badge + link analysis button
+    const statusColor = STATUS_COLORS[plate.status] || 'secondary';
+    return `
+        <div class="mb-3 d-flex align-items-center gap-2">
+            <span class="badge bg-${statusColor} fs-6">${plate.status || 'unknown'}</span>
+            <button class="btn btn-sm btn-outline-success ms-auto" onclick="showLinkAnalysisModal('${plate.plate_id}')">
+                <i class="bi bi-link-45deg"></i> Link Analysis
+            </button>
+        </div>
+        <div class="plate-timeline">
+            ${createdHtml}${pipHtml}${analysisHtml}
+        </div>`;
+}
+
+// ─── Add plate ─────────────────────────────────────────────────────────────
+
+function showAddPlateModal() {
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    document.getElementById('newPlateId').value = `PLATE-${today}-${String(plates.length + 1).padStart(3, '0')}`;
+    document.getElementById('newPlateId').classList.remove('is-invalid');
+    document.getElementById('newPlateNotes').value = '';
+    new bootstrap.Modal(document.getElementById('addPlateModal')).show();
+}
+
+async function addPlateManually() {
+    const idInput = document.getElementById('newPlateId');
+    const plateId = idInput.value.trim();
+    if (!plateId) {
+        idInput.classList.add('is-invalid');
+        return;
+    }
+    idInput.classList.remove('is-invalid');
+
+    try {
+        const resp = await fetch('/api/plates', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                plate_id: plateId,
+                well_count: parseInt(document.getElementById('newPlateWells').value),
+                notes: document.getElementById('newPlateNotes').value
+            })
+        });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || resp.statusText);
+        }
+        bootstrap.Modal.getInstance(document.getElementById('addPlateModal')).hide();
+        await refreshPlates();
+        showToast('success', 'Plate added', `${plateId} created successfully.`);
+    } catch (e) {
+        showToast('error', 'Error', 'Could not add plate: ' + e.message);
+    }
+}
+
+// ─── Link analysis ─────────────────────────────────────────────────────────
+
+async function showLinkAnalysisModal(plateId) {
+    document.getElementById('linkAnalysisPlateId').value = plateId;
+    document.getElementById('analysisResultFile').value = '';
+    document.getElementById('analysisNotes').value = '';
+
+    // Populate protocol dropdown from Library/Analysis
+    const protocolSel = document.getElementById('analysisProtocol');
+    protocolSel.innerHTML = '<option value="">— select protocol —</option>';
+    try {
+        const resp = await fetch('/api/files/protocols');
+        const data = await resp.json();
+        (data.files || []).forEach(f => {
+            const opt = document.createElement('option');
+            opt.value = f;
+            opt.textContent = f;
+            protocolSel.appendChild(opt);
+        });
+    } catch (_) {
+        protocolSel.innerHTML = '<option value="">— protocols unavailable —</option>';
+    }
+
+    // Populate result file picker from Library/Results/AnIML
+    const picker = document.getElementById('analysisResultFilePicker');
+    picker.innerHTML = '<option value="">— pick from library —</option>';
+    try {
+        const resp = await fetch('/api/files/animl_results');
+        const data = await resp.json();
+        (data.files || []).forEach(f => {
+            const opt = document.createElement('option');
+            opt.value = `Results/AnIML/${f.name}`;
+            opt.textContent = `${f.name}  (${new Date(f.modified).toLocaleDateString()})`;
+            picker.appendChild(opt);
+        });
+    } catch (_) { /* ignore if endpoint unavailable */ }
+
+    new bootstrap.Modal(document.getElementById('linkAnalysisModal')).show();
+}
+
+// Sync picker → manual input
+document.getElementById('analysisResultFilePicker').addEventListener('change', function () {
+    if (this.value) document.getElementById('analysisResultFile').value = this.value;
+});
+
+async function linkAnalysis() {
+    const plateId = document.getElementById('linkAnalysisPlateId').value;
+    const resultFile = document.getElementById('analysisResultFile').value.trim()
+        || document.getElementById('analysisResultFilePicker').value;
+
+    try {
+        const resp = await fetch(`/api/plates/${plateId}/analysis`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                measurement_type: document.getElementById('analysisType').value,
+                protocol: document.getElementById('analysisProtocol').value || null,
+                result_file: resultFile,
+                notes: document.getElementById('analysisNotes').value
+            })
+        });
+        if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
+        bootstrap.Modal.getInstance(document.getElementById('linkAnalysisModal')).hide();
+        await refreshPlates();
+        if (_activeId === plateId) await showPlateDetails(plateId);
+        showToast('success', 'Analysis linked', `Linked to plate ${plateId}.`);
+    } catch (e) {
+        showToast('error', 'Error', 'Could not link analysis: ' + e.message);
+    }
+}
+
+// ─── Delete ────────────────────────────────────────────────────────────────
+
+function confirmDeletePlate(plateId) {
+    _pendingDeleteId = plateId;
+    document.getElementById('deletePlateIdLabel').textContent = plateId;
+    new bootstrap.Modal(document.getElementById('deletePlateModal')).show();
+}
+
+document.getElementById('deletePlateConfirmBtn').addEventListener('click', async () => {
+    if (!_pendingDeleteId) return;
+    const plateId = _pendingDeleteId;
+    _pendingDeleteId = null;
+    bootstrap.Modal.getInstance(document.getElementById('deletePlateModal')).hide();
+    try {
+        const resp = await fetch(`/api/plates/${plateId}`, {method: 'DELETE'});
+        if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
+        if (_activeId === plateId) closeDetails();
+        await refreshPlates();
+        showToast('success', 'Deleted', `Plate ${plateId} removed.`);
+    } catch (e) {
+        showToast('error', 'Error', 'Could not delete plate: ' + e.message);
+    }
+});
+
+// ─── Export ────────────────────────────────────────────────────────────────
+
+function exportPlatesCSV() {
+    if (plates.length === 0) {
+        showToast('warning', 'Nothing to export', 'No plates in the list.');
+        return;
+    }
+    const headers = ['plate_id', 'created', 'well_count', 'status', 'has_analysis'];
+    const rows = plates.map(p => [
+        p.plate_id, p.created || '', p.well_count || '', p.status || '',
+        p.has_analysis ? 'Yes' : 'No'
+    ]);
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const a = Object.assign(document.createElement('a'), {
+        href: URL.createObjectURL(new Blob([csv], {type: 'text/csv'})),
+        download: `plates_${new Date().toISOString().slice(0, 10)}.csv`
+    });
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+// ─── Init ──────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', refreshPlates);
+</script>
+{% endblock %}

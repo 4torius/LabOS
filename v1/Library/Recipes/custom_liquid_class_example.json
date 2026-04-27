@@ -1,0 +1,125 @@
+{
+  "ProtocolName": "Custom_LiquidClass_Example",
+  "Description": "Esempio di come usare liquid classes dalla Library/LiquidClasses/",
+  "Requirements": {
+    "MyReservoir": "MyReservoir",
+    "MyPlate": "MyPlate",
+    "MyTips": "MyTips"
+  },
+  "Steps": [
+    {
+      "Comment": "=== Liquid classes vengono caricate automaticamente da Library/LiquidClasses/ ==="
+    },
+    {
+      "Comment": "=== Disponibili: Aqueous, Viscous, Volatile, HighlyViscous, Foaming ==="
+    },
+    {
+      "Comment": "--- Trasferimento con liquido viscoso (caricato dalla library) ---"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "Transfer",
+      "PipetteMount": "left",
+      "Volume": 50,
+      "Source": "MyReservoir:A1",
+      "Dest": "MyPlate:A1",
+      "LiquidClass": "Viscous"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left"
+    },
+    {
+      "Comment": "--- Trasferimento con liquido altamente viscoso ---"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "Transfer",
+      "PipetteMount": "left",
+      "Volume": 100,
+      "Source": "MyReservoir:A2",
+      "Dest": "MyPlate:B1",
+      "LiquidClass": "HighlyViscous"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left"
+    },
+    {
+      "Comment": "--- Trasferimento con liquido schiumogeno ---"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "Aspirate",
+      "PipetteMount": "left",
+      "Volume": 75,
+      "Location": "MyReservoir:A3",
+      "LiquidClass": "Foaming"
+    },
+    {
+      "Command": "Dispense",
+      "PipetteMount": "left",
+      "Volume": 75,
+      "Location": "MyPlate:C1",
+      "LiquidClass": "Foaming"
+    },
+    {
+      "Command": "TouchTip",
+      "PipetteMount": "left",
+      "Location": "MyPlate:C1"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left"
+    },
+    {
+      "Comment": "--- Puoi anche definire liquid class custom inline (override) ---"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "Transfer",
+      "PipetteMount": "left",
+      "Volume": 50,
+      "Source": "MyReservoir:A4",
+      "Dest": "MyPlate:D1",
+      "LiquidClass": "MyCustomOil"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left"
+    }
+  ],
+  "CustomLiquidClasses": {
+    "MyCustomOil": {
+      "description": "Olio personalizzato - definito inline nella ricetta",
+      "aspirate_rate": 0.2,
+      "dispense_rate": 0.2,
+      "blow_out": true,
+      "touch_tip": true,
+      "mix_after": [
+        2,
+        0.3
+      ],
+      "air_gap": 0,
+      "push_out": 6.0,
+      "delay_aspirate": 1.2,
+      "delay_dispense": 0.6
+    }
+  }
+}

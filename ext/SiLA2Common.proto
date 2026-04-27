@@ -1,0 +1,204 @@
+// =============================================================================
+// SiLA2 Common Service - Standard Metadata Interface
+// =============================================================================
+// 
+// This proto defines the STANDARD interface that EVERY SiLA2 server must implement.
+// It enables true plug-and-play: the client discovers servers and their capabilities
+// without any hardcoded knowledge.
+//
+// To add a new instrument:
+// 1. Create your server in SiLA2/YourInstrumentSiLA2Server/
+// 2. Implement this SiLA2Common service
+// 3. Define your features in features/*.sila.xml
+// 4. The system automatically discovers and integrates your instrument
+//
+// =============================================================================
+
+syntax = "proto3";
+
+package sila2.org.silastandard;
+
+option csharp_namespace = "SiLA2.Common";
+option java_package = "org.silastandard.common";
+
+// =============================================================================
+//                         SERVER INFO SERVICE
+// =============================================================================
+
+service SiLA2ServerInfo {
+    // Get complete server metadata
+    rpc GetServerInfo(GetServerInfoRequest) returns (ServerInfoResponse);
+    
+    // Get all features and their commands/properties
+    rpc GetFeatures(GetFeaturesRequest) returns (FeaturesResponse);
+    
+    // Health check - is the server and hardware operational?
+    rpc GetStatus(GetStatusRequest) returns (StatusResponse);
+    
+    // Execute any command generically (for reflection-based clients)
+    rpc ExecuteCommand(ExecuteCommandRequest) returns (stream ExecuteCommandResponse);
+    
+    // Get property value generically
+    rpc GetProperty(GetPropertyRequest) returns (PropertyResponse);
+}
+
+// =============================================================================
+//                         SERVER INFO MESSAGES
+// =============================================================================
+
+message GetServerInfoRequest {}
+
+message ServerInfoResponse {
+    string server_uuid = 1;           // Unique identifier (e.g., UUID)
+    string server_name = 2;           // Human-readable name (e.g., "Tecan Infinite M200 Pro")
+    string server_type = 3;           // Category (e.g., "plate_reader", "liquid_handler", "incubator")
+    string server_version = 4;        // Server software version
+    string sila_version = 5;          // SiLA2 standard version (e.g., "1.1")
+    string vendor = 6;                // Manufacturer (e.g., "Tecan", "Opentrons")
+    string description = 7;           // Detailed description
+    string serial_number = 8;         // Hardware serial number (if applicable)
+    repeated string capabilities = 9; // List of capabilities (e.g., ["fluorescence", "absorbance", "temperature_control"])
+    map<string, string> metadata = 10;// Additional key-value pairs
+    
+    // Network info
+    string host = 11;
+    int32 port = 12;
+    
+    // Status
+    bool hardware_connected = 13;     // Is physical hardware connected?
+    string hardware_status = 14;      // Detailed hardware status
+}
+
+// =============================================================================
+//                         FEATURES MESSAGES
+// =============================================================================
+
+message GetFeaturesRequest {}
+
+message FeaturesResponse {
+    repeated Feature features = 1;
+}
+
+message Feature {
+    string identifier = 1;            // e.g., "PlateReaderService"
+    string display_name = 2;          // e.g., "Plate Reader Service"
+    string description = 3;
+    string version = 4;
+    string category = 5;              // e.g., "instrument", "controller"
+    repeated Command commands = 6;
+    repeated Property properties = 7;
+}
+
+message Command {
+    string identifier = 1;            // e.g., "RunMeasurement"
+    string display_name = 2;          // e.g., "Run Measurement"
+    string description = 3;
+    bool observable = 4;              // True if streaming response
+    repeated Parameter parameters = 5;
+    repeated Parameter responses = 6; // Expected response fields
+}
+
+message Parameter {
+    string identifier = 1;            // e.g., "target_temperature"
+    string display_name = 2;          // e.g., "Target Temperature"
+    string description = 3;
+    string data_type = 4;             // "String", "Integer", "Real", "Boolean", "Binary"
+    bool required = 5;
+    string default_value = 6;         // Default value as string
+    repeated string constraints = 7;  // Allowed values for constrained types
+}
+
+message Property {
+    string identifier = 1;
+    string display_name = 2;
+    string description = 3;
+    string data_type = 4;
+    bool observable = 5;              // True if can subscribe to changes
+    bool readonly = 6;
+}
+
+// =============================================================================
+//                         STATUS MESSAGES
+// =============================================================================
+
+message GetStatusRequest {}
+
+message StatusResponse {
+    string status = 1;                // "online", "offline", "busy", "error", "initializing"
+    bool server_online = 2;           // Is the SiLA2 server process running?
+    bool hardware_online = 3;         // Is the physical instrument connected and responding?
+    string hardware_status = 4;       // Detailed status (e.g., "idle", "measuring", "homing")
+    string error_message = 5;         // If status is "error"
+    int64 uptime_seconds = 6;         // Server uptime
+    map<string, string> details = 7;  // Additional status details
+}
+
+// =============================================================================
+//                         GENERIC COMMAND EXECUTION
+// =============================================================================
+
+message ExecuteCommandRequest {
+    string feature = 1;               // Feature identifier
+    string command = 2;               // Command identifier
+    map<string, string> parameters = 3; // Parameters as string key-value pairs
+    int32 timeout_seconds = 4;        // Command timeout (0 = default)
+}
+
+message ExecuteCommandResponse {
+    bool success = 1;
+    bool is_intermediate = 2;         // True for streaming progress updates
+    int32 progress = 3;               // 0-100 for progress updates
+    string status = 4;                // Current status message
+    map<string, string> result = 5;   // Result data as string key-value pairs
+    string error = 6;                 // Error message if !success (DEPRECATED: use sila2_error)
+    SiLA2Error sila2_error = 7;       // Structured error (SiLA2 compliant)
+}
+
+// =============================================================================
+//                         GENERIC PROPERTY ACCESS
+// =============================================================================
+
+message GetPropertyRequest {
+    string feature = 1;               // Feature identifier (optional if unique)
+    string property = 2;              // Property identifier
+}
+
+message PropertyResponse {
+    bool success = 1;
+    string value = 2;                 // Value as string
+    string data_type = 3;             // Original data type
+    string error = 4;                 // Error message if !success
+}
+// =============================================================================
+//                         SiLA2 DEFINED EXECUTION ERRORS
+// =============================================================================
+// SiLA2 standard error types for command execution failures.
+// Servers MUST return these structured errors when commands fail.
+
+message SiLA2Error {
+    string error_identifier = 1;      // e.g., "ValidationError", "ConnectionFailed"
+    string message = 2;               // Human-readable error message
+    repeated ErrorParameter parameters = 3;  // Additional structured error info
+}
+
+message ErrorParameter {
+    string identifier = 1;            // Parameter name
+    string value = 2;                 // Parameter value as string
+}
+
+// Pre-defined SiLA2 execution errors (servers should use these identifiers)
+//
+// Standard errors:
+//   - ValidationError: Invalid parameters provided
+//   - ConnectionFailed: Hardware connection lost
+//   - HardwareError: Physical hardware malfunction
+//   - TimeoutError: Operation exceeded timeout
+//   - BusyError: Device is busy with another operation
+//   - NotSupportedError: Command not supported by this device
+//   - ConfigurationError: Invalid configuration
+//   - ResourceUnavailable: Required resource not available
+//
+// Usage in ExecuteCommandResponse:
+//   response.success = false
+//   response.sila2_error.error_identifier = "ValidationError"
+//   response.sila2_error.message = "Parameter 'temperature' must be between 4 and 95"

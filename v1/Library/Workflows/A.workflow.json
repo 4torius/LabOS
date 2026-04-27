@@ -1,0 +1,24 @@
+{
+  "WorkflowName": "A",
+  "Description": "aa",
+  "CreatedBy": "DynamicWorkflowBuilder",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "Opentrons Flex",
+      "Action": "ExecuteRecipe",
+      "Parameters": {
+        "recipe": "test_case1_requirements"
+      }
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "Manual Station",
+      "Action": "RequestOperatorTask",
+      "Parameters": {
+        "task_id": "manual_task_1",
+        "task_description": "Operazione manuale richiesta"
+      }
+    }
+  ]
+}

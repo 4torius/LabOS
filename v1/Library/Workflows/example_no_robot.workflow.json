@@ -1,0 +1,46 @@
+{
+  "WorkflowName": "example_no_robot",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "OpentronsFlex",
+      "Action": "ExecuteRecipe",
+      "Parameters": {
+        "recipe": "modifiedtest1.json"
+      }
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "Manual Station",
+      "Action": "RequestOperatorTask",
+      "Parameters": {}
+    },
+    {
+      "StepNumber": 3,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "PlateOut",
+      "Parameters": {}
+    },
+    {
+      "StepNumber": 4,
+      "Instrument": "Manual Station",
+      "Action": "RequestOperatorTask",
+      "Parameters": {}
+    },
+    {
+      "StepNumber": 5,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "PlateIn",
+      "Parameters": {}
+    },
+    {
+      "StepNumber": 6,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "RunMeasurement",
+      "Parameters": {
+        "protocol": "Script1.mdfx"
+      }
+    }
+  ],
+  "CreatedAt": "2026-03-24T15:06:46.294485"
+}

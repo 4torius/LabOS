@@ -1,0 +1,26 @@
+{
+  "$schema": "./liquidclass.schema.json",
+  "name": "Foaming",
+  "loadName": "water",
+  "description": "Foaming liquids (detergents, proteins, surfactants)",
+  "basedOn": "Custom - prevents foam formation",
+  
+  "parameters": {
+    "aspirate_rate": 0.3,
+    "dispense_rate": 0.3,
+    "blow_out": false,
+    "touch_tip": true,
+    "mix_after": null,
+    "air_gap": 2,
+    "push_out": 3.0,
+    "delay_aspirate": 0.5,
+    "delay_dispense": 0.5
+  },
+  
+  "notes": [
+    "NO blow out - would create foam",
+    "NO mix - would create foam",
+    "Moderate speed to minimize turbulence",
+    "Touch tip to remove drops without agitation"
+  ]
+}

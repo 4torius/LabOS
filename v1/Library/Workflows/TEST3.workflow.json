@@ -1,0 +1,11 @@
+{
+  "WorkflowName": "test3",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "Opentrons Flex",
+      "Action": "ExecuteRecipe",
+      "Parameters": {}
+    }
+  ]
+}

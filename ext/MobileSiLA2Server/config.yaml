@@ -1,0 +1,177 @@
+# Mobile Robot SiLA2 Server Configuration
+# ========================================
+#
+# NETWORK ARCHITECTURE:
+# =====================
+# This server runs on the Robot PC (Ubuntu) connected to the mobile manipulator.
+# The Robot PC provides a WiFi hotspot for the Orchestrator PC to connect.
+#
+#   [Orchestrator PC] --WiFi--> [Robot PC Hotspot] --Ethernet--> [Mobile Robot]
+#       (Windows)                  (Ubuntu)                    (RB Kairos + ABB GoFa)
+#       Client                     This Server                  ROS
+#
+# Connection Flow:
+# 1. Robot PC starts hotspot (e.g., "RobotHotspot")
+# 2. Orchestrator PC connects to hotspot WiFi
+# 3. Orchestrator discovers this server via lab_config.yaml (host: 10.16.0.114)
+# 4. SiLA2 commands come in -> server translates to ROS actions -> robot executes
+
+server:
+  # Bind to all interfaces so orchestrator can connect via hotspot
+  host: "0.0.0.0"
+  port: 50053
+  name: "GoFaGo Mobile Robot"
+  description: "SiLA2 server for RB Kairos + ABB GoFa 15000 mobile manipulator"
+
+# ROS Connection to Robot PC
+# --------------------------
+# The server runs ON the robot PC (Ubuntu), so connect to localhost
+# The orchestrator connects to this server via SiLA2 on port 50053
+
+ros:
+  # ROS Master URI - localhost because server runs on robot PC
+  # If ROS master is on a different machine, change to http://<IP>:11311
+  master_uri: "http://localhost:11311"
+  
+  # Namespace for task execution
+  namespace: "/setup1"
+  
+  # Task execution action server
+  # Action: rpwc_msgs/executionCommandsAction (NEW API)
+  # Goal:   int32 command (0=PLAY), string tasksPath, string startTaskID, string endTaskID
+  # Result: bool success, string msg
+  # Feedback: string current_subtask, string status
+  #
+  # command values (verify with robot team):
+  #   0 = PLAY  (normal execution)
+  #   1 = STEP  (step-by-step)
+  #   2 = DRY_RUN
+  task_action:
+    name: "state_exec"
+    timeout: 300.0  # seconds
+    tasks_path: "/home/inspection/exsensia/subtask"  # Path to task definitions on robot PC
+  
+  # Task discovery service
+  # Service: getSubtaskInfo.srv
+  # - Response: tasksInfo[], result, info
+  task_service:
+    name: "getSubtasksInfo"
+    refresh_interval: 30.0  # seconds
+  
+  # Legacy topics (for status monitoring)
+  topics:
+    base_pose: "/gofa_go/base/pose"
+    battery_state: "/gofa_go/battery/state"
+    arm_state: "/gofa_go/arm/state"
+    gripper_state: "/gofa_go/gripper/state"
+  
+  # Legacy services (low-level control)
+  services:
+    navigate_to: "/gofa_go/navigate_to"
+    arm_move_to: "/gofa_go/arm/move_to"
+    gripper_control: "/gofa_go/gripper/control"
+    emergency_stop: "/gofa_go/emergency_stop"
+
+# Registered Stations
+# -------------------
+# Pre-configured pickup/place locations in the lab
+stations:
+  - name: "Home"
+    type: "Exchange"
+    x: 0.0
+    y: 0.0
+    height: 0.0
+    description: "Robot home/charging position"
+    
+  - name: "Opentrons"
+    type: "Instrument"
+    x: 1.5
+    y: 0.5
+    height: 0.85
+    description: "Opentrons Flex deck position"
+    approach_offset:
+      x: -0.3
+      y: 0.0
+    
+  - name: "Tecan"
+    type: "Instrument"
+    x: 2.0
+    y: 1.2
+    height: 0.78
+    description: "Tecan M200Pro carrier position"
+    approach_offset:
+      x: 0.0
+      y: -0.3
+    
+  - name: "Storage_A1"
+    type: "Storage"
+    x: 0.5
+    y: 2.0
+    height: 0.90
+    description: "Plate storage rack position A1"
+    
+  - name: "Storage_A2"
+    type: "Storage"
+    x: 0.5
+    y: 2.2
+    height: 0.90
+    description: "Plate storage rack position A2"
+    
+  - name: "Incubator"
+    type: "Incubator"
+    x: 3.0
+    y: 0.5
+    height: 0.95
+    description: "Incubator exchange position"
+
+# Arm Configuration
+# -----------------
+arm:
+  named_positions:
+    Home:
+      joints: [0, -90, 90, 0, 90, 0]  # degrees
+    Safe:
+      joints: [0, -45, 45, 0, 45, 0]
+    Travel:
+      joints: [0, -60, 60, 0, 60, 0]
+    Pickup:
+      # Computed per-station
+      approach_height: 0.10  # meters above
+    Place:
+      # Computed per-station
+      approach_height: 0.10  # meters above
+
+# Gripper Configuration
+# ---------------------
+gripper:
+  labware_profiles:
+    96_well_plate:
+      width: 0.085  # meters
+      grip_force: 10.0  # Newtons
+      grip_offset: 0.005  # meters from edge
+    384_well_plate:
+      width: 0.085
+      grip_force: 12.0
+      grip_offset: 0.005
+    reservoir:
+      width: 0.095
+      grip_force: 15.0
+      grip_offset: 0.010
+    tube_rack:
+      width: 0.130
+      grip_force: 20.0
+      grip_offset: 0.015
+
+# Safety Configuration
+# --------------------
+safety:
+  min_battery: 20  # Minimum battery % for operations
+  obstacle_distance: 0.3  # meters, stop if obstacle closer
+  max_velocity: 0.5  # m/s for base
+  arm_max_velocity: 0.3  # m/s for end-effector
+
+# Logging
+# -------
+logging:
+  level: "INFO"
+  file: "logs/mobile_robot.log"

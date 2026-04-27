@@ -1,0 +1,8 @@
+\babel@toc {italian}{}\relax 
+\babel@toc {italian}{}\relax 
+\contentsline {section}{\numberline {1}Sintesi Strategica e Stato dell'Arte Operativo}{2}{section.1}%
+\contentsline {section}{\numberline {2}Architettura di Sistema e Integrazione Modulare (SiLA2)}{2}{section.2}%
+\contentsline {section}{\numberline {3}Logistica Autonoma: Il Sistema GoFaGo}{2}{section.3}%
+\contentsline {section}{\numberline {4}Validazione Sperimentale: Caso Hydrogel}{2}{section.4}%
+\contentsline {section}{\numberline {5}Interfaccia No-Code e Design dei Workflow}{3}{section.5}%
+\contentsline {section}{\numberline {6}Conclusioni e Prossimi Passi}{3}{section.6}%

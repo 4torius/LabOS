@@ -1,0 +1,1266 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<style>
+    .settings-page {
+        padding-top: 20px;
+        margin-top: 10px;
+        padding-bottom: 100px;
+    }
+    
+    .settings-card {
+        background: var(--bs-dark);
+        border: 1px solid var(--bs-border-color);
+        border-radius: 10px;
+        margin-bottom: 20px;
+    }
+    
+    .settings-card .card-header {
+        background: linear-gradient(135deg, var(--bs-dark) 0%, #1a1d21 100%);
+        border-bottom: 1px solid var(--bs-border-color);
+        padding: 15px 20px;
+        font-weight: 600;
+    }
+    
+    .settings-card .card-body {
+        padding: 20px;
+    }
+    
+    .server-item {
+        background: rgba(255,255,255,0.05);
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 10px;
+        border: 1px solid var(--bs-border-color);
+    }
+    
+    .server-item.enabled {
+        border-left: 3px solid var(--bs-success);
+    }
+    
+    .server-item.disabled {
+        border-left: 3px solid var(--bs-secondary);
+        opacity: 0.7;
+    }
+    
+    .server-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+    
+    .server-name {
+        font-weight: 600;
+        font-size: 1rem;
+    }
+    
+    .setting-input {
+        background: rgba(255,255,255,0.1);
+        border: 1px solid var(--bs-border-color);
+        color: var(--bs-light);
+        padding: 8px 12px;
+        border-radius: 6px;
+    }
+    
+    .setting-input:focus {
+        outline: none;
+        border-color: var(--bs-primary);
+        background: rgba(255,255,255,0.15);
+    }
+    
+    .port-input {
+        width: 100px;
+        text-align: center;
+    }
+    
+    .number-input {
+        width: 100px;
+        text-align: center;
+    }
+    
+    .commands-textarea {
+        width: 100%;
+        min-height: 80px;
+        background: rgba(255,255,255,0.1);
+        border: 1px solid var(--bs-border-color);
+        color: var(--bs-light);
+        padding: 10px;
+        border-radius: 6px;
+        font-family: monospace;
+        font-size: 0.85rem;
+        resize: vertical;
+    }
+    
+    .commands-textarea:focus {
+        outline: none;
+        border-color: var(--bs-primary);
+        background: rgba(255,255,255,0.15);
+    }
+    
+    .save-btn {
+        position: fixed;
+        bottom: 30px;
+        right: 30px;
+        padding: 15px 30px;
+        font-size: 1.1rem;
+        box-shadow: 0 4px 15px rgba(13, 110, 253, 0.4);
+        z-index: 1000;
+    }
+    
+    .save-btn.has-changes {
+        animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+        0% { box-shadow: 0 4px 15px rgba(13, 110, 253, 0.4); }
+        50% { box-shadow: 0 4px 25px rgba(13, 110, 253, 0.8); }
+        100% { box-shadow: 0 4px 15px rgba(13, 110, 253, 0.4); }
+    }
+    
+    .status-badge {
+        font-size: 0.75rem;
+        padding: 3px 8px;
+    }
+    
+    .info-box {
+        background: rgba(13, 110, 253, 0.1);
+        border: 1px solid rgba(13, 110, 253, 0.3);
+        border-radius: 8px;
+        padding: 12px 15px;
+        margin-bottom: 15px;
+        font-size: 0.85rem;
+    }
+    
+    .info-box i {
+        color: var(--bs-info);
+    }
+    
+    .setting-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 0;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .setting-row:last-child {
+        border-bottom: none;
+    }
+    
+    .setting-label {
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .setting-label small {
+        color: var(--bs-secondary);
+        margin-top: 2px;
+    }
+    
+    .section-tabs {
+        border-bottom: 1px solid var(--bs-border-color);
+        margin-bottom: 20px;
+    }
+    
+    .section-tabs .nav-link {
+        color: var(--bs-secondary);
+        border: none;
+        padding: 10px 20px;
+    }
+    
+    .section-tabs .nav-link.active {
+        color: var(--bs-primary);
+        background: transparent;
+        border-bottom: 2px solid var(--bs-primary);
+    }
+    
+    .section-tabs .nav-link:hover:not(.active) {
+        color: var(--bs-light);
+    }
+</style>
+
+<div class="container-fluid settings-page">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-gear"></i> Settings</h2>
+        <span class="text-muted" id="config-status">Loading...</span>
+    </div>
+    
+    <!-- Navigation Tabs -->
+    <ul class="nav section-tabs" id="settingsTabs" role="tablist">
+        <li class="nav-item">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-system" type="button">
+                <i class="bi bi-cpu me-1"></i> System
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-servers" type="button">
+                <i class="bi bi-hdd-network me-1"></i> Servers
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-workflow" type="button">
+                <i class="bi bi-diagram-3 me-1"></i> Workflow
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-ui" type="button">
+                <i class="bi bi-window me-1"></i> Interface
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-paths" type="button">
+                <i class="bi bi-folder me-1"></i> Paths
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-commands" type="button">
+                <i class="bi bi-star me-1"></i> Commands
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-network" type="button">
+                <i class="bi bi-wifi me-1"></i> Network
+            </button>
+        </li>
+    </ul>
+    
+    <div class="tab-content">
+        <!-- System Tab -->
+        <div class="tab-pane fade show active" id="tab-system">
+            <div class="row">
+                <div class="col-lg-6">
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-sliders me-2"></i> General Settings
+                        </div>
+                        <div class="card-body">
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Log Level</span>
+                                    <small>Verbosity of system logs</small>
+                                </div>
+                                <select class="form-select setting-input" style="width: 140px;" id="setting-log-level" onchange="updateSetting('system.log_level', this.value)">
+                                    <option value="DEBUG">DEBUG</option>
+                                    <option value="INFO">INFO</option>
+                                    <option value="WARNING">WARNING</option>
+                                    <option value="ERROR">ERROR</option>
+                                </select>
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Auto Start Servers</span>
+                                    <small>Start SiLA2 servers automatically on launch</small>
+                                </div>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="setting-auto-start" onchange="updateSetting('system.auto_start_servers', this.checked)">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-broadcast me-2"></i> Discovery
+                        </div>
+                        <div class="card-body">
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>mDNS Discovery</span>
+                                    <small>Auto-discover SiLA2 servers on network</small>
+                                </div>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="setting-discovery-enabled" onchange="updateSetting('discovery.enabled', this.checked)">
+                                </div>
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Scan Interval</span>
+                                    <small>Seconds between discovery scans</small>
+                                </div>
+                                <input type="number" class="setting-input number-input" id="setting-scan-interval" min="5" max="300" onchange="updateSetting('discovery.scan_interval', parseInt(this.value))">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-lg-6">
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-info-circle me-2"></i> System Info
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-6 mb-3">
+                                    <small class="text-muted d-block">System Name</small>
+                                    <span id="system-name">-</span>
+                                </div>
+                                <div class="col-6 mb-3">
+                                    <small class="text-muted d-block">Version</small>
+                                    <span id="system-version">-</span>
+                                </div>
+                                <div class="col-6 mb-3">
+                                    <small class="text-muted d-block">Architecture</small>
+                                    <span>Plug & Play SiLA2</span>
+                                </div>
+                                <div class="col-6 mb-3">
+                                    <small class="text-muted d-block">Config File</small>
+                                    <code>lab_config.yaml</code>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Servers Tab -->
+        <div class="tab-pane fade" id="tab-servers">
+            <div class="row">
+                <div class="col-lg-8">
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-hdd-network me-2"></i> SiLA2 Servers
+                        </div>
+                        <div class="card-body">
+                            <div class="info-box">
+                                <i class="bi bi-info-circle me-2"></i>
+                                Configure server ports and enable/disable servers. Changes require server restart.
+                            </div>
+                            <div id="servers-list">
+                                <!-- Populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Workflow Tab -->
+        <div class="tab-pane fade" id="tab-workflow">
+            <div class="row">
+                <div class="col-lg-6">
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-gear-wide-connected me-2"></i> Execution Settings
+                        </div>
+                        <div class="card-body">
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Parallel Execution</span>
+                                    <small>Run independent workflow steps in parallel</small>
+                                </div>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="setting-parallel-exec" onchange="updateSetting('workflow.parallel_execution', this.checked)">
+                                </div>
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Default Timeout</span>
+                                    <small>Max seconds for workflow step (0 = no limit)</small>
+                                </div>
+                                <div class="input-group" style="width: 140px;">
+                                    <input type="number" class="setting-input number-input" id="setting-default-timeout" min="0" max="7200" onchange="updateSetting('workflow.default_timeout', parseInt(this.value))">
+                                    <span class="input-group-text bg-dark border-secondary text-muted">s</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-arrow-repeat me-2"></i> Error Handling
+                        </div>
+                        <div class="card-body">
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Retry on Failure</span>
+                                    <small>Automatically retry failed commands</small>
+                                </div>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="setting-retry-failure" onchange="updateSetting('workflow.retry_on_failure', this.checked)">
+                                </div>
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Max Retries</span>
+                                    <small>Maximum retry attempts per command</small>
+                                </div>
+                                <input type="number" class="setting-input number-input" id="setting-max-retries" min="0" max="10" onchange="updateSetting('workflow.max_retries', parseInt(this.value))">
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Human Intervention</span>
+                                    <small>Pause and notify operator on critical errors</small>
+                                </div>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="setting-human-intervention" onchange="updateSetting('error_handling.enable_human_intervention', this.checked)">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- UI Tab -->
+        <div class="tab-pane fade" id="tab-ui">
+            <div class="row">
+                <div class="col-lg-6">
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-window me-2"></i> Interface Settings
+                        </div>
+                        <div class="card-body">
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Auto Refresh Interval</span>
+                                    <small>Seconds between dashboard updates</small>
+                                </div>
+                                <div class="input-group" style="width: 140px;">
+                                    <input type="number" class="setting-input number-input" id="setting-refresh-interval" min="1" max="60" onchange="updateSetting('webapp.ui.auto_refresh_interval', parseInt(this.value))">
+                                    <span class="input-group-text bg-dark border-secondary text-muted">s</span>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Toast Duration</span>
+                                    <small>Seconds notifications stay visible</small>
+                                </div>
+                                <div class="input-group" style="width: 140px;">
+                                    <input type="number" class="setting-input number-input" id="setting-toast-duration" min="2" max="30" onchange="updateSetting('webapp.ui.toast_duration', parseInt(this.value))">
+                                    <span class="input-group-text bg-dark border-secondary text-muted">s</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-hourglass-split me-2"></i> Timeouts
+                        </div>
+                        <div class="card-body">
+                            <div class="info-box">
+                                <i class="bi bi-lightbulb me-2"></i>
+                                Maximum wait times for operator interventions and manual actions.
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Intervention Timeout</span>
+                                    <small>Max wait for operator response</small>
+                                </div>
+                                <div class="input-group" style="width: 140px;">
+                                    <input type="number" class="setting-input number-input" id="setting-intervention-timeout" min="60" max="86400" onchange="updateSetting('webapp.timeouts.intervention_timeout', parseInt(this.value))">
+                                    <span class="input-group-text bg-dark border-secondary text-muted">s</span>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Manual Action Timeout</span>
+                                    <small>Max wait for manual station tasks</small>
+                                </div>
+                                <div class="input-group" style="width: 140px;">
+                                    <input type="number" class="setting-input number-input" id="setting-manual-timeout" min="30" max="3600" onchange="updateSetting('webapp.timeouts.manual_action_timeout', parseInt(this.value))">
+                                    <span class="input-group-text bg-dark border-secondary text-muted">s</span>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Tip Refill Timeout</span>
+                                    <small>Max wait for tip rack refill</small>
+                                </div>
+                                <div class="input-group" style="width: 140px;">
+                                    <input type="number" class="setting-input number-input" id="setting-tiprefill-timeout" min="60" max="3600" onchange="updateSetting('webapp.timeouts.tip_refill_timeout', parseInt(this.value))">
+                                    <span class="input-group-text bg-dark border-secondary text-muted">s</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Paths Tab -->
+        <div class="tab-pane fade" id="tab-paths">
+            <div class="row">
+                <div class="col-lg-6">
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-folder me-2"></i> Library Paths
+                        </div>
+                        <div class="card-body">
+                            <div class="info-box">
+                                <i class="bi bi-info-circle me-2"></i>
+                                Paths are relative to the project root. Used for dropdown menus in workflows.
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span><i class="bi bi-file-code me-1"></i> Recipes</span>
+                                    <small>Opentrons recipe JSON files</small>
+                                </div>
+                                <input type="text" class="setting-input" style="width: 250px;" id="path-recipes" onchange="updateSetting('ui_dropdowns.recipe.folder', this.value)">
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span><i class="bi bi-graph-up me-1"></i> Analysis</span>
+                                    <small>Tecan analysis .mdfx files</small>
+                                </div>
+                                <input type="text" class="setting-input" style="width: 250px;" id="path-analysis" onchange="updateSetting('ui_dropdowns.analysis.folder', this.value)">
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span><i class="bi bi-cpu me-1"></i> HAL Configs</span>
+                                    <small>Hardware abstraction configs</small>
+                                </div>
+                                <input type="text" class="setting-input" style="width: 250px;" id="path-hal" onchange="updateSetting('ui_dropdowns.hal_config.folder', this.value)">
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span><i class="bi bi-droplet me-1"></i> Liquid Classes</span>
+                                    <small>Pipetting liquid class definitions</small>
+                                </div>
+                                <input type="text" class="setting-input" style="width: 250px;" id="path-liquid" onchange="updateSetting('ui_dropdowns.liquid_class.folder', this.value)">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-lg-6">
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-folder-check me-2"></i> Output Paths
+                        </div>
+                        <div class="card-body">
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span><i class="bi bi-diagram-3 me-1"></i> Workflows</span>
+                                    <small>Saved workflow definitions</small>
+                                </div>
+                                <input type="text" class="setting-input" style="width: 250px;" id="path-workflows" onchange="updateSetting('paths.workflows', this.value)">
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span><i class="bi bi-file-earmark-bar-graph me-1"></i> Results</span>
+                                    <small>Analysis results output</small>
+                                </div>
+                                <input type="text" class="setting-input" style="width: 250px;" id="path-results" onchange="updateSetting('paths.results', this.value)">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Labware Options Row -->
+            <div class="row mt-4">
+                <div class="col-lg-6">
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-grid-3x3 me-2"></i> Plate Catalog
+                        </div>
+                        <div class="card-body">
+                            <div class="info-box mb-3">
+                                <i class="bi bi-folder me-2"></i>
+                                Loaded from <code>Library/Labware/Plates/*.plate.json</code>. Drop a new <code>.plate.json</code> there to add a plate — no config changes needed.
+                            </div>
+                            <div id="target-plates-list">
+                                <!-- Populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-lg-6">
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-droplet me-2"></i> Liquid Classes
+                        </div>
+                        <div class="card-body">
+                            <div class="info-box mb-3">
+                                <i class="bi bi-folder me-2"></i>
+                                Loaded from <code>Library/LiquidClasses/*.json</code>. Add/edit JSON files in that folder to manage liquid classes.
+                            </div>
+                            <div id="liquid-classes-list">
+                                <!-- Populated by JavaScript - read only -->
+                            </div>
+                            <a href="/library?folder=LiquidClasses" class="btn btn-sm btn-outline-secondary mt-2">
+                                <i class="bi bi-folder-symlink"></i> Open Folder
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Commands Tab -->
+        <div class="tab-pane fade" id="tab-commands">
+            <div class="row">
+                <div class="col-lg-8">
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-star me-2"></i> Important Commands
+                        </div>
+                        <div class="card-body">
+                            <div class="info-box">
+                                <i class="bi bi-lightbulb me-2"></i>
+                                Commands marked as "important" are shown first in Dashboard. Others appear under "View All". One command per line.
+                            </div>
+                            <div id="important-commands-list">
+                                <!-- Populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Network Tab -->
+        <div class="tab-pane fade" id="tab-network">
+            <div class="row">
+                <div class="col-lg-6">
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-robot me-2"></i> Mobile Robot Network
+                        </div>
+                        <div class="card-body">
+                            <div class="info-box">
+                                <i class="bi bi-info-circle me-2"></i>
+                                The Mobile Robot server runs on a separate PC. Connect via the robot's WiFi hotspot.
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Robot IP Address</span>
+                                    <small>IP of the robot PC (hotspot gateway)</small>
+                                </div>
+                                <input type="text" class="setting-input" style="width: 160px;" id="mobile-host" placeholder="10.16.0.114" onchange="updateMobileNetwork('host', this.value)">
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>SiLA2 Port</span>
+                                    <small>Port for SiLA2 communication</small>
+                                </div>
+                                <input type="number" class="setting-input port-input" id="mobile-port" placeholder="50053" onchange="updateMobileNetwork('port', parseInt(this.value))">
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Hotspot SSID</span>
+                                    <small>WiFi network name (for reference)</small>
+                                </div>
+                                <input type="text" class="setting-input" style="width: 180px;" id="mobile-ssid" placeholder="RobotHotspot" onchange="updateMobileNetwork('network.hotspot_ssid', this.value)">
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Connection Timeout</span>
+                                    <small>Seconds to wait for connection</small>
+                                </div>
+                                <input type="number" class="setting-input number-input" id="mobile-timeout" step="0.5" min="1" max="30" placeholder="5.0" onchange="updateMobileNetwork('network.connection_timeout', parseFloat(this.value))">
+                            </div>
+                            
+                            <hr>
+                            
+                            <div class="d-flex gap-2 mt-3">
+                                <button class="btn btn-outline-primary" onclick="testMobileConnection()">
+                                    <i class="bi bi-plug"></i> Test Connection
+                                </button>
+                                <button class="btn btn-outline-secondary" onclick="refreshMobileStatus()">
+                                    <i class="bi bi-arrow-clockwise"></i> Refresh Status
+                                </button>
+                            </div>
+                            
+                            <div id="mobile-connection-status" class="mt-3" style="display: none;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-lg-6">
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-diagram-3 me-2"></i> ROS Configuration
+                        </div>
+                        <div class="card-body">
+                            <div class="info-box">
+                                <i class="bi bi-info-circle me-2"></i>
+                                ROS settings are configured on the robot PC. These values are for reference only.
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>ROS Master URI</span>
+                                    <small>Robot's ROS master address</small>
+                                </div>
+                                <input type="text" class="setting-input" style="width: 220px;" id="mobile-ros-uri" placeholder="http://localhost:11311" onchange="updateMobileNetwork('network.ros_master_uri', this.value)">
+                            </div>
+                            
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>ROS Namespace</span>
+                                    <small>Task execution namespace</small>
+                                </div>
+                                <input type="text" class="setting-input" style="width: 150px;" id="mobile-ros-namespace" placeholder="/setup1" onchange="updateMobileNetwork('network.ros_namespace', this.value)">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card settings-card mt-3">
+                        <div class="card-header">
+                            <i class="bi bi-info-circle me-2"></i> Connection Instructions
+                        </div>
+                        <div class="card-body">
+                            <ol class="small mb-0">
+                                <li class="mb-2">Ensure robot PC is on and hotspot is active</li>
+                                <li class="mb-2">Connect this PC to the robot's WiFi hotspot</li>
+                                <li class="mb-2">Verify IP settings match the robot's configuration</li>
+                                <li class="mb-2">Click "Test Connection" to verify connectivity</li>
+                                <li>The Mobile Robot should appear in Dashboard when online</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="row mt-4">
+                <div class="col-lg-12">
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-hdd-network me-2"></i> Other Remote Servers
+                        </div>
+                        <div class="card-body">
+                            <div class="info-box">
+                                <i class="bi bi-lightbulb me-2"></i>
+                                To add other remote SiLA2 servers, edit <code>lab_config.yaml</code> and set <code>remote: true</code> with the correct host/port.
+                            </div>
+                            <div id="remote-servers-list">
+                                <!-- Populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Floating Save Button -->
+    <button class="btn btn-primary save-btn" id="btnSave" onclick="saveConfig()" disabled>
+        <i class="bi bi-save me-2"></i> Save Changes
+    </button>
+</div>
+
+<script>
+var originalConfig = null;
+var currentConfig = null;
+var hasChanges = false;
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadConfig();
+});
+
+function loadConfig() {
+    document.getElementById('config-status').textContent = 'Loading...';
+    
+    fetch('/api/config')
+        .then(r => r.json())
+        .then(config => {
+            originalConfig = JSON.parse(JSON.stringify(config));
+            currentConfig = config;
+            
+            // Populate all settings
+            populateAllSettings(config);
+            renderServers(config.servers || {});
+            renderImportantCommands(config.important_commands || {});
+            
+            document.getElementById('config-status').innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> Loaded</span>';
+        })
+        .catch(err => {
+            console.error('Failed to load config:', err);
+            document.getElementById('config-status').innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> Error loading config</span>';
+        });
+}
+
+function getNestedValue(obj, path) {
+    return path.split('.').reduce((o, p) => (o && o[p] !== undefined) ? o[p] : null, obj);
+}
+
+function setNestedValue(obj, path, value) {
+    var parts = path.split('.');
+    var last = parts.pop();
+    var target = parts.reduce((o, p) => {
+        if (!o[p]) o[p] = {};
+        return o[p];
+    }, obj);
+    target[last] = value;
+}
+
+function populateAllSettings(config) {
+    // System Info
+    document.getElementById('system-name').textContent = getNestedValue(config, 'system.name') || 'LabOS';
+    document.getElementById('system-version').textContent = getNestedValue(config, 'system.version') || '2.0.0';
+    
+    // System Settings
+    var logLevel = document.getElementById('setting-log-level');
+    if (logLevel) logLevel.value = getNestedValue(config, 'system.log_level') || 'INFO';
+    
+    var autoStart = document.getElementById('setting-auto-start');
+    if (autoStart) autoStart.checked = getNestedValue(config, 'system.auto_start_servers') !== false;
+    
+    // Discovery Settings
+    var discoveryEnabled = document.getElementById('setting-discovery-enabled');
+    if (discoveryEnabled) discoveryEnabled.checked = getNestedValue(config, 'discovery.enabled') !== false;
+    
+    var scanInterval = document.getElementById('setting-scan-interval');
+    if (scanInterval) scanInterval.value = getNestedValue(config, 'discovery.scan_interval') || 30;
+    
+    // Workflow Settings
+    var parallelExec = document.getElementById('setting-parallel-exec');
+    if (parallelExec) parallelExec.checked = getNestedValue(config, 'workflow.parallel_execution') !== false;
+    
+    var defaultTimeout = document.getElementById('setting-default-timeout');
+    if (defaultTimeout) defaultTimeout.value = getNestedValue(config, 'workflow.default_timeout') || 600;
+    
+    var retryFailure = document.getElementById('setting-retry-failure');
+    if (retryFailure) retryFailure.checked = getNestedValue(config, 'workflow.retry_on_failure') === true;
+    
+    var maxRetries = document.getElementById('setting-max-retries');
+    if (maxRetries) maxRetries.value = getNestedValue(config, 'workflow.max_retries') || 3;
+    
+    // Error Handling
+    var humanIntervention = document.getElementById('setting-human-intervention');
+    if (humanIntervention) humanIntervention.checked = getNestedValue(config, 'error_handling.enable_human_intervention') !== false;
+    
+    // UI Settings
+    var refreshInterval = document.getElementById('setting-refresh-interval');
+    if (refreshInterval) refreshInterval.value = getNestedValue(config, 'webapp.ui.auto_refresh_interval') || 3;
+    
+    var toastDuration = document.getElementById('setting-toast-duration');
+    if (toastDuration) toastDuration.value = getNestedValue(config, 'webapp.ui.toast_duration') || 5;
+    
+    // Timeouts
+    var interventionTimeout = document.getElementById('setting-intervention-timeout');
+    if (interventionTimeout) interventionTimeout.value = getNestedValue(config, 'webapp.timeouts.intervention_timeout') || 3600;
+    
+    var manualTimeout = document.getElementById('setting-manual-timeout');
+    if (manualTimeout) manualTimeout.value = getNestedValue(config, 'webapp.timeouts.manual_action_timeout') || 300;
+    
+    var tipRefillTimeout = document.getElementById('setting-tiprefill-timeout');
+    if (tipRefillTimeout) tipRefillTimeout.value = getNestedValue(config, 'webapp.timeouts.tip_refill_timeout') || 600;
+    
+    // Paths - Library
+    var pathRecipes = document.getElementById('path-recipes');
+    if (pathRecipes) pathRecipes.value = getNestedValue(config, 'ui_dropdowns.recipe.folder') || 'Library/Recipes';
+    
+    var pathAnalysis = document.getElementById('path-analysis');
+    if (pathAnalysis) pathAnalysis.value = getNestedValue(config, 'ui_dropdowns.analysis.folder') || 'Library/Analysis';
+    
+    var pathHal = document.getElementById('path-hal');
+    if (pathHal) pathHal.value = getNestedValue(config, 'ui_dropdowns.hal_config.folder') || 'Library/HardwareConfig';
+    
+    var pathLiquid = document.getElementById('path-liquid');
+    if (pathLiquid) pathLiquid.value = getNestedValue(config, 'ui_dropdowns.liquid_class.folder') || 'Library/LiquidClasses';
+    
+    // Paths - Output
+    var pathWorkflows = document.getElementById('path-workflows');
+    if (pathWorkflows) pathWorkflows.value = getNestedValue(config, 'paths.workflows') || 'Library/Workflows';
+    
+    var pathResults = document.getElementById('path-results');
+    if (pathResults) pathResults.value = getNestedValue(config, 'paths.results') || 'Results';
+    
+    // Plate catalog (read from Library/Labware/Plates/)
+    renderTargetPlates();
+    
+    // Load liquid classes from API (read from folder)
+    loadLiquidClassesFromFolder();
+    
+    // Mobile network settings
+    populateMobileNetworkSettings(config);
+}
+
+// Load liquid classes from Library/LiquidClasses folder
+function loadLiquidClassesFromFolder() {
+    fetch('/api/files/liquidclasses')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            renderLiquidClasses(data.classes || {});
+        })
+        .catch(function(e) {
+            console.error('Error loading liquid classes:', e);
+            renderLiquidClasses({});
+        });
+}
+
+function updateSetting(path, value) {
+    setNestedValue(currentConfig, path, value);
+    markChanged();
+}
+
+function renderServers(servers) {
+    var container = document.getElementById('servers-list');
+    var html = '';
+    
+    for (var key in servers) {
+        var srv = servers[key];
+        var enabledClass = srv.enabled ? 'enabled' : 'disabled';
+        var statusBadge = srv.enabled ? 
+            '<span class="badge bg-success status-badge">Enabled</span>' : 
+            '<span class="badge bg-secondary status-badge">Disabled</span>';
+        var remoteLabel = srv.remote ? '<span class="badge bg-info status-badge ms-1">Remote</span>' : '';
+        
+        html += `
+            <div class="server-item ${enabledClass}" data-server="${key}">
+                <div class="server-header">
+                    <span class="server-name">${srv.name || key} ${remoteLabel}</span>
+                    <div class="d-flex align-items-center gap-2">
+                        ${statusBadge}
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" 
+                                   id="enable-${key}" 
+                                   ${srv.enabled ? 'checked' : ''} 
+                                   onchange="toggleServer('${key}', this.checked)">
+                        </div>
+                    </div>
+                </div>
+                <div class="row align-items-center mt-2">
+                    <div class="col-auto">
+                        <small class="text-muted">Host:</small>
+                        <input type="text" class="setting-input ms-2" style="width: 140px;"
+                               value="${srv.host || 'localhost'}" 
+                               onchange="updateServerHost('${key}', this.value)">
+                    </div>
+                    <div class="col-auto">
+                        <small class="text-muted">Port:</small>
+                        <input type="number" class="setting-input port-input ms-2" 
+                               value="${srv.port || 50051}" 
+                               onchange="updateServerPort('${key}', this.value)">
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html || '<p class="text-muted">No servers configured</p>';
+}
+
+function renderImportantCommands(commands) {
+    var container = document.getElementById('important-commands-list');
+    if (!container) return;
+    
+    var html = '';
+    
+    // Define instrument icons
+    var icons = {
+        'tecan': 'bi-eye-fill text-success',
+        'opentrons': 'bi-droplet-fill text-primary',
+        'mobile': 'bi-robot text-warning',
+        'incubator': 'bi-thermometer-half text-danger',
+        'manual_station': 'bi-person-fill text-info',
+        '_default': 'bi-gear text-secondary'
+    };
+    
+    // Define order
+    var order = ['tecan', 'opentrons', 'mobile', 'manual_station', 'incubator', '_default'];
+    var sortedKeys = Object.keys(commands).sort((a, b) => {
+        var ai = order.indexOf(a);
+        var bi = order.indexOf(b);
+        if (ai === -1) ai = order.length;
+        if (bi === -1) bi = order.length;
+        return ai - bi;
+    });
+    
+    for (var i = 0; i < sortedKeys.length; i++) {
+        var key = sortedKeys[i];
+        var cmds = commands[key] || [];
+        var icon = icons[key] || 'bi-cpu';
+        var label = key === '_default' ? 'Default (new servers)' : key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        
+        html += `
+            <div class="mb-3">
+                <label class="form-label">
+                    <i class="bi ${icon} me-1"></i> ${label}
+                </label>
+                <textarea class="commands-textarea" 
+                          data-instrument="${key}"
+                          onchange="updateImportantCommands('${key}', this.value)"
+                          placeholder="One command per line...">${cmds.join('\n')}</textarea>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html || '<p class="text-muted">No commands configured</p>';
+}
+
+function toggleServer(serverKey, enabled) {
+    if (currentConfig.servers && currentConfig.servers[serverKey]) {
+        currentConfig.servers[serverKey].enabled = enabled;
+        markChanged();
+        renderServers(currentConfig.servers);
+    }
+}
+
+function updateServerPort(serverKey, port) {
+    if (currentConfig.servers && currentConfig.servers[serverKey]) {
+        currentConfig.servers[serverKey].port = parseInt(port);
+        markChanged();
+    }
+}
+
+function updateServerHost(serverKey, host) {
+    if (currentConfig.servers && currentConfig.servers[serverKey]) {
+        currentConfig.servers[serverKey].host = host;
+        markChanged();
+    }
+}
+
+function updateImportantCommands(instrument, value) {
+    var commands = value.split('\n').map(c => c.trim()).filter(c => c.length > 0);
+    if (!currentConfig.important_commands) {
+        currentConfig.important_commands = {};
+    }
+    currentConfig.important_commands[instrument] = commands;
+    markChanged();
+}
+
+// Plate Catalog display (read-only, loaded from Library/Labware/Plates/)
+async function renderTargetPlates() {
+    var container = document.getElementById('target-plates-list');
+    if (!container) return;
+    try {
+        var resp = await fetch('/api/library/plates');
+        var data = await resp.json();
+        var plates = data.plates || [];
+        if (!plates.length) {
+            container.innerHTML = '<p class="text-muted small">No plates found in Library/Labware/Plates/</p>';
+            return;
+        }
+        var html = plates.map(function(p) {
+            return '<div class="setting-row">' +
+                '<span class="me-2 badge bg-secondary">' + (p.format || p.category) + '</span>' +
+                '<code class="me-2 small">' + p.id + '</code>' +
+                '<span class="text-muted small">' + p.display_name + ' &mdash; ' + p.total_wells + ' wells, ' + p.max_volume_ul + '&thinsp;&micro;L</span>' +
+                '</div>';
+        }).join('');
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = '<p class="text-muted small">Failed to load plate catalog</p>';
+    }
+}
+
+// Liquid Classes display (read-only, loaded from folder)
+function renderLiquidClasses(classes) {
+    var container = document.getElementById('liquid-classes-list');
+    if (!container) return;
+    
+    var html = '';
+    for (var key in classes) {
+        var info = classes[key];
+        var displayName = typeof info === 'object' ? info.displayName : info;
+        var description = typeof info === 'object' ? info.description : '';
+        html += `
+            <div class="d-flex align-items-center gap-2 mb-2 p-2 bg-dark rounded">
+                <span class="badge bg-secondary">${key}</span>
+                <span class="text-light">${displayName}</span>
+                ${description ? `<small class="text-muted ms-auto" title="${description}"><i class="bi bi-info-circle"></i></small>` : ''}
+            </div>
+        `;
+    }
+    container.innerHTML = html || '<p class="text-muted small">No liquid classes found in folder</p>';
+}
+
+function markChanged() {
+    hasChanges = true;
+    var btn = document.getElementById('btnSave');
+    btn.disabled = false;
+    btn.classList.add('has-changes');
+    document.getElementById('config-status').innerHTML = '<span class="text-warning"><i class="bi bi-exclamation-circle"></i> Unsaved changes</span>';
+}
+
+function saveConfig() {
+    var btn = document.getElementById('btnSave');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split me-2"></i> Saving...';
+    
+    fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(currentConfig)
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.status === 'ok') {
+            hasChanges = false;
+            originalConfig = JSON.parse(JSON.stringify(currentConfig));
+            btn.classList.remove('has-changes');
+            btn.innerHTML = '<i class="bi bi-check-lg me-2"></i> Saved!';
+            document.getElementById('config-status').innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> Saved</span>';
+            
+            setTimeout(() => {
+                btn.innerHTML = '<i class="bi bi-save me-2"></i> Save Changes';
+            }, 2000);
+        } else {
+            throw new Error(result.message || 'Save failed');
+        }
+    })
+    .catch(err => {
+        console.error('Save failed:', err);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-x-lg me-2"></i> Error!';
+        document.getElementById('config-status').innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> Save failed</span>';
+        
+        setTimeout(() => {
+            btn.innerHTML = '<i class="bi bi-save me-2"></i> Save Changes';
+        }, 2000);
+    });
+}
+
+// Mobile Network Settings
+
+function populateMobileNetworkSettings(config) {
+    var mobile = getNestedValue(config, 'servers.mobile') || {};
+    var network = mobile.network || {};
+    
+    // Basic settings
+    var hostInput = document.getElementById('mobile-host');
+    if (hostInput) hostInput.value = mobile.host || '10.16.0.114';
+    
+    var portInput = document.getElementById('mobile-port');
+    if (portInput) portInput.value = mobile.port || 50053;
+    
+    var ssidInput = document.getElementById('mobile-ssid');
+    if (ssidInput) ssidInput.value = network.hotspot_ssid || '';
+    
+    var timeoutInput = document.getElementById('mobile-timeout');
+    if (timeoutInput) timeoutInput.value = network.connection_timeout || 5.0;
+    
+    // ROS settings
+    var rosUriInput = document.getElementById('mobile-ros-uri');
+    if (rosUriInput) rosUriInput.value = network.ros_master_uri || 'http://localhost:11311';
+    
+    var rosNamespaceInput = document.getElementById('mobile-ros-namespace');
+    if (rosNamespaceInput) rosNamespaceInput.value = network.ros_namespace || '/setup1';
+    
+    // Render remote servers list
+    renderRemoteServers(config.servers || {});
+}
+
+function updateMobileNetwork(field, value) {
+    // Handle different field paths
+    if (field === 'host') {
+        setNestedValue(currentConfig, 'servers.mobile.host', value);
+    } else if (field === 'port') {
+        setNestedValue(currentConfig, 'servers.mobile.port', value);
+    } else if (field.startsWith('network.')) {
+        // e.g., 'network.hotspot_ssid' -> 'servers.mobile.network.hotspot_ssid'
+        setNestedValue(currentConfig, 'servers.mobile.' + field, value);
+    }
+    markChanged();
+}
+
+function renderRemoteServers(servers) {
+    var container = document.getElementById('remote-servers-list');
+    if (!container) return;
+    
+    var html = '';
+    for (var key in servers) {
+        var srv = servers[key];
+        if (!srv.remote) continue;
+        if (key === 'mobile') continue; // Skip mobile, has its own section
+        
+        var statusClass = srv.enabled ? 'bg-success' : 'bg-secondary';
+        html += `
+            <div class="d-flex align-items-center gap-3 p-2 bg-dark rounded mb-2">
+                <span class="badge ${statusClass}">${srv.enabled ? 'Enabled' : 'Disabled'}</span>
+                <strong>${srv.name || key}</strong>
+                <code class="text-muted">${srv.host}:${srv.port}</code>
+            </div>
+        `;
+    }
+    container.innerHTML = html || '<p class="text-muted small">No other remote servers configured</p>';
+}
+
+async function testMobileConnection() {
+    var statusDiv = document.getElementById('mobile-connection-status');
+    statusDiv.style.display = 'block';
+    statusDiv.className = 'mt-3 alert alert-info';
+    statusDiv.innerHTML = '<i class="bi bi-hourglass-split"></i> Testing connection...';
+    
+    var host = document.getElementById('mobile-host').value || '10.16.0.114';
+    var port = document.getElementById('mobile-port').value || 50053;
+    
+    try {
+        var response = await fetch('/api/network/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ host: host, port: parseInt(port) })
+        });
+        var result = await response.json();
+        
+        if (result.reachable) {
+            statusDiv.className = 'mt-3 alert alert-success';
+            statusDiv.innerHTML = `
+                <i class="bi bi-check-circle"></i> <strong>Connection successful!</strong><br>
+                <small>Server at ${host}:${port} is reachable (${result.latency_ms}ms)</small>
+                ${result.server_name ? `<br><small>Server: ${result.server_name}</small>` : ''}
+            `;
+        } else {
+            statusDiv.className = 'mt-3 alert alert-danger';
+            statusDiv.innerHTML = `
+                <i class="bi bi-x-circle"></i> <strong>Connection failed</strong><br>
+                <small>${result.error || 'Could not reach ' + host + ':' + port}</small>
+            `;
+        }
+    } catch (e) {
+        statusDiv.className = 'mt-3 alert alert-danger';
+        statusDiv.innerHTML = `
+            <i class="bi bi-x-circle"></i> <strong>Test failed</strong><br>
+            <small>${e.message}</small>
+        `;
+    }
+}
+
+async function refreshMobileStatus() {
+    var statusDiv = document.getElementById('mobile-connection-status');
+    statusDiv.style.display = 'block';
+    statusDiv.className = 'mt-3 alert alert-secondary';
+    statusDiv.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Checking status...';
+    
+    try {
+        var response = await fetch('/api/devices');
+        var devices = await response.json();
+        
+        var mobile = devices.find(d => d.id && d.id.includes('mobile'));
+        if (mobile) {
+            var statusClass = mobile.status === 'online' ? 'alert-success' : 'alert-warning';
+            statusDiv.className = 'mt-3 alert ' + statusClass;
+            statusDiv.innerHTML = `
+                <i class="bi bi-robot"></i> <strong>${mobile.name || 'Mobile Robot'}</strong><br>
+                <small>Status: ${mobile.status}</small>
+                ${mobile.hardware_status ? `<br><small>Hardware: ${mobile.hardware_status}</small>` : ''}
+            `;
+        } else {
+            statusDiv.className = 'mt-3 alert alert-warning';
+            statusDiv.innerHTML = `
+                <i class="bi bi-question-circle"></i> Mobile Robot not discovered<br>
+                <small>Check if server is running and network is connected</small>
+            `;
+        }
+    } catch (e) {
+        statusDiv.className = 'mt-3 alert alert-danger';
+        statusDiv.innerHTML = `<i class="bi bi-x-circle"></i> Error: ${e.message}`;
+    }
+}
+</script>
+{% endblock %}

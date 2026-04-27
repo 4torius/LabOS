@@ -1,0 +1,358 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Feature SiLA2Version="1.1" FeatureVersion="1.0.0" MaturityLevel="Draft"
+         Originator="it.chemicallab" Category="operator"
+         xmlns="http://www.sila-standard.org"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://www.sila-standard.org https://gitlab.com/SiLA2/sila_base/raw/master/schema/FeatureDefinition.xsd">
+    
+    <Identifier>ManualStation</Identifier>
+    <DisplayName>Manual Station Controller</DisplayName>
+    <Description>
+        Virtual station for operator interactions in automated workflows.
+        Handles manual tasks that require human intervention, notifications,
+        and confirmation of completed operations.
+        
+        Use cases:
+        - Manual operations in complex workflows (e.g., "add reagent manually")
+        - Tip refill notifications when Opentrons runs low
+        - Quality control checkpoints
+        - Sample preparation steps
+    </Description>
+    
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!--                            COMMANDS                                  -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    
+    <Command>
+        <Identifier>RequestOperatorTask</Identifier>
+        <DisplayName>Request Operator Task</DisplayName>
+        <Description>
+            Request the operator to perform a manual task.
+            The workflow will wait until the operator confirms completion.
+            A notification is sent to all connected clients (CLI, WebApp).
+        </Description>
+        <Observable>Yes</Observable>
+        <Parameter>
+            <Identifier>TaskDescription</Identifier>
+            <DisplayName>Task Description</DisplayName>
+            <Description>Description of the task for the operator to perform.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Parameter>
+            <Identifier>TaskType</Identifier>
+            <DisplayName>Task Type</DisplayName>
+            <Description>Type of task (manual_operation, tip_refill, quality_check, sample_prep, custom).</Description>
+            <DataType>
+                <Constrained>
+                    <DataType>
+                        <Basic>String</Basic>
+                    </DataType>
+                    <Constraints>
+                        <Set>
+                            <Value>manual_operation</Value>
+                            <Value>tip_refill</Value>
+                            <Value>quality_check</Value>
+                            <Value>sample_prep</Value>
+                            <Value>custom</Value>
+                        </Set>
+                    </Constraints>
+                </Constrained>
+            </DataType>
+        </Parameter>
+        <Parameter>
+            <Identifier>Priority</Identifier>
+            <DisplayName>Priority</DisplayName>
+            <Description>Task priority (low, normal, high, urgent).</Description>
+            <DataType>
+                <Constrained>
+                    <DataType>
+                        <Basic>String</Basic>
+                    </DataType>
+                    <Constraints>
+                        <Set>
+                            <Value>low</Value>
+                            <Value>normal</Value>
+                            <Value>high</Value>
+                            <Value>urgent</Value>
+                        </Set>
+                    </Constraints>
+                </Constrained>
+            </DataType>
+        </Parameter>
+        <Parameter>
+            <Identifier>SourceInstrument</Identifier>
+            <DisplayName>Source Instrument</DisplayName>
+            <Description>The instrument that requested this task (e.g., "Opentrons Flex").</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Parameter>
+            <Identifier>TimeoutSeconds</Identifier>
+            <DisplayName>Timeout (seconds)</DisplayName>
+            <Description>Maximum time to wait for operator response (0 = no timeout).</Description>
+            <DataType>
+                <Basic>Integer</Basic>
+            </DataType>
+        </Parameter>
+        <Response>
+            <Identifier>TaskId</Identifier>
+            <DisplayName>Task ID</DisplayName>
+            <Description>Unique identifier for tracking this task.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+        <IntermediateResponse>
+            <Identifier>TaskStatus</Identifier>
+            <DisplayName>Task Status</DisplayName>
+            <Description>Current status of the task (pending, in_progress, completed, cancelled, timeout).</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </IntermediateResponse>
+        <DefinedExecutionErrors>
+            <Identifier>TaskCancelled</Identifier>
+            <Identifier>TaskTimeout</Identifier>
+        </DefinedExecutionErrors>
+    </Command>
+    
+    <Command>
+        <Identifier>ConfirmTaskComplete</Identifier>
+        <DisplayName>Confirm Task Complete</DisplayName>
+        <Description>
+            Called by the operator to confirm that a manual task has been completed.
+            This releases the workflow to continue.
+        </Description>
+        <Observable>No</Observable>
+        <Parameter>
+            <Identifier>TaskId</Identifier>
+            <DisplayName>Task ID</DisplayName>
+            <Description>ID of the task to confirm.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Parameter>
+            <Identifier>Notes</Identifier>
+            <DisplayName>Notes</DisplayName>
+            <Description>Optional notes from the operator about the completed task.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Response>
+            <Identifier>ConfirmationResult</Identifier>
+            <DisplayName>Confirmation Result</DisplayName>
+            <Description>Result of the confirmation.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+        <DefinedExecutionErrors>
+            <Identifier>TaskNotFound</Identifier>
+            <Identifier>TaskAlreadyCompleted</Identifier>
+        </DefinedExecutionErrors>
+    </Command>
+    
+    <Command>
+        <Identifier>CancelTask</Identifier>
+        <DisplayName>Cancel Task</DisplayName>
+        <Description>Cancel a pending operator task.</Description>
+        <Observable>No</Observable>
+        <Parameter>
+            <Identifier>TaskId</Identifier>
+            <DisplayName>Task ID</DisplayName>
+            <Description>ID of the task to cancel.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Parameter>
+            <Identifier>Reason</Identifier>
+            <DisplayName>Reason</DisplayName>
+            <Description>Reason for cancellation.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Response>
+            <Identifier>CancelResult</Identifier>
+            <DisplayName>Cancel Result</DisplayName>
+            <Description>Result of the cancellation.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+        <DefinedExecutionErrors>
+            <Identifier>TaskNotFound</Identifier>
+        </DefinedExecutionErrors>
+    </Command>
+    
+    <Command>
+        <Identifier>GetActiveTasks</Identifier>
+        <DisplayName>Get Active Tasks</DisplayName>
+        <Description>Get all currently active (pending or in progress) operator tasks.</Description>
+        <Observable>No</Observable>
+        <Response>
+            <Identifier>ActiveTasks</Identifier>
+            <DisplayName>Active Tasks</DisplayName>
+            <Description>JSON list of active tasks with their details.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+    </Command>
+    
+    <Command>
+        <Identifier>GetTaskHistory</Identifier>
+        <DisplayName>Get Task History</DisplayName>
+        <Description>Get history of completed and cancelled tasks.</Description>
+        <Observable>No</Observable>
+        <Parameter>
+            <Identifier>Limit</Identifier>
+            <DisplayName>Limit</DisplayName>
+            <Description>Maximum number of tasks to return.</Description>
+            <DataType>
+                <Basic>Integer</Basic>
+            </DataType>
+        </Parameter>
+        <Response>
+            <Identifier>TaskHistory</Identifier>
+            <DisplayName>Task History</DisplayName>
+            <Description>JSON list of historical tasks.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+    </Command>
+    
+    <Command>
+        <Identifier>SendNotification</Identifier>
+        <DisplayName>Send Notification</DisplayName>
+        <Description>
+            Send a notification to the operator without requiring confirmation.
+            Used for informational messages.
+        </Description>
+        <Observable>No</Observable>
+        <Parameter>
+            <Identifier>Message</Identifier>
+            <DisplayName>Message</DisplayName>
+            <Description>Notification message text.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Parameter>
+            <Identifier>Level</Identifier>
+            <DisplayName>Level</DisplayName>
+            <Description>Notification level (info, warning, error).</Description>
+            <DataType>
+                <Constrained>
+                    <DataType>
+                        <Basic>String</Basic>
+                    </DataType>
+                    <Constraints>
+                        <Set>
+                            <Value>info</Value>
+                            <Value>warning</Value>
+                            <Value>error</Value>
+                        </Set>
+                    </Constraints>
+                </Constrained>
+            </DataType>
+        </Parameter>
+        <Parameter>
+            <Identifier>SourceInstrument</Identifier>
+            <DisplayName>Source Instrument</DisplayName>
+            <Description>The instrument that sent this notification.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Response>
+            <Identifier>NotificationId</Identifier>
+            <DisplayName>Notification ID</DisplayName>
+            <Description>Unique identifier for the notification.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+    </Command>
+    
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!--                           PROPERTIES                                 -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    
+    <Property>
+        <Identifier>StationStatus</Identifier>
+        <DisplayName>Station Status</DisplayName>
+        <Description>Current status of the manual station (idle, waiting_for_operator, busy).</Description>
+        <Observable>Yes</Observable>
+        <DataType>
+            <Constrained>
+                <DataType>
+                    <Basic>String</Basic>
+                </DataType>
+                <Constraints>
+                    <Set>
+                        <Value>idle</Value>
+                        <Value>waiting_for_operator</Value>
+                        <Value>busy</Value>
+                    </Set>
+                </Constraints>
+            </Constrained>
+        </DataType>
+    </Property>
+    
+    <Property>
+        <Identifier>PendingTaskCount</Identifier>
+        <DisplayName>Pending Task Count</DisplayName>
+        <Description>Number of tasks waiting for operator action.</Description>
+        <Observable>Yes</Observable>
+        <DataType>
+            <Basic>Integer</Basic>
+        </DataType>
+    </Property>
+    
+    <Property>
+        <Identifier>LastNotification</Identifier>
+        <DisplayName>Last Notification</DisplayName>
+        <Description>The most recent notification message (JSON with timestamp, message, level, source).</Description>
+        <Observable>Yes</Observable>
+        <DataType>
+            <Basic>String</Basic>
+        </DataType>
+    </Property>
+    
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!--                       DEFINED EXECUTION ERRORS                       -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    
+    <DefinedExecutionError>
+        <Identifier>TaskNotFound</Identifier>
+        <DisplayName>Task Not Found</DisplayName>
+        <Description>The specified task ID was not found.</Description>
+    </DefinedExecutionError>
+    
+    <DefinedExecutionError>
+        <Identifier>TaskAlreadyCompleted</Identifier>
+        <DisplayName>Task Already Completed</DisplayName>
+        <Description>The task has already been completed or cancelled.</Description>
+    </DefinedExecutionError>
+    
+    <DefinedExecutionError>
+        <Identifier>TaskCancelled</Identifier>
+        <DisplayName>Task Cancelled</DisplayName>
+        <Description>The task was cancelled before completion.</Description>
+    </DefinedExecutionError>
+    
+    <DefinedExecutionError>
+        <Identifier>TaskTimeout</Identifier>
+        <DisplayName>Task Timeout</DisplayName>
+        <Description>The operator did not respond within the timeout period.</Description>
+    </DefinedExecutionError>
+    
+</Feature>

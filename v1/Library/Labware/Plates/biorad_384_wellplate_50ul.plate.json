@@ -1,0 +1,58 @@
+{
+  "id": "biorad_384_wellplate_50ul",
+  "display_name": "Bio-Rad 384 Well Plate 50 µL",
+  "category": "wellPlate",
+  "format": "384Standard",
+  "rows": 16,
+  "columns": 24,
+  "total_wells": 384,
+  "row_labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P"
+  ],
+  "max_volume_ul": 50,
+  "working_volume_ul": 40,
+  "well_shape": "circular",
+  "well_diameter_mm": 3.1,
+  "well_depth_mm": 9.35,
+  "dimensions_mm": {
+    "x": 127.76,
+    "y": 85.48,
+    "z": 10.4
+  },
+  "bottom_type": "flat",
+  "instruments": [
+    "opentrons",
+    "tecan"
+  ],
+  "opentrons_load_name": "biorad_384_wellplate_50ul",
+  "tecan_compatible": true,
+  "brand": "Bio-Rad",
+  "catalog_numbers": [
+    "HSP3805",
+    "HSP3801",
+    "HSP3901",
+    "HSP4801"
+  ],
+  "tags": [
+    "384-well",
+    "pcr",
+    "high-throughput",
+    "low-volume"
+  ],
+  "notes": "Bio-Rad 384-well PCR plate. 16 rows (A-P) × 24 columns."
+}

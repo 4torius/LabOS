@@ -1,0 +1,28 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<TecanFile xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="tecan.at.schema.documents Main.xsd" fileformat="Tecan.At.Measurement" fileversion="2.0" xmlns="tecan.at.schema.documents">
+    <FileInfo type="" instrument="infinite 200Pro" version="" createdFrom="inspection" createdAt="2025-11-14T13:01:16.5408599Z" createdWith="Tecan.At.XFluor.ReaderEditor.XFluorReaderEditor" description="" />
+    <TecanMeasurement id="1" class="">
+        <MeasurementManualCycle id="2" number="1" type="Standard">
+            <CyclePlate id="3" file="COS24ft" plateWithCover="False">
+                <PlateRange id="0" range="A1~D6" auto="true">
+                    <MeasurementLuminescence id="4" mode="Normal" type="" name="LUMI" longname="" description="" dualColor="false">
+                        <Well id="5" auto="true">
+                            <MeasurementReading id="6" name="" beamDiameter="0" beamGridType="Single" beamGridSize="0" beamEdgeDistance="">
+                                <ReadingLabel id="7" name="Label1" scanType="ScanFixed" refID="0">
+                                    <ReadingTime integrationTime="1000000" lagTime="0" readDelay="0" flash="0" dark="0" excitationTime="0" />
+                                    <ReadingFilter id="8" type="Em" wavelength="0" bandwidth="0" attenuation="0" usage="EMPTY" compatibility="" />
+                                </ReadingLabel>
+                            </MeasurementReading>
+                        </Well>
+                    </MeasurementLuminescence>
+                </PlateRange>
+            </CyclePlate>
+        </MeasurementManualCycle>
+        <MeasurementInfo id="0" description="">
+            <ScriptTemplateSettings id="0">
+                <ScriptTemplateGeneralSettings id="0" Title="" Group="" Info="" Image="" />
+                <ScriptTemplateDescriptionSettings id="0" Internal="" External="" IsExternal="False" />
+            </ScriptTemplateSettings>
+        </MeasurementInfo>
+    </TecanMeasurement>
+</TecanFile>

@@ -1,0 +1,121 @@
+{
+  "ProtocolName": "Test_10_Tips",
+  "Description": "Test per esaurimento tip rack - usa 10 tips (1 rack completo)",
+  "Requirements": {
+    "MyTips": "MyTips",
+    "MyPlate": "MyPlate",
+    "MyTrash": "MyTrash"
+  },
+  "Steps": [
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A1",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A2",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A3",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A4",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A5",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A6",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A7",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A8",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A9",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A10",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    }
+  ]
+}

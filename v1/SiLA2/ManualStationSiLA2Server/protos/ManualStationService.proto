@@ -1,0 +1,163 @@
+syntax = "proto3";
+
+package it.chemlab.manualstation;
+
+option csharp_namespace = "ManualStationSiLA2Server.Features";
+
+// =============================================================================
+// Manual Station Service
+// =============================================================================
+// Virtual station for operator interactions in automated workflows.
+// Handles manual tasks, notifications, and confirmations.
+
+service ManualStationService {
+    // ═══════════════════════════════════════════════════════════════════════
+    // OBSERVABLE PROPERTIES
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    // Station status (idle, waiting_for_operator, busy)
+    rpc GetStationStatus(GetStationStatusRequest) returns (GetStationStatusResponse);
+    rpc SubscribeStationStatus(SubscribeStationStatusRequest) returns (stream GetStationStatusResponse);
+    
+    // Pending task count
+    rpc GetPendingTaskCount(GetPendingTaskCountRequest) returns (GetPendingTaskCountResponse);
+    rpc SubscribePendingTaskCount(SubscribePendingTaskCountRequest) returns (stream GetPendingTaskCountResponse);
+    
+    // Last notification
+    rpc GetLastNotification(GetLastNotificationRequest) returns (GetLastNotificationResponse);
+    rpc SubscribeLastNotification(SubscribeLastNotificationRequest) returns (stream GetLastNotificationResponse);
+    
+    // ═══════════════════════════════════════════════════════════════════════
+    // COMMANDS
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    // Request operator task (blocking until confirmed or timeout)
+    rpc RequestOperatorTask(RequestOperatorTaskRequest) returns (stream RequestOperatorTaskResponse);
+    
+    // Confirm task completed
+    rpc ConfirmTaskComplete(ConfirmTaskCompleteRequest) returns (ConfirmTaskCompleteResponse);
+    
+    // Cancel a pending task
+    rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+    
+    // Get active tasks
+    rpc GetActiveTasks(GetActiveTasksRequest) returns (GetActiveTasksResponse);
+    
+    // Get task history
+    rpc GetTaskHistory(GetTaskHistoryRequest) returns (GetTaskHistoryResponse);
+    
+    // Send notification (non-blocking)
+    rpc SendNotification(SendNotificationRequest) returns (SendNotificationResponse);
+}
+
+// =============================================================================
+// PROPERTY MESSAGES
+// =============================================================================
+
+// StationStatus
+message GetStationStatusRequest {}
+message SubscribeStationStatusRequest {}
+message GetStationStatusResponse {
+    string status = 1;  // idle, waiting_for_operator, busy
+}
+
+// PendingTaskCount
+message GetPendingTaskCountRequest {}
+message SubscribePendingTaskCountRequest {}
+message GetPendingTaskCountResponse {
+    int32 count = 1;
+}
+
+// LastNotification
+message GetLastNotificationRequest {}
+message SubscribeLastNotificationRequest {}
+message GetLastNotificationResponse {
+    string notification_json = 1;  // JSON with timestamp, message, level, source
+}
+
+// =============================================================================
+// COMMAND MESSAGES
+// =============================================================================
+
+// RequestOperatorTask
+message RequestOperatorTaskRequest {
+    string task_description = 1;
+    string task_type = 2;           // manual_operation, tip_refill, quality_check, sample_prep, custom
+    string priority = 3;            // low, normal, high, urgent
+    string source_instrument = 4;   // e.g., "Opentrons Flex"
+    int32 timeout_seconds = 5;      // 0 = no timeout
+}
+
+message RequestOperatorTaskResponse {
+    bool is_intermediate = 1;       // true = progress update, false = final response
+    string task_id = 2;
+    string status = 3;              // pending, in_progress, completed, cancelled, timeout
+    string message = 4;
+}
+
+// ConfirmTaskComplete
+message ConfirmTaskCompleteRequest {
+    string task_id = 1;
+    string notes = 2;               // Optional operator notes
+}
+
+message ConfirmTaskCompleteResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// CancelTask
+message CancelTaskRequest {
+    string task_id = 1;
+    string reason = 2;
+}
+
+message CancelTaskResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// GetActiveTasks
+message GetActiveTasksRequest {}
+
+message GetActiveTasksResponse {
+    string tasks_json = 1;          // JSON array of active tasks
+    int32 count = 2;
+}
+
+// GetTaskHistory
+message GetTaskHistoryRequest {
+    int32 limit = 1;                // Max tasks to return
+}
+
+message GetTaskHistoryResponse {
+    string tasks_json = 1;          // JSON array of historical tasks
+    int32 count = 2;
+}
+
+// SendNotification
+message SendNotificationRequest {
+    string message = 1;
+    string level = 2;               // info, warning, error
+    string source_instrument = 3;
+}
+
+message SendNotificationResponse {
+    string notification_id = 1;
+    bool success = 2;
+}
+
+// =============================================================================
+// TASK STRUCTURE (for reference - used in JSON)
+// =============================================================================
+// {
+//     "task_id": "task_001",
+//     "task_type": "tip_refill",
+//     "description": "Please refill tip rack on slot 7",
+//     "priority": "high",
+//     "source_instrument": "Opentrons Flex",
+//     "status": "pending",
+//     "created_at": "2026-02-09T16:30:00Z",
+//     "completed_at": null,
+//     "operator_notes": null
+// }

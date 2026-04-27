@@ -1,0 +1,57 @@
+# OpentronsSiLA2Server Configuration
+# =============================================================================
+
+server:
+  host: "0.0.0.0"
+  port: 50057
+  name: "Opentrons Flex"
+  description: "SiLA2 Server for Opentrons Flex Robot"
+  vendor: "ChemicalLab"
+  version: "1.0.0"
+
+robot:
+  # Opentrons Flex HTTP API
+  ip: "169.254.161.83"
+  port: 31950
+  timeout: 30
+  # Local address to bind (needed for link-local routing on Windows with Hyper-V)
+  # local_address: "169.254.161.1"
+  # Retry settings
+  connection_retry_count: 3
+  connection_retry_delay: 2.0
+  
+hardware:
+  # Hardware configuration folder (contains multiple JSON configs)
+  config_folder: "../../Library/HardwareConfig"
+  # Default config file (can be changed at runtime)
+  default_config: "Standard_Flex_Setup.json"
+
+directories:
+  # Relative to OpentronsSiLA2Server folder
+  input_queue: "./input"
+  processed: "./processed"
+  errors: "./errors"
+  output: "./output"
+  images: "./images"
+  logs: "./logs"
+  # Shared directories (relative to BicoccaLab root)
+  library: "../../../Library"
+  recipes: "../../../Library/Recipes"
+  results: "../../../Results"
+  protocols: "../../../Protocols"
+
+tip_tracking:
+  enabled: true
+  state_file: "./tip_state.json"
+  
+safety:
+  emergency_protocol: "../000_EMERGENCY_RESET.json"
+  auto_home_on_error: true
+  auto_drop_tip_on_abort: true
+
+logging:
+  level: "INFO"
+  file_enabled: true
+  console_enabled: true
+  max_file_size_mb: 10
+  backup_count: 5

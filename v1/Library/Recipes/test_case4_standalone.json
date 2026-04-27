@@ -1,0 +1,26 @@
+{
+  "ProtocolName": "Test_Case4_Standalone",
+  "Description": "Caso 4: Ricetta completamente standalone (no HAL needed)",
+  "Pipettes": {
+    "left": "flex_1channel_1000"
+  },
+  "Trash": {
+    "default": { "Type": "TrashBin", "Slot": "A3" }
+  },
+  "Labware": {
+    "tips": { "LoadName": "opentrons_flex_96_filtertiprack_1000ul", "Slot": "B3" },
+    "plate": { "LoadName": "corning_96_wellplate_360ul_flat", "Slot": "D2" }
+  },
+  "Steps": [
+    {
+      "Command": "Comment",
+      "Type": "Comment",
+      "Text": "TEST CASE 4: Ricetta standalone completa"
+    },
+    {
+      "Command": "Comment",
+      "Type": "Comment",
+      "Text": "Questa ricetta funziona anche SENZA HAL config caricata"
+    }
+  ]
+}

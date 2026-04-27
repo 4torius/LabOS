@@ -1,0 +1,47 @@
+{
+  "WorkflowName": "test1",
+  "Description": "test1",
+  "Author": "BicoccaLab",
+  "Version": "1.0",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "Opentrons",
+      "Action": "ExecuteRecipe",
+      "Parameters": {
+        "Recipe": "test_case1_requirements",
+        "UseHAL": true,
+        "HALConfig": "Standard_Flex_Setup"
+      },
+      "Description": "Esegue ricetta test_case1_requirements"
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "Tecan",
+      "Action": "Connect",
+      "Description": "Connessione allo strumento Tecan"
+    },
+    {
+      "StepNumber": 3,
+      "Instrument": "Tecan",
+      "Action": "PlateOut",
+      "Description": "Espulsione piastra dal lettore"
+    },
+    {
+      "StepNumber": 4,
+      "Instrument": "Tecan",
+      "Action": "PlateIn",
+      "Description": "Inserimento piastra nel lettore"
+    },
+    {
+      "StepNumber": 5,
+      "Instrument": "Tecan",
+      "Action": "RunProtocol",
+      "Parameters": {
+        "ProtocolFile": "Script1.mdfx",
+        "ProtocolPath": "C:\\Users\\andre\\Desktop\\BicoccaLab\\v6\\Library\\Analysis\\Script1.mdfx"
+      },
+      "Description": "Esegue analisi Script1"
+    }
+  ]
+}

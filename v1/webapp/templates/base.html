@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - LabOS</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="/static/css/labos-fallback.css" rel="stylesheet">
+    <script>
+        // If Bootstrap CDN is unreachable (common in offline lab networks),
+        // enable local fallback styles.
+        window.addEventListener('load', function () {
+            const probe = document.createElement('div');
+            probe.className = 'd-none';
+            document.body.appendChild(probe);
+            const hasBootstrap = window.getComputedStyle(probe).display === 'none';
+            probe.remove();
+
+            if (!hasBootstrap) {
+                document.documentElement.classList.add('bootstrap-fallback');
+                console.warn('Bootstrap CDN unavailable: local fallback styles enabled.');
+            }
+        });
+    </script>
+    <style>
+        :root {
+            --labos-primary: #667eea;
+            --labos-secondary: #764ba2;
+        }
+        .navbar-brand {
+            font-weight: bold;
+            background: linear-gradient(135deg, var(--labos-primary), var(--labos-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .sidebar {
+            position: fixed;
+            top: 56px;
+            bottom: 0;
+            left: 0;
+            width: 250px;
+            padding: 20px;
+            background: var(--bs-body-bg);
+            border-right: 1px solid var(--bs-border-color);
+        }
+        .main-content {
+            margin-left: 250px;
+            padding: 20px;
+            min-height: calc(100vh - 56px);
+        }
+        .device-card {
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .device-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .status-online { color: #28a745; }
+        .status-offline { color: #dc3545; }
+        .status-busy { color: #ffc107; }
+        .nav-link.active {
+            background: linear-gradient(135deg, var(--labos-primary), var(--labos-secondary));
+            border-radius: 8px;
+        }
+        .nodered-frame {
+            width: 100%;
+            height: calc(100vh - 150px);
+            border: none;
+            border-radius: 8px;
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-cpu"></i> LabOS
+            </a>
+            <div class="navbar-nav ms-auto">
+                <span class="nav-item nav-link text-muted">
+                    <i class="bi bi-circle-fill text-success"></i> System Online
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="sidebar">
+        <nav class="nav flex-column">
+            <a class="nav-link {% if title == 'Dashboard' %}active{% endif %}" href="/dashboard">
+                <i class="bi bi-speedometer2"></i> Dashboard
+            </a>
+            <a class="nav-link {% if title == 'Workflows' %}active{% endif %}" href="/workflows">
+                <i class="bi bi-diagram-3"></i> Workflows
+            </a>
+            <a class="nav-link {% if title == 'Operator' %}active{% endif %}" href="/operator">
+                <i class="bi bi-bell"></i> Operator
+                <span class="badge bg-danger rounded-pill ms-auto" id="notif-badge" style="display:none;">0</span>
+            </a>
+            <a class="nav-link {% if title == 'Recipes' %}active{% endif %}" href="/recipes">
+                <i class="bi bi-magic"></i> Recipes
+            </a>
+            <a class="nav-link {% if title == 'Plates' %}active{% endif %}" href="/plates">
+                <i class="bi bi-grid-3x3-gap"></i> Plates
+            </a>
+            <a class="nav-link {% if title == 'Results' %}active{% endif %}" href="/results">
+                <i class="bi bi-file-earmark-bar-graph"></i> Results
+            </a>
+            <a class="nav-link {% if title == 'History' %}active{% endif %}" href="/history">
+                <i class="bi bi-clock-history"></i> History
+            </a>
+            <a class="nav-link {% if title == 'Hardware' %}active{% endif %}" href="/hardware">
+                <i class="bi bi-cpu"></i> Hardware
+            </a>
+            <a class="nav-link {% if title == 'Settings' %}active{% endif %}" href="/settings">
+                <i class="bi bi-gear"></i> Settings
+            </a>
+            <hr>
+            <a class="nav-link text-muted" href="/docs" target="_blank">
+                <i class="bi bi-book"></i> API Docs
+            </a>
+        </nav>
+    </div>
+
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // WebSocket connection with error handling
+        let ws = null;
+        let wsConnected = false;
+        
+        function connectWebSocket() {
+            ws = new WebSocket(`ws://${window.location.host}/ws`);
+            
+            ws.onopen = () => {
+                wsConnected = true;
+                console.log('✅ WebSocket connected');
+            };
+            
+            ws.onmessage = (event) => {
+                // Handle ping/pong and non-JSON messages
+                if (event.data === 'pong' || event.data === 'ping') {
+                    return; // Ignore heartbeat messages
+                }
+                try {
+                    const data = JSON.parse(event.data);
+                    window.handleWebSocketMessage(data);
+                } catch (e) {
+                    console.log('Received non-JSON message:', event.data);
+                }
+            };
+            
+            ws.onerror = (error) => {
+                console.error('❌ WebSocket error:', error);
+            };
+            
+            ws.onclose = () => {
+                wsConnected = false;
+                console.log('⚠️ WebSocket disconnected, reconnecting in 3s...');
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+        
+        // Connect on load
+        connectWebSocket();
+        
+        // Sync notification badge with server on page load
+        function syncNotificationBadge() {
+            fetch('/api/operator/pending')
+                .then(resp => resp.json())
+                .then(data => {
+                    const count = (data.actions || []).length;
+                    const badge = document.getElementById('notif-badge');
+                    if (badge) {
+                        badge.textContent = count;
+                        badge.style.display = count > 0 ? 'inline-block' : 'none';
+                    }
+                    console.log('[Badge] Synced with server:', count, 'pending actions');
+                })
+                .catch(e => console.error('Error syncing badge:', e));
+        }
+        syncNotificationBadge();
+        // Refresh badge every 5 seconds
+        setInterval(syncNotificationBadge, 5000);
+        
+        function handleWebSocketMessage(data) {
+            if (data.type === 'device_update') {
+                updateDeviceStatus(data.device_id, data.status);
+            } else if (data.type === 'operator_notification') {
+                showOperatorNotification(data);
+            } else if (data.type === 'workflow_start') {
+                showWorkflowStatus(data.workflow_name, 0, data.total_steps, 'Starting...');
+            } else if (data.type === 'workflow_progress') {
+                showWorkflowStatus(data.workflow_name, data.step, data.total, `${data.instrument} - ${data.action}`);
+            } else if (data.type === 'workflow_paused') {
+                showWorkflowPaused(data.message, data.step);
+            } else if (data.type === 'workflow_complete') {
+                showWorkflowComplete(data.workflow_name, data.message);
+            } else if (data.type === 'workflow_failed') {
+                const failMessage = data.message || data.error || (Array.isArray(data.errors) ? data.errors.join('; ') : data.errors);
+                showWorkflowFailed(data.workflow_name, data.step, data.reason, failMessage);
+            } else if (data.type === 'workflow_resumed') {
+                // Resume status bar animation
+                if (workflowStatusEl) {
+                    workflowStatusEl.style.borderTopColor = '#0d6efd';
+                    workflowStatusState.paused = false;
+                    workflowStatusState.action = data.message || workflowStatusState.action || 'Resumed';
+                    renderWorkflowStatusBar();
+                }
+            } else if (data.type === 'command_executed') {
+                if (typeof log === 'function') {
+                    log('[' + (data.device_name || data.device_id || 'device') + '] ' + data.command + ' completed: ' + (data.message || 'OK'), 'success');
+                }
+                showToast('success', 'Command completed', (data.device_name || data.device_id || 'Device') + ' - ' + data.command);
+            } else if (data.type === 'command_failed') {
+                if (typeof log === 'function') {
+                    log('[' + (data.device_name || data.device_id || 'device') + '] ' + data.command + ' failed: ' + (data.error || 'unknown error'), 'error');
+                }
+                showToast('error', 'Command failed', (data.device_name || data.device_id || 'Device') + ' - ' + (data.error || 'unknown error'));
+            } else if (data.type === 'emergency_stop') {
+                showEmergencyStop(data.message);
+            } else if (data.type === 'intervention_required') {
+                showInterventionRequired(data);
+            } else if (data.type === 'tip_refill_complete') {
+                showToast('success', 'Tips Reloaded', data.message || 'Tip rack reloaded successfully');
+            } else if (data.type === 'mobile_tasks_updated') {
+                if (typeof refreshMobileTasks === 'function') refreshMobileTasks();
+            }
+        }
+        
+        function updateDeviceStatus(deviceId, status) {
+            const card = document.querySelector(`[data-device-id="${deviceId}"]`);
+            if (card) {
+                const statusEl = card.querySelector('.device-status');
+                if (statusEl) {
+                    statusEl.className = `device-status status-${status}`;
+                    statusEl.innerHTML = `<i class="bi bi-circle-fill"></i> ${status}`;
+                }
+            }
+        }
+        
+        function showOperatorNotification(data) {
+            // Refresh badge from server to ensure accuracy
+            syncNotificationBadge();
+            
+            // Show toast notification if not on operator page
+            if (window.location.pathname !== '/operator') {
+                const toast = document.createElement('div');
+                toast.className = 'toast show position-fixed';
+                toast.style.cssText = 'top: 70px; right: 20px; z-index: 9999;';
+                toast.setAttribute('role', 'alert');
+                
+                const priorityClass = data.priority === 'urgent' ? 'bg-danger' : 
+                                     data.priority === 'warning' ? 'bg-warning text-dark' : 'bg-info';
+                
+                toast.innerHTML = `
+                    <div class="toast-header ${priorityClass}">
+                        <i class="bi bi-bell-fill me-2"></i>
+                        <strong class="me-auto">Operator Required</strong>
+                        <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+                    </div>
+                    <div class="toast-body">
+                        ${data.message}
+                        <div class="mt-2">
+                            <a href="/operator" class="btn btn-sm btn-primary">View</a>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(toast);
+                
+                // Auto-remove after 10 seconds
+                setTimeout(() => toast.remove(), 10000);
+            }
+        }
+        
+        // Workflow status display
+        let workflowStatusEl = null;
+        let workflowStatusState = {
+            name: 'Workflow',
+            step: 0,
+            total: 0,
+            action: '',
+            paused: false
+        };
+
+        async function pauseWorkflowFromBar() {
+            try {
+                const resp = await fetch('/api/workflows/pause', { method: 'POST' });
+                const out = await resp.json();
+                showToast('warning', 'Workflow', out.message || 'Pause requested');
+            } catch (e) {
+                showToast('error', 'Pause failed', e.message || 'Cannot pause workflow');
+            }
+        }
+
+        async function resumeWorkflowFromBar() {
+            try {
+                const resp = await fetch('/api/workflows/resume', { method: 'POST' });
+                const out = await resp.json();
+                showToast('success', 'Workflow', out.message || 'Workflow resumed');
+            } catch (e) {
+                showToast('error', 'Resume failed', e.message || 'Cannot resume workflow');
+            }
+        }
+
+        async function abortWorkflowFromBar() {
+            try {
+                const resp = await fetch('/api/workflows/abort', { method: 'POST' });
+                const out = await resp.json();
+                showToast('error', 'Workflow', out.message || 'Abort requested');
+            } catch (e) {
+                showToast('error', 'Abort failed', e.message || 'Cannot abort workflow');
+            }
+        }
+
+        function renderWorkflowStatusBar() {
+            if (!workflowStatusEl) {
+                return;
+            }
+            const percent = workflowStatusState.total > 0 ? Math.round((workflowStatusState.step / workflowStatusState.total) * 100) : 0;
+            const pauseBtnStyle = workflowStatusState.paused ? 'display:none;' : '';
+            const resumeBtnStyle = workflowStatusState.paused ? '' : 'display:none;';
+
+            workflowStatusEl.innerHTML = `
+                <i class="bi ${workflowStatusState.paused ? 'bi-pause-circle-fill text-warning' : 'bi-play-circle-fill text-success'}"></i>
+                <strong>${workflowStatusState.name || 'Workflow'}</strong>
+                <div style="flex: 1; max-width: 320px;">
+                    <div class="progress" style="height: 10px;">
+                        <div class="progress-bar ${workflowStatusState.paused ? '' : 'progress-bar-striped progress-bar-animated'}"
+                             style="width: ${percent}%"></div>
+                    </div>
+                </div>
+                <span>Step ${workflowStatusState.step}/${workflowStatusState.total}</span>
+                <span class="text-muted">${workflowStatusState.action || ''}</span>
+                <div class="ms-auto d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-warning" style="${pauseBtnStyle}" onclick="pauseWorkflowFromBar()">
+                        <i class="bi bi-pause-circle"></i> Pause
+                    </button>
+                    <button class="btn btn-sm btn-outline-success" style="${resumeBtnStyle}" onclick="resumeWorkflowFromBar()">
+                        <i class="bi bi-play-circle"></i> Resume
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="abortWorkflowFromBar()">
+                        <i class="bi bi-stop-circle"></i> Abort
+                    </button>
+                </div>
+            `;
+        }
+        
+        function showWorkflowStatus(name, step, total, action) {
+            if (!workflowStatusEl) {
+                workflowStatusEl = document.createElement('div');
+                workflowStatusEl.id = 'workflow-status-bar';
+                workflowStatusEl.style.cssText = `
+                    position: fixed;
+                    bottom: 0;
+                    left: 200px;
+                    right: 0;
+                    background: linear-gradient(135deg, #1a1d21 0%, #2d3238 100%);
+                    color: white;
+                    padding: 10px 20px;
+                    z-index: 9998;
+                    border-top: 2px solid #0d6efd;
+                    display: flex;
+                    align-items: center;
+                    gap: 15px;
+                `;
+                document.body.appendChild(workflowStatusEl);
+            }
+
+            workflowStatusState = {
+                name: name || workflowStatusState.name,
+                step: step || 0,
+                total: total || workflowStatusState.total,
+                action: action || '',
+                paused: false
+            };
+            renderWorkflowStatusBar();
+        }
+        
+        function showWorkflowPaused(message, step) {
+            if (workflowStatusEl) {
+                workflowStatusEl.style.borderTopColor = '#ffc107';
+                workflowStatusState.paused = true;
+                if (typeof step === 'number' && step > 0) {
+                    workflowStatusState.step = step;
+                }
+                workflowStatusState.action = message || workflowStatusState.action || 'Paused';
+                renderWorkflowStatusBar();
+            }
+        }
+        
+        function hideWorkflowStatus() {
+            if (workflowStatusEl) {
+                workflowStatusEl.remove();
+                workflowStatusEl = null;
+            }
+        }
+        
+        function showWorkflowComplete(name, message) {
+            if (workflowStatusEl) {
+                workflowStatusEl.style.borderTopColor = '#198754';
+                workflowStatusEl.innerHTML = `
+                    <i class="bi bi-check-circle-fill text-success"></i>
+                    <strong>${name || 'Workflow'}</strong>
+                    <span class="text-success">${message || 'Completed!'}</span>
+                    <button class="btn btn-sm btn-outline-light ms-auto" onclick="hideWorkflowStatus()">Close</button>
+                `;
+                
+                // Auto-hide after 10 seconds
+                setTimeout(hideWorkflowStatus, 10000);
+            }
+        }
+        
+        function showWorkflowFailed(name, step, reason, message) {
+            // Update status bar to show failure
+            if (workflowStatusEl) {
+                workflowStatusEl.style.borderTopColor = '#dc3545';
+                workflowStatusEl.innerHTML = `
+                    <i class="bi bi-x-circle-fill text-danger"></i>
+                    <strong>${name || 'Workflow'}</strong>
+                    <span class="text-danger">FAILED - Step ${step || '?'}</span>
+                    <button class="btn btn-sm btn-outline-light ms-auto" onclick="hideWorkflowStatus()">Close</button>
+                `;
+            }
+            
+            // Show prominent failure alert
+            const alertEl = document.createElement('div');
+            alertEl.className = 'alert alert-danger position-fixed';
+            alertEl.style.cssText = 'top: 70px; left: 50%; transform: translateX(-50%); z-index: 9998; min-width: 450px; max-width: 600px;';
+            
+            let title = 'Workflow Failed';
+            let icon = 'bi-x-circle-fill';
+            
+            if (reason === 'operator_timeout') {
+                title = 'Operator Timeout';
+                icon = 'bi-clock-fill';
+            }
+            
+            alertEl.innerHTML = `
+                <h4 class="alert-heading"><i class="bi ${icon}"></i> ${title}</h4>
+                <p><strong>Workflow:</strong> ${name || 'N/A'}</p>
+                <p><strong>Step:</strong> ${step || 'N/A'}</p>
+                <p>${message || 'The workflow was interrupted.'}</p>
+                <hr>
+                <p class="mb-0">
+                    <small>Check logs for more details. You can restart the workflow from the Batch page.</small>
+                </p>
+                <button class="btn btn-outline-danger mt-2" onclick="this.parentElement.remove()">Close</button>
+            `;
+            document.body.appendChild(alertEl);
+        }
+        
+        function showEmergencyStop(message) {
+            // Show prominent emergency stop notification
+            const alertEl = document.createElement('div');
+            alertEl.className = 'alert alert-danger position-fixed';
+            alertEl.style.cssText = 'top: 70px; left: 50%; transform: translateX(-50%); z-index: 9999; min-width: 400px;';
+            alertEl.innerHTML = `
+                <h4 class="alert-heading"><i class="bi bi-exclamation-octagon-fill"></i> EMERGENCY STOP</h4>
+                <p>${message || 'Emergency stop activated!'}</p>
+                <button class="btn btn-outline-danger" onclick="this.parentElement.remove()">Close</button>
+            `;
+            document.body.appendChild(alertEl);
+            
+            // Hide workflow status
+            hideWorkflowStatus();
+        }
+        
+        function showInterventionRequired(data) {
+            // Remove any existing intervention modal
+            document.querySelectorAll('.intervention-modal').forEach(m => m.remove());
+
+            const iid = data.intervention_id;
+            const modal = document.createElement('div');
+            modal.className = 'modal fade show intervention-modal';
+            modal.style.cssText = 'display:block; background:rgba(0,0,0,0.6);';
+            modal.innerHTML = `
+                <div class="modal-dialog modal-dialog-centered modal-lg">
+                    <div class="modal-content border-warning">
+                        <div class="modal-header bg-warning text-dark">
+                            <h5 class="modal-title">
+                                <i class="bi bi-exclamation-triangle-fill me-2"></i>Operator Intervention Required
+                            </h5>
+                        </div>
+                        <div class="modal-body">
+                            <div class="row g-3 mb-3">
+                                <div class="col-sm-4 text-muted small">Workflow</div>
+                                <div class="col-sm-8 fw-semibold">${data.workflow_name || '—'}</div>
+                                <div class="col-sm-4 text-muted small">Step</div>
+                                <div class="col-sm-8">${data.step_number || '?'} — <span class="fw-semibold">${data.instrument || ''}</span> / ${data.action || ''}</div>
+                                <div class="col-sm-4 text-muted small">Error</div>
+                                <div class="col-sm-8 text-danger">${data.error_message || 'Unknown error'}</div>
+                                <div class="col-sm-4 text-muted small">Attempt</div>
+                                <div class="col-sm-8">${data.attempt || '?'} / ${data.max_attempts || '?'}</div>
+                            </div>
+                            <hr>
+                            <div class="row g-2 text-center">
+                                <div class="col-4">
+                                    <button class="btn btn-warning w-100 py-3" onclick="respondIntervention('${iid}','retry')">
+                                        <i class="bi bi-arrow-repeat d-block fs-4 mb-1"></i>
+                                        <strong>Retry</strong><br>
+                                        <small class="text-dark">Re-run this step</small>
+                                    </button>
+                                </div>
+                                <div class="col-4">
+                                    <button class="btn btn-secondary w-100 py-3" onclick="respondIntervention('${iid}','skip')">
+                                        <i class="bi bi-skip-forward d-block fs-4 mb-1"></i>
+                                        <strong>Skip</strong><br>
+                                        <small>Skip to next step</small>
+                                    </button>
+                                </div>
+                                <div class="col-4">
+                                    <button class="btn btn-danger w-100 py-3" onclick="respondIntervention('${iid}','abort')">
+                                        <i class="bi bi-stop-circle d-block fs-4 mb-1"></i>
+                                        <strong>Abort</strong><br>
+                                        <small>Stop the workflow</small>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            document.body.appendChild(modal);
+        }
+
+        function respondIntervention(id, action) {
+            fetch('/api/intervention/respond', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({intervention_id: id, action: action})
+            }).then(() => {
+                document.querySelectorAll('.intervention-modal').forEach(m => m.remove());
+            }).catch(e => showToast('error', 'Error', e.message));
+        }
+        
+        function showToast(type, title, message) {
+            const toast = document.createElement('div');
+            toast.className = 'toast show position-fixed';
+            toast.style.cssText = 'top: 70px; right: 20px; z-index: 9999;';
+            const bgClass = type === 'success' ? 'bg-success' : type === 'error' ? 'bg-danger' : 'bg-info';
+            toast.innerHTML = `
+                <div class="toast-header ${bgClass} text-white">
+                    <strong class="me-auto">${title}</strong>
+                    <button type="button" class="btn-close btn-close-white" onclick="this.closest('.toast').remove()"></button>
+                </div>
+                <div class="toast-body">${message}</div>
+            `;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 5000);
+        }
+        
+        // Keep connection alive
+        setInterval(() => ws.send('ping'), 30000);
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

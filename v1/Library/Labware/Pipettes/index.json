@@ -1,0 +1,458 @@
+{
+  "source": "Opentrons repo edge branch (shared-data)",
+  "total_files": 73,
+  "channels": [
+    "eight_channel",
+    "eight_channel_em",
+    "ninety_six_channel",
+    "single_channel"
+  ],
+  "models": [
+    "p10",
+    "p1000",
+    "p20",
+    "p200",
+    "p300",
+    "p50"
+  ],
+  "definitions": [
+    {
+      "channel": "eight_channel",
+      "model": "p10",
+      "version": "1_0",
+      "path": "Library/Pipettes/eight_channel/p10/1_0.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p10",
+      "version": "1_3",
+      "path": "Library/Pipettes/eight_channel/p10/1_3.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p10",
+      "version": "1_4",
+      "path": "Library/Pipettes/eight_channel/p10/1_4.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p10",
+      "version": "1_5",
+      "path": "Library/Pipettes/eight_channel/p10/1_5.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p10",
+      "version": "1_6",
+      "path": "Library/Pipettes/eight_channel/p10/1_6.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p1000",
+      "version": "1_0",
+      "path": "Library/Pipettes/eight_channel/p1000/1_0.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p1000",
+      "version": "3_0",
+      "path": "Library/Pipettes/eight_channel/p1000/3_0.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p1000",
+      "version": "3_3",
+      "path": "Library/Pipettes/eight_channel/p1000/3_3.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p1000",
+      "version": "3_4",
+      "path": "Library/Pipettes/eight_channel/p1000/3_4.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p1000",
+      "version": "3_5",
+      "path": "Library/Pipettes/eight_channel/p1000/3_5.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p20",
+      "version": "2_0",
+      "path": "Library/Pipettes/eight_channel/p20/2_0.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p20",
+      "version": "2_1",
+      "path": "Library/Pipettes/eight_channel/p20/2_1.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p300",
+      "version": "1_0",
+      "path": "Library/Pipettes/eight_channel/p300/1_0.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p300",
+      "version": "1_3",
+      "path": "Library/Pipettes/eight_channel/p300/1_3.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p300",
+      "version": "1_4",
+      "path": "Library/Pipettes/eight_channel/p300/1_4.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p300",
+      "version": "1_5",
+      "path": "Library/Pipettes/eight_channel/p300/1_5.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p300",
+      "version": "2_0",
+      "path": "Library/Pipettes/eight_channel/p300/2_0.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p300",
+      "version": "2_1",
+      "path": "Library/Pipettes/eight_channel/p300/2_1.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p50",
+      "version": "1_0",
+      "path": "Library/Pipettes/eight_channel/p50/1_0.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p50",
+      "version": "1_3",
+      "path": "Library/Pipettes/eight_channel/p50/1_3.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p50",
+      "version": "1_4",
+      "path": "Library/Pipettes/eight_channel/p50/1_4.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p50",
+      "version": "1_5",
+      "path": "Library/Pipettes/eight_channel/p50/1_5.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p50",
+      "version": "3_0",
+      "path": "Library/Pipettes/eight_channel/p50/3_0.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p50",
+      "version": "3_3",
+      "path": "Library/Pipettes/eight_channel/p50/3_3.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p50",
+      "version": "3_4",
+      "path": "Library/Pipettes/eight_channel/p50/3_4.json"
+    },
+    {
+      "channel": "eight_channel",
+      "model": "p50",
+      "version": "3_5",
+      "path": "Library/Pipettes/eight_channel/p50/3_5.json"
+    },
+    {
+      "channel": "eight_channel_em",
+      "model": "p1000",
+      "version": "1_0",
+      "path": "Library/Pipettes/eight_channel_em/p1000/1_0.json"
+    },
+    {
+      "channel": "eight_channel_em",
+      "model": "p1000",
+      "version": "3_0",
+      "path": "Library/Pipettes/eight_channel_em/p1000/3_0.json"
+    },
+    {
+      "channel": "ninety_six_channel",
+      "model": "p1000",
+      "version": "1_0",
+      "path": "Library/Pipettes/ninety_six_channel/p1000/1_0.json"
+    },
+    {
+      "channel": "ninety_six_channel",
+      "model": "p1000",
+      "version": "3_0",
+      "path": "Library/Pipettes/ninety_six_channel/p1000/3_0.json"
+    },
+    {
+      "channel": "ninety_six_channel",
+      "model": "p1000",
+      "version": "3_3",
+      "path": "Library/Pipettes/ninety_six_channel/p1000/3_3.json"
+    },
+    {
+      "channel": "ninety_six_channel",
+      "model": "p1000",
+      "version": "3_4",
+      "path": "Library/Pipettes/ninety_six_channel/p1000/3_4.json"
+    },
+    {
+      "channel": "ninety_six_channel",
+      "model": "p1000",
+      "version": "3_5",
+      "path": "Library/Pipettes/ninety_six_channel/p1000/3_5.json"
+    },
+    {
+      "channel": "ninety_six_channel",
+      "model": "p1000",
+      "version": "3_6",
+      "path": "Library/Pipettes/ninety_six_channel/p1000/3_6.json"
+    },
+    {
+      "channel": "ninety_six_channel",
+      "model": "p200",
+      "version": "1_0",
+      "path": "Library/Pipettes/ninety_six_channel/p200/1_0.json"
+    },
+    {
+      "channel": "ninety_six_channel",
+      "model": "p200",
+      "version": "3_0",
+      "path": "Library/Pipettes/ninety_six_channel/p200/3_0.json"
+    },
+    {
+      "channel": "ninety_six_channel",
+      "model": "p200",
+      "version": "3_1",
+      "path": "Library/Pipettes/ninety_six_channel/p200/3_1.json"
+    },
+    {
+      "channel": "ninety_six_channel",
+      "model": "p200",
+      "version": "3_2",
+      "path": "Library/Pipettes/ninety_six_channel/p200/3_2.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p10",
+      "version": "1_0",
+      "path": "Library/Pipettes/single_channel/p10/1_0.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p10",
+      "version": "1_3",
+      "path": "Library/Pipettes/single_channel/p10/1_3.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p10",
+      "version": "1_4",
+      "path": "Library/Pipettes/single_channel/p10/1_4.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p10",
+      "version": "1_5",
+      "path": "Library/Pipettes/single_channel/p10/1_5.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p1000",
+      "version": "1_0",
+      "path": "Library/Pipettes/single_channel/p1000/1_0.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p1000",
+      "version": "1_3",
+      "path": "Library/Pipettes/single_channel/p1000/1_3.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p1000",
+      "version": "1_4",
+      "path": "Library/Pipettes/single_channel/p1000/1_4.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p1000",
+      "version": "1_5",
+      "path": "Library/Pipettes/single_channel/p1000/1_5.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p1000",
+      "version": "2_0",
+      "path": "Library/Pipettes/single_channel/p1000/2_0.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p1000",
+      "version": "2_1",
+      "path": "Library/Pipettes/single_channel/p1000/2_1.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p1000",
+      "version": "2_2",
+      "path": "Library/Pipettes/single_channel/p1000/2_2.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p1000",
+      "version": "3_0",
+      "path": "Library/Pipettes/single_channel/p1000/3_0.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p1000",
+      "version": "3_3",
+      "path": "Library/Pipettes/single_channel/p1000/3_3.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p1000",
+      "version": "3_4",
+      "path": "Library/Pipettes/single_channel/p1000/3_4.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p1000",
+      "version": "3_5",
+      "path": "Library/Pipettes/single_channel/p1000/3_5.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p1000",
+      "version": "3_6",
+      "path": "Library/Pipettes/single_channel/p1000/3_6.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p1000",
+      "version": "3_7",
+      "path": "Library/Pipettes/single_channel/p1000/3_7.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p20",
+      "version": "2_0",
+      "path": "Library/Pipettes/single_channel/p20/2_0.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p20",
+      "version": "2_1",
+      "path": "Library/Pipettes/single_channel/p20/2_1.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p20",
+      "version": "2_2",
+      "path": "Library/Pipettes/single_channel/p20/2_2.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p300",
+      "version": "1_0",
+      "path": "Library/Pipettes/single_channel/p300/1_0.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p300",
+      "version": "1_3",
+      "path": "Library/Pipettes/single_channel/p300/1_3.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p300",
+      "version": "1_4",
+      "path": "Library/Pipettes/single_channel/p300/1_4.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p300",
+      "version": "1_5",
+      "path": "Library/Pipettes/single_channel/p300/1_5.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p300",
+      "version": "2_0",
+      "path": "Library/Pipettes/single_channel/p300/2_0.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p300",
+      "version": "2_1",
+      "path": "Library/Pipettes/single_channel/p300/2_1.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p50",
+      "version": "1_0",
+      "path": "Library/Pipettes/single_channel/p50/1_0.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p50",
+      "version": "1_3",
+      "path": "Library/Pipettes/single_channel/p50/1_3.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p50",
+      "version": "1_4",
+      "path": "Library/Pipettes/single_channel/p50/1_4.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p50",
+      "version": "1_5",
+      "path": "Library/Pipettes/single_channel/p50/1_5.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p50",
+      "version": "3_0",
+      "path": "Library/Pipettes/single_channel/p50/3_0.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p50",
+      "version": "3_3",
+      "path": "Library/Pipettes/single_channel/p50/3_3.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p50",
+      "version": "3_4",
+      "path": "Library/Pipettes/single_channel/p50/3_4.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p50",
+      "version": "3_5",
+      "path": "Library/Pipettes/single_channel/p50/3_5.json"
+    },
+    {
+      "channel": "single_channel",
+      "model": "p50",
+      "version": "3_6",
+      "path": "Library/Pipettes/single_channel/p50/3_6.json"
+    }
+  ]
+}

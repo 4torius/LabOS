@@ -1,0 +1,88 @@
+{
+  "WorkflowName": "test_1111111",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "jbdicbrjpachybnevgledbwsfkygxmad"
+      }
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "bfdvcbegqxcsmtpcecoeoaxbacxjoceb"
+      }
+    },
+    {
+      "StepNumber": 3,
+      "Instrument": "Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "cqascqatavvnubfuacdekaydmwdrbqae"
+      }
+    },
+    {
+      "StepNumber": 4,
+      "Instrument": "OpentronsFlex",
+      "Action": "ExecuteRecipe",
+      "Parameters": {
+        "recipe": "test_6.json"
+      }
+    },
+    {
+      "StepNumber": 5,
+      "Instrument": "Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "edlefzcowacoyedmbkjpextzmacracvb"
+      }
+    },
+    {
+      "StepNumber": 6,
+      "Instrument": "Manual Station",
+      "Action": "RequestOperatorTask",
+      "Parameters": {
+        "TaskDescription": "vai indietro di 75 cm"
+      }
+    },
+    {
+      "StepNumber": 7,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "PlateOut",
+      "Parameters": {}
+    },
+    {
+      "StepNumber": 8,
+      "Instrument": "Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "dhvtaxeapblazkrllljktezzfhuezsyu"
+      }
+    },
+    {
+      "StepNumber": 9,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "PlateIn",
+      "Parameters": {}
+    },
+    {
+      "StepNumber": 10,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "RunMeasurement",
+      "Parameters": {
+        "protocol": "Script1.mdfx"
+      }
+    },
+    {
+      "StepNumber": 11,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "PlateOut",
+      "Parameters": {}
+    }
+  ],
+  "CreatedAt": "2026-03-10T18:11:01.762274"
+}

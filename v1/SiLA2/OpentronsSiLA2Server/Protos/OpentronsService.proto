@@ -1,0 +1,275 @@
+// OpentronsService.proto
+// SiLA2 gRPC service for Opentrons Flex robot - SIMPLIFIED WORKFLOW INTERFACE
+// Focus: HAL configuration, Recipe execution, Tip management
+
+syntax = "proto3";
+
+package it.chemlab.opentrons;
+
+option csharp_namespace = "ChemLab.Opentrons.Protos";
+
+import "google/protobuf/empty.proto";
+
+// ═══════════════════════════════════════════════════════════════════════════
+//                    OPENTRONS FLEX SERVICE - WORKFLOW API
+// ═══════════════════════════════════════════════════════════════════════════
+// 
+// This simplified interface focuses on workflow-level operations:
+// 1. Robot Control     - Initialize, Home, Emergency Stop
+// 2. HAL Configuration - Load hardware abstraction layer configs  
+// 3. Recipe Execution  - Select and run JSON recipes
+// 4. Tip Management    - Refill and track tip usage
+// 5. Monitoring        - Status, info, modules
+//
+// Low-level liquid handling (Transfer, Aspirate, etc.) is handled
+// internally by recipes via the UNIVERSAL_TEMPLATE protocol generator.
+// ═══════════════════════════════════════════════════════════════════════════
+
+service OpentronsService {
+    // ─────────────────────────────────────────────────────────────────────
+    //                    ROBOT CONTROL
+    // ─────────────────────────────────────────────────────────────────────
+    
+    // Initialize connection to the robot
+    rpc Initialize(InitializeRequest) returns (InitializeResponse);
+    
+    // Home all axes
+    rpc Home(HomeRequest) returns (stream HomeResponse);
+    
+    // Emergency stop - immediately halt all operations
+    rpc EmergencyStop(google.protobuf.Empty) returns (EmergencyStopResponse);
+    
+    // Get current robot status
+    rpc GetStatus(google.protobuf.Empty) returns (StatusResponse);
+    
+    // ─────────────────────────────────────────────────────────────────────
+    //                    HAL CONFIGURATION
+    // ─────────────────────────────────────────────────────────────────────
+    
+    // List available hardware configurations (from Library/HardwareConfig)
+    rpc ListHardwareConfigs(google.protobuf.Empty) returns (ListHardwareConfigsResponse);
+    
+    // Load a hardware configuration (HAL)
+    rpc LoadHardwareConfig(LoadHardwareConfigRequest) returns (LoadHardwareConfigResponse);
+    
+    // Get currently loaded hardware configuration
+    rpc GetCurrentConfig(google.protobuf.Empty) returns (GetCurrentConfigResponse);
+    
+    // ─────────────────────────────────────────────────────────────────────
+    //                    RECIPE EXECUTION
+    // ─────────────────────────────────────────────────────────────────────
+    
+    // List available recipes (from Library/Recipes)
+    rpc ListRecipes(google.protobuf.Empty) returns (ListRecipesResponse);
+    
+    // Execute a recipe by filename - streams progress updates
+    rpc ExecuteRecipe(ExecuteRecipeRequest) returns (stream ExecuteRecipeResponse);
+    
+    // Pause currently running recipe
+    rpc PauseRun(google.protobuf.Empty) returns (PauseRunResponse);
+    
+    // Resume paused recipe
+    rpc ResumeRun(google.protobuf.Empty) returns (ResumeRunResponse);
+    
+    // Abort current recipe execution
+    rpc AbortRun(google.protobuf.Empty) returns (AbortRunResponse);
+    
+    // ─────────────────────────────────────────────────────────────────────
+    //                    TIP MANAGEMENT
+    // ─────────────────────────────────────────────────────────────────────
+    
+    // List tip racks with usage statistics
+    rpc ListTipRacks(google.protobuf.Empty) returns (ListTipRacksResponse);
+    
+    // Refill a tip rack (reset tip count to full)
+    rpc RefillTipRack(RefillTipRackRequest) returns (RefillTipRackResponse);
+    
+    // Reset all tip tracking (after manual refill of all racks)
+    rpc ResetTipTracking(google.protobuf.Empty) returns (ResetTipTrackingResponse);
+    
+    // ─────────────────────────────────────────────────────────────────────
+    //                    MONITORING & ACCESSORIES
+    // ─────────────────────────────────────────────────────────────────────
+    
+    // Set robot deck lights on/off
+    rpc SetLights(SetLightsRequest) returns (SetLightsResponse);
+    
+    // Get robot information (model, serial, firmware)
+    rpc GetRobotInfo(google.protobuf.Empty) returns (RobotInfoResponse);
+    
+    // Get status of all attached modules
+    rpc GetModulesStatus(google.protobuf.Empty) returns (ModulesStatusResponse);
+    
+    // Subscribe to status updates (streaming)
+    rpc SubscribeStatus(google.protobuf.Empty) returns (stream StatusResponse);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//                         REQUEST/RESPONSE MESSAGES
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── Robot Control ─────────────────────────────────────────────────────────
+
+message InitializeRequest {
+    string robot_ip = 1;          // Optional: Robot IP (default from config)
+}
+
+message InitializeResponse {
+    bool success = 1;
+    string message = 2;
+    string robot_name = 3;        // Robot name if connected
+}
+
+message HomeRequest {
+    bool drop_tip = 1;            // Drop tip before homing (safety)
+}
+
+message HomeResponse {
+    bool is_complete = 1;         // false = progress update, true = done
+    string status = 2;            // Current homing status
+}
+
+message EmergencyStopResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message StatusResponse {
+    string state = 1;             // idle, running, paused, error
+    string current_run_id = 2;    // Active run ID (if any)
+    string current_recipe = 3;    // Recipe being executed (if any)
+    int32 progress = 4;           // Progress percentage (0-100)
+    bool is_connected = 5;        // Robot connection status
+    string config_loaded = 6;     // Currently loaded HAL config
+}
+
+// ─── HAL Configuration ─────────────────────────────────────────────────────
+
+message ListHardwareConfigsResponse {
+    repeated HardwareConfigInfo configs = 1;
+}
+
+message HardwareConfigInfo {
+    string filename = 1;          // Config filename
+    string description = 2;       // Optional description
+    repeated string pipettes = 3; // Configured pipettes summary
+}
+
+message LoadHardwareConfigRequest {
+    string config_file = 1;       // Config filename (e.g., "Standard_Flex_Setup.json")
+}
+
+message LoadHardwareConfigResponse {
+    bool success = 1;
+    string message = 2;           // Loaded labware and pipettes info
+    string loaded_config = 3;     // Name of the loaded config file
+}
+
+message GetCurrentConfigResponse {
+    string config_name = 1;       // Current config filename (empty if none)
+    string config_json = 2;       // Full config as JSON
+}
+
+// ─── Recipe Execution ──────────────────────────────────────────────────────
+
+message ListRecipesResponse {
+    repeated RecipeInfo recipes = 1;
+}
+
+message RecipeInfo {
+    string filename = 1;          // Recipe filename
+    string name = 2;              // Recipe display name
+    string description = 3;       // Recipe description
+    int32 step_count = 4;         // Number of steps
+}
+
+message ExecuteRecipeRequest {
+    string recipe_name = 1;       // Recipe filename (e.g., "protocol_1.json")
+}
+
+message ExecuteRecipeResponse {
+    bool is_intermediate = 1;     // true = progress update, false = final
+    string run_id = 2;            // Run ID
+    string status = 3;            // loading, running, complete, error
+    int32 progress = 4;           // Progress percentage (0-100)
+    string message = 5;           // Current operation / error message
+    int32 current_step = 6;       // Current step number
+    int32 total_steps = 7;        // Total number of steps
+}
+
+message PauseRunResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message ResumeRunResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message AbortRunResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// ─── Tip Management ────────────────────────────────────────────────────────
+
+message ListTipRacksResponse {
+    repeated TipRackInfo tip_racks = 1;
+}
+
+message TipRackInfo {
+    string rack_id = 1;           // Logical rack ID (e.g., "tips_1000")
+    string rack_type = 2;         // Opentrons definition name
+    string location = 3;          // Deck slot (e.g., "C1")
+    int32 total_tips = 4;         // Total capacity (96 or 384)
+    int32 remaining_tips = 5;     // Tips still available
+    int32 used_tips = 6;          // Tips consumed
+    double percent_remaining = 7; // Percentage remaining
+}
+
+message RefillTipRackRequest {
+    string rack_id = 1;           // Logical rack ID to refill
+}
+
+message RefillTipRackResponse {
+    bool success = 1;
+    string message = 2;
+    int32 tips_restored = 3;      // Number of tips marked as available
+}
+
+message ResetTipTrackingResponse {
+    bool success = 1;
+    string message = 2;
+    int32 racks_reset = 3;        // Number of racks reset
+}
+
+// ─── Monitoring & Accessories ──────────────────────────────────────────────
+
+message SetLightsRequest {
+    bool on = 1;                  // true = lights on, false = lights off
+}
+
+message SetLightsResponse {
+    bool success = 1;
+}
+
+message RobotInfoResponse {
+    string name = 1;              // Robot name
+    string model = 2;             // Robot model (e.g., "Flex")
+    string serial_number = 3;     // Serial number
+    string api_version = 4;       // API version
+    string firmware_version = 5;  // Firmware version
+}
+
+message ModulesStatusResponse {
+    repeated ModuleInfo modules = 1;
+}
+
+message ModuleInfo {
+    string module_id = 1;         // Logical module ID
+    string module_type = 2;       // heaterShakerModuleV1, thermocyclerModuleV2, etc.
+    string location = 3;          // Deck slot
+    string status = 4;            // idle, active, error
+    string status_details = 5;    // JSON with module-specific status (temp, rpm, etc.)
+}

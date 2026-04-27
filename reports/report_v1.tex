@@ -1,0 +1,111 @@
+\documentclass[a4paper,11pt]{article}
+
+% --- Pacchetti di base ---
+\usepackage[utf8]{inputenc}
+\usepackage[italian]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+\usepackage{graphicx}
+\usepackage{booktabs} % Per tabelle professionali
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{amsmath}
+\usepackage{hyperref}
+
+% --- Configurazione Stile ---
+\hypersetup{
+	colorlinks=true,
+	linkcolor=blue,
+	filecolor=magenta,      
+	urlcolor=cyan,
+	pdftitle={Report Avanzamento Progetto SDL},
+}
+
+\titleformat{\section}{\large\bfseries\color{darkblue}}{\thesection}{1em}{}[\titlerule]
+\definecolor{darkblue}{rgb}{0.0, 0.0, 0.5}
+
+% --- Metadati ---
+\title{\textbf{Report di Avanzamento Progetto:\\Verso il Laboratorio Chimico Robotico Autonomo (SDL)}}
+\author{Team di Sviluppo LabOS}
+\date{\today}
+
+\begin{document}
+	
+	\maketitle
+	
+	\tableofcontents
+	\newpage
+	
+	\section{Sintesi Strategica e Stato dell'Arte Operativo}
+	Il progetto si colloca sulla frontiera tecnologica dei \textbf{Self-Driving Laboratories (SDL)}, sistemi integrati in cui l'automazione robotica chiude il ciclo della scoperta scientifica guidata dall'Intelligenza Artificiale. 
+	
+	Per la committenza, il superamento del \textit{bottleneck} tra fase computazionale e validazione fisica è vitale: mentre i modelli di machine learning possono oggi proporre migliaia di potenziali formulazioni in tempi ridottissimi, la capacità di validazione manuale resta limitata a poche decine di campioni al giorno (Fonte 2.1.1). Questa asimmetria operativa rappresenta il principale limite all'innovazione accelerata.
+	
+	L'approccio strategico adottato non punta a un'automazione industriale rigida, ma a una flessibilità basata sulla ricerca. Risultati chiave raggiunti:
+	\begin{itemize}[label=--]
+		\item \textbf{Systematic Requirements Analysis:} Traduzione dei flussi manuali in requisiti formali.
+		\item \textbf{Architettura Modulare:} Framework ispirato all'Industria 4.0.
+		\item \textbf{Validazione Sperimentale:} Sintesi di Idrogeli per mappare limiti di precisione e affidabilità.
+	\end{itemize}
+	
+	\section{Architettura di Sistema e Integrazione Modulare (SiLA2)}
+	L'architettura è rigorosamente \textit{Workstation-centric}, orchestrata tramite lo standard di comunicazione \textbf{SiLA2}. L'adozione di gRPC e Protocol Buffers garantisce messaggi binari ridotti e parsing accelerato (Fonte 5.1.1), eliminando il \textit{vendor lock-in}.
+	
+	\begin{table}[h]
+		\centering
+		\caption{Riepilogo Workstation e Insight Progettuali}
+		\vspace{2mm}
+		\begin{tabular}{@{}lll@{}}
+			\toprule
+			\textbf{Workstation} & \textbf{Equipaggiamento} & \textbf{Insight Progettuale (Layout)} \\ \midrule
+			WS-1 (Liquid Handling) & Opentrons Flex & Struttura chiusa per ottimizzazione LIDAR. \\
+			WS-2 (Plate Reading) & Tecan M200 Pro & Wrapper SiLA2 via iControl. \\
+			WS-3 (Mobile Manip.) & GoFaGo (Robotnik+ABB) & Base omnidirezionale per spazi ristretti. \\
+			WS-4 (Manual) & Operatore Umano & Interfaccia di sincronizzazione dedicata. \\ \bottomrule
+		\end{tabular}
+	\end{table}
+	
+	\section{Logistica Autonoma: Il Sistema GoFaGo}
+	Il sistema \textbf{GoFaGo} (base Robotnik RB-STEEL e braccio ABB GoFa) funge da tessuto connettivo. 
+	\begin{enumerate}
+		\item \textbf{Learning from Demonstration (LfD):} Permette ai ricercatori di riconfigurare i task tramite \textit{kinesthetic teaching} senza scrivere codice.
+		\item \textbf{Visione Artificiale:} Utilizzo di marker \textbf{ArUco} per colmare il gap della navigazione SLAM ($\pm 10$ cm), raggiungendo una precisione locale inferiore ai \textbf{$\pm 5$ mm} (Fonte 7.2.1).
+	\end{enumerate}
+	
+	\section{Validazione Sperimentale: Caso Hydrogel}
+	I test hanno evidenziato tassi di successo incoraggianti ma hanno mappato limiti fisici critici.
+	
+	\begin{table}[h]
+		\centering
+		\caption{Tassi di Successo del Grasping}
+		\vspace{2mm}
+		\begin{tabular}{@{}lcl@{}}
+			\toprule
+			\textbf{Sito di Prelievo} & \textbf{Success Rate} & \textbf{Analisi Critica} \\ \midrule
+			Open Storage & $\sim$95\% & Elevata tolleranza geometrica. \\
+			Tecan Carrier & $\sim$80\% & Sensibilità a collisioni sui bordi. \\
+			Opentrons Deck & $\sim$85\% & Richiesta massima precisione inserimento. \\ \bottomrule
+		\end{tabular}
+	\end{table}
+	
+	\textbf{Analisi Critica:} È stata rilevata un'asimmetria nelle tolleranze: $X$ (laterale) $\pm 4$ cm vs $Y$ (longitudinale) $\sim 20$ cm. L'errore laterale consuma il margine del Giunto 1, spingendo il braccio verso \textit{singolarità cinematica}. Inoltre, l'effetto \textit{"forward-push"} della pinza \textbf{OnRobot RG6} sposta la piastra di alcuni millimetri, suggerendo la migrazione verso gripper a cinematica parallela.
+	
+	\section{Interfaccia No-Code e Design dei Workflow}
+	Il \textbf{No-Code Visual Workflow Designer} permette di trasformare matrici Excel in ricette JSON.
+	\begin{itemize}
+		\item \textbf{Liquid Class Library:} Gestione differenziata per liquidi \textit{Aqueous, Viscous e Foaming}.
+		\item \textbf{Multi-fase:} Supporto a tempi di incubazione precisi (ELISA, PCR).
+		\item \textbf{Monitoraggio:} Feedback in tempo reale via WebSocket verso la Manual Station.
+	\end{itemize}
+	
+	\section{Conclusioni e Prossimi Passi}
+	Il framework \textbf{LabOS} è solido, ma l'affidabilità fisica richiede affinamenti. La \textit{road-map} prevede:
+	\begin{itemize}
+		\item Sostituzione della pinza RG6 e adozione di marker ArUco su supporti rigidi in alluminio.
+		\item Integrazione \textbf{Active Learning} per loop chiusi di sperimentazione autonoma.
+		\item Espansione della libreria LfD per reagenti ad alta viscosità.
+	\end{itemize}
+	
+\end{document}

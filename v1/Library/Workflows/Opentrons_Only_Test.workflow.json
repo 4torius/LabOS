@@ -1,0 +1,19 @@
+{
+  "WorkflowName": "Opentrons_Only_Test",
+  "Description": "Solo esecuzione ricetta Opentrons (per test)",
+  "Author": "BicoccaLab",
+  "Version": "1.0",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "Opentrons",
+      "Action": "ExecuteRecipe",
+      "Parameters": {
+        "Recipe": "test_case1_requirements",
+        "UseHAL": true,
+        "HALConfig": "Standard_Flex_Setup"
+      },
+      "Description": "Esecuzione ricetta di test"
+    }
+  ]
+}

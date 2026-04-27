@@ -1,0 +1,73 @@
+{
+  "WorkflowName": "Manual_Intervention_Test",
+  "Description": "Test workflow con operazione manuale: Opentrons -> Manual Operation -> Tecan Analysis",
+  "Author": "BicoccaLab",
+  "Version": "1.0",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "Opentrons",
+      "Action": "ExecuteRecipe",
+      "Parameters": {
+        "Recipe": "test_case3_selfcontained_no_pipettes",
+        "UseHAL": true
+      },
+      "Description": "Esegue ricetta Opentrons"
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "Manual Station",
+      "Action": "RequestOperatorTask",
+      "Parameters": {
+        "task_type": "plate_transfer",
+        "description": "Trasferire la piastra da Opentrons al lettore Tecan. Verificare che la piastra sia orientata correttamente (A1 in alto a sinistra).",
+        "source_instrument": "Workflow Orchestrator",
+        "priority": "high",
+        "timeout_seconds": 1800
+      },
+      "Description": "Attende che l'operatore trasferisca la piastra - IL WORKFLOW SI BLOCCA QUI FINO A CONFERMA"
+    },
+    {
+      "StepNumber": 3,
+      "Instrument": "Tecan",
+      "Action": "Connect",
+      "Parameters": {
+        "ConnectionMode": "usb_auto"
+      },
+      "Description": "Connessione al Tecan"
+    },
+    {
+      "StepNumber": 4,
+      "Instrument": "Tecan",
+      "Action": "PlateIn",
+      "Description": "Inserimento piastra nel lettore"
+    },
+    {
+      "StepNumber": 5,
+      "Instrument": "Tecan",
+      "Action": "RunMeasurement",
+      "Parameters": {
+        "ProtocolFile": "Script1.mdfx",
+        "ProtocolPath": "C:\\Users\\andre\\Desktop\\BicoccaLab\\v7\\Library\\Analysis\\Script1.mdfx"
+      },
+      "Description": "Esegue analisi Script1"
+    },
+    {
+      "StepNumber": 6,
+      "Instrument": "Tecan",
+      "Action": "PlateOut",
+      "Description": "Espulsione piastra dal lettore"
+    },
+    {
+      "StepNumber": 7,
+      "Instrument": "Manual Station",
+      "Action": "SendNotification",
+      "Parameters": {
+        "message": "Workflow completato! Piastra pronta per il ritiro.",
+        "level": "info",
+        "source_instrument": "Tecan"
+      },
+      "Description": "Notifica completamento workflow"
+    }
+  ]
+}

@@ -1,0 +1,1067 @@
+{
+  "ProtocolName": "Test_96_Tips",
+  "Description": "Test per esaurimento tip rack - usa 96 tips (1 rack completo)",
+  "Requirements": {
+    "MyTips": "MyTips",
+    "MyPlate": "MyPlate",
+    "MyTrash": "MyTrash"
+  },
+  "Steps": [
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A1",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A2",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A3",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A4",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A5",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A6",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A7",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A8",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A9",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A10",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A11",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "A12",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "B1",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "B2",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "B3",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "B4",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "B5",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "B6",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "B7",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "B8",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "B9",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "B10",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "B11",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "B12",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "C1",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "C2",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "C3",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "C4",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "C5",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "C6",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "C7",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "C8",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "C9",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "C10",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "C11",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "C12",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "D1",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "D2",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "D3",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "D4",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "D5",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "D6",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "D7",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "D8",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "D9",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "D10",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "D11",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "D12",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "E1",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "E2",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "E3",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "E4",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "E5",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "E6",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "E7",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "E8",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "E9",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "E10",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "E11",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "E12",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "F1",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "F2",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "F3",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "F4",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "F5",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "F6",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "F7",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "F8",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "F9",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "F10",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "F11",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "F12",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "G1",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "G2",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "G3",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "G4",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "G5",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "G6",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "G7",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "G8",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "G9",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "G10",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "G11",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "G12",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "H1",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "H2",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "H3",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "H4",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "H5",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "H6",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "H7",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "H8",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "H9",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "H10",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "H11",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "Well": "H12",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    }
+  ]
+}

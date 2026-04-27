@@ -1,0 +1,788 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+/* ── Layout ─────────────────────────────────────────────────────────────── */
+.hw-page { padding-top: 50px; }
+
+.hw-toolbar {
+    background: linear-gradient(135deg, var(--bs-dark) 0%, #1a1d21 100%);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 10px;
+    padding: 10px 20px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}
+.hw-toolbar .toolbar-title { font-weight:600; font-size:1rem; color:var(--bs-light); white-space:nowrap; }
+.hw-toolbar .toolbar-title i { color:var(--bs-primary); font-size:1.2rem; margin-right:6px; }
+.hw-toolbar .sep { width:1px; height:28px; background:var(--bs-border-color); }
+
+/* ── Configs list ───────────────────────────────────────────────────────── */
+.config-card {
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: border-color .15s, background .15s;
+}
+.config-card:hover { border-color: var(--bs-primary); }
+.config-card.selected { border-color: var(--bs-primary); background: rgba(13,110,253,.08); }
+.config-card.is-active { border-color: #198754; background: rgba(25,135,84,.08); }
+.config-card.is-active.selected { border-color: #198754; background: rgba(25,135,84,.12); }
+.active-dot { width:8px; height:8px; border-radius:50%; background:#198754; display:inline-block; margin-right:4px; box-shadow:0 0 6px #198754; }
+
+/* ── Deck visualizer ────────────────────────────────────────────────────── */
+.deck-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    gap: 6px;
+    aspect-ratio: 3/4;
+    max-width: 340px;
+}
+.deck-slot {
+    border: 2px solid var(--bs-border-color);
+    border-radius: 8px;
+    padding: 6px;
+    cursor: pointer;
+    min-height: 70px;
+    position: relative;
+    transition: border-color .15s, background .15s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: .75rem;
+}
+.deck-slot:hover { border-color: var(--bs-primary); background: rgba(13,110,253,.06); }
+.deck-slot.slot-empty { border-style: dashed; color: var(--bs-secondary-color); }
+.deck-slot.slot-labware { border-color: #0d6efd; background: rgba(13,110,253,.1); }
+.deck-slot.slot-tiprack { border-color: #0dcaf0; background: rgba(13,202,240,.1); }
+.deck-slot.slot-module  { border-color: #dc3545; background: rgba(220,53,69,.1); }
+.deck-slot.slot-trash   { border-color: #6c757d; background: rgba(108,117,125,.1); }
+.deck-slot.slot-reservoir { border-color: #198754; background: rgba(25,135,84,.1); }
+.deck-slot.slot-thermocycler { grid-row: span 2; border-color: #dc3545; background: rgba(220,53,69,.1); }
+.deck-slot .slot-label { font-size:.65rem; color: var(--bs-secondary-color); position:absolute; top:3px; left:5px; }
+.deck-slot .slot-icon { font-size: 1.3rem; }
+.deck-slot .slot-name { font-size: .7rem; font-weight:600; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+.deck-slot .slot-detail { font-size: .6rem; color: var(--bs-secondary-color); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+
+/* ── Pipettes section ───────────────────────────────────────────────────── */
+.mount-badge {
+    display: inline-block;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 28px;
+    font-size: .7rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+</style>
+
+<div class="container-fluid hw-page">
+    <!-- Toolbar -->
+    <div class="hw-toolbar">
+        <span class="toolbar-title"><i class="bi bi-cpu"></i>Hardware Config Editor</span>
+        <div class="sep"></div>
+        <input type="text" id="configName" class="form-control form-control-sm" style="width:200px" placeholder="Config name…">
+        <input type="text" id="configDesc" class="form-control form-control-sm flex-grow-1" placeholder="Description…">
+        <div class="sep"></div>
+        <button class="btn btn-outline-secondary btn-sm" onclick="newConfig()">
+            <i class="bi bi-plus-lg"></i> New
+        </button>
+        <button class="btn btn-outline-success btn-sm" id="btnSetActive" disabled onclick="setActiveConfig()">
+            <i class="bi bi-check-circle"></i> Set Active
+        </button>
+        <button class="btn btn-outline-danger btn-sm" id="btnDeleteConfig" disabled onclick="deleteCurrentConfig()">
+            <i class="bi bi-trash"></i>
+        </button>
+        <button class="btn btn-primary btn-sm" onclick="saveConfig()">
+            <i class="bi bi-save"></i> Save
+        </button>
+    </div>
+
+    <div class="row g-4">
+        <!-- Left: configs list -->
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-folder2"></i> Saved Configs</span>
+                    <span class="badge bg-secondary" id="configCount">0</span>
+                </div>
+                <div class="card-body p-2" id="configsList">
+                    <p class="text-muted text-center small py-3">Loading…</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center: deck + pipettes -->
+        <div class="col-md-5">
+            <!-- Deck visualizer -->
+            <div class="card mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-grid-3x3"></i> Opentrons Flex Deck</span>
+                    <small class="text-muted">Click a slot to assign</small>
+                </div>
+                <div class="card-body d-flex justify-content-center py-3">
+                    <div class="deck-grid" id="deckGrid"></div>
+                </div>
+            </div>
+
+            <!-- Pipettes -->
+            <div class="card">
+                <div class="card-header"><i class="bi bi-droplet-fill"></i> Pipettes</div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            <label class="form-label small fw-semibold d-flex align-items-center gap-2">
+                                <span class="mount-badge bg-primary text-white">L</span> Left Mount
+                            </label>
+                            <select class="form-select form-select-sm" id="pipetteLeft">
+                                <option value="">— None —</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small fw-semibold d-flex align-items-center gap-2">
+                                <span class="mount-badge bg-success text-white">R</span> Right Mount
+                            </label>
+                            <select class="form-select form-select-sm" id="pipetteRight">
+                                <option value="">— None —</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mt-2 small text-muted">
+                        <i class="bi bi-info-circle"></i>
+                        96-ch pipettes occupy both mounts — select in Left and leave Right empty.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: deck assignments table -->
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-list-ul"></i> Deck Assignments</span>
+                    <span class="badge bg-secondary" id="assignCount">0</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>Slot</th>
+                                    <th>Logical Name</th>
+                                    <th>Load Name</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="assignTable">
+                                <tr><td colspan="4" class="text-center text-muted py-3 small">No assignments yet</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- JSON preview -->
+            <div class="card mt-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-code-slash"></i> JSON Preview</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="copyJson()">
+                        <i class="bi bi-clipboard"></i>
+                    </button>
+                </div>
+                <div class="card-body p-0">
+                    <pre id="jsonPreview" style="max-height:220px; overflow-y:auto; font-size:.72rem; margin:0; padding:10px; background:var(--bs-body-bg); color:var(--bs-body-color); border-radius:0 0 .375rem .375rem;"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Slot Assignment Modal -->
+<div class="modal fade" id="slotModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-grid-1x2 me-2"></i>Slot <span id="slotModalLabel"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="modalSlot">
+                <div class="mb-3">
+                    <label class="form-label">Type</label>
+                    <select class="form-select" id="slotType" onchange="onSlotTypeChange()">
+                        <option value="">— Empty (clear slot) —</option>
+                        <option value="labware">Labware (plate / tip rack / reservoir)</option>
+                        <option value="module">Module</option>
+                        <option value="trash">Trash Bin</option>
+                    </select>
+                </div>
+
+                <!-- Labware fields -->
+                <div id="labwareFields" style="display:none">
+                    <div class="mb-3">
+                        <label class="form-label">Logical Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="slotLogicalName" placeholder="e.g. Piastra_Target, Tips_1000">
+                        <div class="form-text">Name used in recipes and workflows.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Labware</label>
+                        <select class="form-select" id="slotLoadName" onchange="onLoadNameChange()">
+                            <option value="">— Select labware —</option>
+                        </select>
+                    </div>
+                    <div class="mb-3" id="tecanPlateSection" style="display:none">
+                        <label class="form-label">
+                            Tecan Plate Name
+                            <span class="badge bg-success ms-1">Tecan compatible</span>
+                        </label>
+                        <input type="text" class="form-control" id="slotTecanName" placeholder="e.g. GRE96ft_Corning360">
+                        <div class="form-text">iControl plate name. Leave empty if not used with Tecan.</div>
+                    </div>
+                </div>
+
+                <!-- Module fields -->
+                <div id="moduleFields" style="display:none">
+                    <div class="mb-3">
+                        <label class="form-label">Logical Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="moduleLogicalName" placeholder="e.g. HeaterShaker, Thermocycler">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Module Type</label>
+                        <select class="form-select" id="moduleType" onchange="onModuleTypeChange()">
+                            <option value="">— Select module —</option>
+                        </select>
+                    </div>
+                    <div class="alert alert-info py-2 small" id="moduleNote" style="display:none"></div>
+                </div>
+
+                <!-- Trash fields -->
+                <div id="trashFields" style="display:none">
+                    <div class="mb-3">
+                        <label class="form-label">Logical Name</label>
+                        <input type="text" class="form-control" id="trashLogicalName" value="Bin_Standard">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-danger me-auto" id="btnClearSlot" onclick="clearSlot()">
+                    <i class="bi bi-x-circle"></i> Clear Slot
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="applySlot()">Apply</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div class="modal fade" id="deleteConfigModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content border-danger">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-trash"></i> Delete Config</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Delete <strong id="deleteConfigLabel"></strong>?</p>
+                <p class="text-danger small mb-0"><i class="bi bi-exclamation-triangle"></i> This cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="btnConfirmDeleteConfig">Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ── State ─────────────────────────────────────────────────────────────────
+
+const FLEX_SLOTS = ['A1','A2','A3','B1','B2','B3','C1','C2','C3','D1','D2','D3'];
+
+// slot → assignment: { type:'labware'|'module'|'trash', logicalName, loadName?, tecanPlateName?, moduleType? }
+let deckState = {};
+let catalogs = { pipettes: [], modules: [], labware: [] };
+let currentFilename = null;
+let activeFilename = null;
+
+// ── Catalog loading ───────────────────────────────────────────────────────
+
+async function loadCatalogs() {
+    const [pip, mod, lab] = await Promise.all([
+        fetch('/api/hardware/catalog/pipettes').then(r => r.json()),
+        fetch('/api/hardware/catalog/modules').then(r => r.json()),
+        fetch('/api/hardware/catalog/labware').then(r => r.json()),
+    ]);
+    catalogs.pipettes = pip.pipettes || [];
+    catalogs.modules  = mod.modules  || [];
+    catalogs.labware  = lab.labware  || [];
+
+    // Populate pipette dropdowns
+    ['pipetteLeft', 'pipetteRight'].forEach(id => {
+        const sel = document.getElementById(id);
+        sel.innerHTML = '<option value="">— None —</option>';
+        catalogs.pipettes.forEach(p => {
+            sel.innerHTML += `<option value="${p.model}">${p.display}</option>`;
+        });
+    });
+
+    // Populate module type select
+    const modSel = document.getElementById('moduleType');
+    modSel.innerHTML = '<option value="">— Select module —</option>';
+    catalogs.modules.forEach(m => {
+        modSel.innerHTML += `<option value="${m.type}">${m.display}</option>`;
+    });
+
+    // Populate labware select grouped by category
+    buildLabwareSelect();
+}
+
+function buildLabwareSelect() {
+    const sel = document.getElementById('slotLoadName');
+    sel.innerHTML = '<option value="">— Select labware —</option>';
+    const groups = { plate: 'Plates', tiprack: 'Tip Racks', reservoir: 'Reservoirs' };
+    Object.entries(groups).forEach(([cat, label]) => {
+        const items = catalogs.labware.filter(l => l.category === cat);
+        if (!items.length) return;
+        sel.innerHTML += `<optgroup label="${label}">`;
+        items.forEach(l => {
+            const tecan = l.tecan_plate_name ? ' ✅' : '';
+            sel.innerHTML += `<option value="${l.load_name}" data-cat="${cat}" data-tecan="${l.tecan_plate_name}">${l.display_name}${tecan}</option>`;
+        });
+        sel.innerHTML += '</optgroup>';
+    });
+}
+
+// ── Configs list ──────────────────────────────────────────────────────────
+
+async function refreshConfigsList() {
+    const resp = await fetch('/api/hardware/configs');
+    const data = await resp.json();
+    const configs = data.configs || [];
+    activeFilename = data.active || null;
+    document.getElementById('configCount').textContent = configs.length;
+
+    const list = document.getElementById('configsList');
+    if (!configs.length) {
+        list.innerHTML = '<p class="text-muted text-center small py-3">No configs yet. Click <strong>New</strong> to create one.</p>';
+        return;
+    }
+    list.innerHTML = configs.map(c => {
+        const isSelected = currentFilename === c.filename;
+        const isActive   = c.active;
+        const cardClass  = `${isActive ? 'is-active' : ''} ${isSelected ? 'selected' : ''}`;
+        const activeBadge = isActive
+            ? `<span><span class="active-dot"></span><span class="text-success" style="font-size:.65rem">ACTIVE</span></span>`
+            : '';
+        return `
+        <div class="card config-card mb-2 ${cardClass}" onclick="loadConfig('${c.filename}')">
+            <div class="card-body py-2 px-3">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div class="fw-semibold small">${c.name}</div>
+                    ${activeBadge}
+                </div>
+                <div class="text-muted" style="font-size:.72rem">${c.description || '—'}</div>
+                <div class="mt-1" style="font-size:.68rem">
+                    <span class="badge bg-primary me-1">${c.pipettes.filter(Boolean).join(', ') || 'no pipettes'}</span>
+                    <span class="badge bg-secondary">${c.labware_count} labware</span>
+                    ${c.module_count ? `<span class="badge bg-danger ms-1">${c.module_count} modules</span>` : ''}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// ── Load / New ────────────────────────────────────────────────────────────
+
+async function loadConfig(filename) {
+    const data = await fetch(`/api/hardware/configs/${encodeURIComponent(filename)}`).then(r => r.json());
+    currentFilename = filename;
+    document.getElementById('configName').value = data.ConfigName || '';
+    document.getElementById('configDesc').value = data.Description || '';
+    document.getElementById('pipetteLeft').value  = data.Pipettes?.left  || '';
+    document.getElementById('pipetteRight').value = data.Pipettes?.right || '';
+    document.getElementById('btnDeleteConfig').disabled = false;
+    document.getElementById('btnSetActive').disabled = false;
+    _updateActiveBtn();
+
+    // Rebuild deck state from JSON
+    deckState = {};
+    Object.entries(data.Modules  || {}).forEach(([name, v]) => {
+        deckState[v.Slot] = { type: 'module', logicalName: name, moduleType: v.Type };
+    });
+    Object.entries(data.Trash || {}).forEach(([name, v]) => {
+        deckState[v.Slot] = { type: 'trash', logicalName: name };
+    });
+    Object.entries(data.Labware || {}).forEach(([name, v]) => {
+        deckState[v.Slot] = { type: 'labware', logicalName: name, loadName: v.LoadName, tecanPlateName: v.TecanPlateName || '' };
+    });
+
+    renderDeck();
+    renderAssignTable();
+    renderJsonPreview();
+    await refreshConfigsList();
+}
+
+function newConfig() {
+    currentFilename = null;
+    deckState = {};
+    document.getElementById('configName').value = '';
+    document.getElementById('configDesc').value = '';
+    document.getElementById('pipetteLeft').value = '';
+    document.getElementById('pipetteRight').value = '';
+    document.getElementById('btnDeleteConfig').disabled = true;
+    document.getElementById('btnSetActive').disabled = true;
+    renderDeck();
+    renderAssignTable();
+    renderJsonPreview();
+    document.getElementById('configName').focus();
+    refreshConfigsList();
+}
+
+// ── Deck rendering ────────────────────────────────────────────────────────
+
+const SLOT_ICONS = {
+    plate: 'bi-grid-3x3-gap', tiprack: 'bi-layers', reservoir: 'bi-droplet-fill',
+    module: 'bi-cpu', trash: 'bi-trash3', empty: 'bi-plus'
+};
+const SLOT_CLASSES = {
+    labware_plate: 'slot-labware', labware_tiprack: 'slot-tiprack',
+    labware_reservoir: 'slot-reservoir', module: 'slot-module', trash: 'slot-trash', empty: 'slot-empty'
+};
+
+function slotCSSClass(slot) {
+    const a = deckState[slot];
+    if (!a) return 'slot-empty';
+    if (a.type === 'labware') {
+        const cat = catalogs.labware.find(l => l.load_name === a.loadName)?.category || 'plate';
+        return SLOT_CLASSES[`labware_${cat}`] || 'slot-labware';
+    }
+    return SLOT_CLASSES[a.type] || '';
+}
+
+function slotIcon(slot) {
+    const a = deckState[slot];
+    if (!a) return SLOT_ICONS.empty;
+    if (a.type === 'labware') {
+        const cat = catalogs.labware.find(l => l.load_name === a.loadName)?.category || 'plate';
+        return SLOT_ICONS[cat] || SLOT_ICONS.plate;
+    }
+    return SLOT_ICONS[a.type] || 'bi-question';
+}
+
+function renderDeck() {
+    const grid = document.getElementById('deckGrid');
+    grid.innerHTML = '';
+
+    // Thermocycler occupies A1+B1 — detect it
+    const tcSlot = Object.entries(deckState).find(([s, a]) => a.type === 'module' && a.moduleType === 'thermocyclerModuleV2');
+    const tcSlots = tcSlot ? ['A1', 'B1'] : [];
+
+    let skipNext = false;
+    FLEX_SLOTS.forEach((slot, idx) => {
+        if (skipNext === slot) { skipNext = false; return; }
+
+        const a = deckState[slot];
+        const isTc = tcSlots.includes(slot) && slot === 'A1';
+        const cssClass = slotCSSClass(slot);
+        const icon = slotIcon(slot);
+
+        const div = document.createElement('div');
+        div.className = `deck-slot ${cssClass}${isTc ? ' slot-thermocycler' : ''}`;
+        div.onclick = () => openSlotModal(slot);
+        if (isTc) skipNext = 'B1';
+
+        const tecanBadge = a?.tecanPlateName ? '<span class="badge bg-success" style="font-size:.55rem">Tecan ✅</span>' : '';
+
+        div.innerHTML = `
+            <span class="slot-label">${slot}${isTc ? '+B1' : ''}</span>
+            <i class="bi ${icon} slot-icon"></i>
+            <span class="slot-name">${a?.logicalName || ''}</span>
+            ${a?.loadName ? `<span class="slot-detail">${a.loadName.split('_').slice(0,3).join('_')}…</span>` : ''}
+            ${tecanBadge}
+        `;
+        grid.appendChild(div);
+    });
+}
+
+// ── Assignments table ─────────────────────────────────────────────────────
+
+function renderAssignTable() {
+    const tbody = document.getElementById('assignTable');
+    const entries = Object.entries(deckState);
+    document.getElementById('assignCount').textContent = entries.length;
+
+    if (!entries.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3 small">No assignments yet</td></tr>';
+        return;
+    }
+    tbody.innerHTML = entries.sort((a, b) => a[0].localeCompare(b[0])).map(([slot, a]) => {
+        const typeIcon = a.type === 'labware' ? 'bi-layers text-primary' : a.type === 'module' ? 'bi-cpu text-danger' : 'bi-trash3 text-secondary';
+        const detail = a.loadName || a.moduleType || 'TrashBin';
+        const tecan = a.tecanPlateName ? `<span class="badge bg-success ms-1" style="font-size:.6rem">Tecan</span>` : '';
+        return `
+            <tr>
+                <td><code class="small">${slot}</code></td>
+                <td class="small"><i class="bi ${typeIcon} me-1"></i>${a.logicalName}</td>
+                <td class="small text-muted" style="max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${detail}${tecan}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="clearSlotDirect('${slot}')">
+                        <i class="bi bi-x"></i>
+                    </button>
+                </td>
+            </tr>`;
+    }).join('');
+}
+
+function clearSlotDirect(slot) {
+    delete deckState[slot];
+    renderDeck();
+    renderAssignTable();
+    renderJsonPreview();
+}
+
+// ── Slot modal ────────────────────────────────────────────────────────────
+
+function openSlotModal(slot) {
+    document.getElementById('modalSlot').value = slot;
+    document.getElementById('slotModalLabel').textContent = slot;
+
+    const a = deckState[slot];
+    const type = a?.type || '';
+    document.getElementById('slotType').value = type;
+    document.getElementById('slotLogicalName').value = a?.logicalName || '';
+    document.getElementById('slotLoadName').value = a?.loadName || '';
+    document.getElementById('slotTecanName').value = a?.tecanPlateName || '';
+    document.getElementById('moduleLogicalName').value = a?.logicalName || '';
+    document.getElementById('moduleType').value = a?.moduleType || '';
+    document.getElementById('trashLogicalName').value = a?.logicalName || 'Bin_Standard';
+
+    onSlotTypeChange();
+    onLoadNameChange();
+    onModuleTypeChange();
+    new bootstrap.Modal(document.getElementById('slotModal')).show();
+}
+
+function onSlotTypeChange() {
+    const type = document.getElementById('slotType').value;
+    document.getElementById('labwareFields').style.display = type === 'labware' ? '' : 'none';
+    document.getElementById('moduleFields').style.display  = type === 'module'  ? '' : 'none';
+    document.getElementById('trashFields').style.display   = type === 'trash'   ? '' : 'none';
+}
+
+function onLoadNameChange() {
+    const sel = document.getElementById('slotLoadName');
+    const opt = sel.options[sel.selectedIndex];
+    const cat = opt?.getAttribute('data-cat') || '';
+    const tecan = opt?.getAttribute('data-tecan') || '';
+    const isPlate = cat === 'plate';
+    document.getElementById('tecanPlateSection').style.display = isPlate ? '' : 'none';
+    if (tecan && !document.getElementById('slotTecanName').value) {
+        document.getElementById('slotTecanName').value = tecan;
+    }
+}
+
+function onModuleTypeChange() {
+    const type = document.getElementById('moduleType').value;
+    const note = document.getElementById('moduleNote');
+    const mod = catalogs.modules.find(m => m.type === type);
+    if (mod && mod.slots === 'A1+B1') {
+        note.style.display = '';
+        note.textContent = '⚠️ Thermocycler occupies slots A1 and B1. Assign it to slot A1.';
+    } else {
+        note.style.display = 'none';
+    }
+}
+
+function clearSlot() {
+    const slot = document.getElementById('modalSlot').value;
+    delete deckState[slot];
+    bootstrap.Modal.getInstance(document.getElementById('slotModal')).hide();
+    renderDeck();
+    renderAssignTable();
+    renderJsonPreview();
+}
+
+function applySlot() {
+    const slot = document.getElementById('modalSlot').value;
+    const type = document.getElementById('slotType').value;
+
+    if (!type) {
+        delete deckState[slot];
+    } else if (type === 'labware') {
+        const logicalName = document.getElementById('slotLogicalName').value.trim();
+        const loadName = document.getElementById('slotLoadName').value;
+        if (!logicalName) {
+            document.getElementById('slotLogicalName').classList.add('is-invalid');
+            return;
+        }
+        document.getElementById('slotLogicalName').classList.remove('is-invalid');
+        deckState[slot] = {
+            type: 'labware', logicalName, loadName,
+            tecanPlateName: document.getElementById('slotTecanName').value.trim()
+        };
+    } else if (type === 'module') {
+        const logicalName = document.getElementById('moduleLogicalName').value.trim() || 'Module';
+        const moduleType = document.getElementById('moduleType').value;
+        deckState[slot] = { type: 'module', logicalName, moduleType };
+        // Thermocycler auto-fills B1
+        if (moduleType === 'thermocyclerModuleV2') {
+            delete deckState['B1'];  // B1 is occupied, not separately assignable
+        }
+    } else if (type === 'trash') {
+        const logicalName = document.getElementById('trashLogicalName').value.trim() || 'Bin_Standard';
+        deckState[slot] = { type: 'trash', logicalName };
+    }
+
+    bootstrap.Modal.getInstance(document.getElementById('slotModal')).hide();
+    renderDeck();
+    renderAssignTable();
+    renderJsonPreview();
+}
+
+// ── Build & render JSON ───────────────────────────────────────────────────
+
+function buildHalJson() {
+    const cfg = {
+        ConfigName:  document.getElementById('configName').value.trim() || 'Unnamed',
+        Description: document.getElementById('configDesc').value.trim(),
+        Modules: {}, Trash: {}, Labware: {},
+        Pipettes: {}
+    };
+    const left  = document.getElementById('pipetteLeft').value;
+    const right = document.getElementById('pipetteRight').value;
+    if (left)  cfg.Pipettes.left  = left;
+    if (right) cfg.Pipettes.right = right;
+
+    Object.entries(deckState).forEach(([slot, a]) => {
+        if (a.type === 'module') {
+            cfg.Modules[a.logicalName] = { Type: a.moduleType, Slot: slot };
+        } else if (a.type === 'trash') {
+            cfg.Trash[a.logicalName] = { Type: 'TrashBin', Slot: slot };
+        } else if (a.type === 'labware') {
+            const entry = { LoadName: a.loadName, Slot: slot };
+            if (a.tecanPlateName) entry.TecanPlateName = a.tecanPlateName;
+            cfg.Labware[a.logicalName] = entry;
+        }
+    });
+    return cfg;
+}
+
+function renderJsonPreview() {
+    document.getElementById('jsonPreview').textContent = JSON.stringify(buildHalJson(), null, 2);
+}
+
+function copyJson() {
+    navigator.clipboard.writeText(JSON.stringify(buildHalJson(), null, 2))
+        .then(() => showToast('success', 'Copied', 'JSON copied to clipboard.'))
+        .catch(() => showToast('error', 'Copy failed', ''));
+}
+
+// ── Active config ─────────────────────────────────────────────────────────
+
+function _updateActiveBtn() {
+    const btn = document.getElementById('btnSetActive');
+    if (!btn || !currentFilename) return;
+    const isAlreadyActive = currentFilename === activeFilename;
+    btn.innerHTML = isAlreadyActive
+        ? '<i class="bi bi-check-circle-fill"></i> Active'
+        : '<i class="bi bi-check-circle"></i> Set Active';
+    btn.className = isAlreadyActive
+        ? 'btn btn-success btn-sm'
+        : 'btn btn-outline-success btn-sm';
+    btn.disabled = false;
+}
+
+async function setActiveConfig() {
+    if (!currentFilename) return;
+    try {
+        await fetch('/api/hardware/active', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ filename: currentFilename })
+        });
+        activeFilename = currentFilename;
+        _updateActiveBtn();
+        await refreshConfigsList();
+        showToast('success', 'Active config set', currentFilename);
+    } catch (e) {
+        showToast('error', 'Error', e.message);
+    }
+}
+
+// ── Save / Delete ─────────────────────────────────────────────────────────
+
+async function saveConfig() {
+    const cfg = buildHalJson();
+    if (!cfg.ConfigName || cfg.ConfigName === 'Unnamed') {
+        document.getElementById('configName').classList.add('is-invalid');
+        document.getElementById('configName').focus();
+        return;
+    }
+    document.getElementById('configName').classList.remove('is-invalid');
+    try {
+        const resp = await fetch('/api/hardware/configs', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(cfg)
+        });
+        const result = await resp.json();
+        if (!resp.ok) throw new Error(result.detail || resp.statusText);
+        currentFilename = result.filename;
+        document.getElementById('btnDeleteConfig').disabled = false;
+        await refreshConfigsList();
+        showToast('success', 'Saved', result.filename);
+    } catch (e) {
+        showToast('error', 'Save failed', e.message);
+    }
+}
+
+function deleteCurrentConfig() {
+    if (!currentFilename) return;
+    document.getElementById('deleteConfigLabel').textContent = currentFilename;
+    new bootstrap.Modal(document.getElementById('deleteConfigModal')).show();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('btnConfirmDeleteConfig').addEventListener('click', async () => {
+        if (!currentFilename) return;
+        bootstrap.Modal.getInstance(document.getElementById('deleteConfigModal')).hide();
+        try {
+            await fetch(`/api/hardware/configs/${encodeURIComponent(currentFilename)}`, { method: 'DELETE' });
+            showToast('success', 'Deleted', currentFilename);
+            newConfig();
+            await refreshConfigsList();
+        } catch (e) {
+            showToast('error', 'Delete failed', e.message);
+        }
+    });
+
+    // Live JSON update on pipette change
+    document.getElementById('pipetteLeft').addEventListener('change', renderJsonPreview);
+    document.getElementById('pipetteRight').addEventListener('change', renderJsonPreview);
+    document.getElementById('configName').addEventListener('input', renderJsonPreview);
+    document.getElementById('configDesc').addEventListener('input', renderJsonPreview);
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadCatalogs();
+    await refreshConfigsList();
+    // Auto-load active config if one is set
+    if (activeFilename) {
+        await loadConfig(activeFilename);
+    } else {
+        renderDeck();
+        renderJsonPreview();
+    }
+});
+</script>
+{% endblock %}

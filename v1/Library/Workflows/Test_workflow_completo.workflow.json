@@ -1,0 +1,102 @@
+{
+  "WorkflowName": "Test_workflow_completo",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "GoFaGo Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "jbdicbrjpachybnevgledbwsfkygxmad"
+      }
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "GoFaGo Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "xqsapdodzbcabreuaihbqsvffgebbsfx"
+      }
+    },
+    {
+      "StepNumber": 3,
+      "Instrument": "Opentrons Flex",
+      "Action": "ExecuteRecipe",
+      "Parameters": {
+        "recipe": "test_6.json"
+      }
+    },
+    {
+      "StepNumber": 4,
+      "Instrument": "GoFaGo Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "bvevdflgubltydqmqljdtsdkluabuduf"
+      }
+    },
+    {
+      "StepNumber": 5,
+      "Instrument": "Manual Station",
+      "Action": "RequestOperatorTask",
+      "Parameters": {
+        "TaskDescription": "Sposta il robot a Tecan",
+        "TaskType": "preparation",
+        "Priority": "urgent"
+      }
+    },
+    {
+      "StepNumber": 6,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "Connect",
+      "Parameters": {}
+    },
+    {
+      "StepNumber": 7,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "PlateOut",
+      "Parameters": {}
+    },
+    {
+      "StepNumber": 8,
+      "Instrument": "GoFaGo Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "acxzbdvsrtfptmxpbecqgnapadxitfye"
+      }
+    },
+    {
+      "StepNumber": 9,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "PlateIn",
+      "Parameters": {}
+    },
+    {
+      "StepNumber": 10,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "RunMeasurement",
+      "Parameters": {
+        "protocol": "Script1.mdfx"
+      }
+    },
+    {
+      "StepNumber": 11,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "PlateOut",
+      "Parameters": {}
+    },
+    {
+      "StepNumber": 12,
+      "Instrument": "GoFaGo Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "rocfheceibklrecoaafefewbdmciavcc"
+      }
+    },
+    {
+      "StepNumber": 13,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "PlateIn",
+      "Parameters": {}
+    }
+  ],
+  "CreatedAt": "2026-03-07T17:58:57.707888"
+}

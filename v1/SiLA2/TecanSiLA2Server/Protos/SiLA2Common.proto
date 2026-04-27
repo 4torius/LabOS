@@ -1,0 +1,166 @@
+// SiLA2Common.proto — C# server (Tecan)
+// Field numbers MUST match v1/SiLA2/SiLA2Common.proto (Python canonical proto)
+// for cross-language compatibility between Python client and C# server.
+
+syntax = "proto3";
+
+package sila2.org.silastandard;
+
+option csharp_namespace = "TecanSiLA2Server.Features";
+
+// =============================================================================
+// SERVER INFO SERVICE - Plug & Play Interface
+// =============================================================================
+
+service SiLA2ServerInfo {
+    rpc GetServerInfo(GetServerInfoRequest) returns (ServerInfoResponse);
+    rpc GetFeatures(GetFeaturesRequest) returns (FeaturesResponse);
+    rpc GetStatus(GetStatusRequest) returns (StatusResponse);
+    rpc ExecuteCommand(ExecuteCommandRequest) returns (stream ExecuteCommandResponse);
+    rpc GetProperty(GetPropertyRequest) returns (PropertyResponse);
+}
+
+// =============================================================================
+// SERVER INFO MESSAGES
+// =============================================================================
+
+message GetServerInfoRequest {}
+
+// Fields MUST match Python SiLA2Common.proto exactly
+message ServerInfoResponse {
+    string server_name = 1;
+    string server_type = 2;
+    string vendor = 3;
+    string model = 4;
+    string serial_number = 5;
+    string server_version = 6;
+    string sila_version = 7;
+    string description = 8;
+    string host = 9;
+    int32 uptime_seconds = 10;
+    repeated string capabilities = 11;
+    string server_uuid = 12;
+    int32 port = 13;
+    bool hardware_connected = 14;
+    string hardware_status = 15;
+    map<string, string> metadata = 16;
+}
+
+// =============================================================================
+// FEATURES MESSAGES
+// =============================================================================
+
+message GetFeaturesRequest {}
+
+message FeaturesResponse {
+    repeated Feature features = 1;
+}
+
+message Feature {
+    string identifier = 1;
+    string display_name = 2;
+    string description = 3;
+    string version = 4;      // NOTE: version=4, category=5 (matches Python proto)
+    string category = 5;
+    repeated Command commands = 6;
+    repeated Property properties = 7;
+}
+
+message Command {
+    string identifier = 1;   // was command_id in old C# proto
+    string display_name = 2;
+    string description = 3;
+    bool observable = 4;      // was is_observable in old C# proto
+    repeated Parameter parameters = 5;
+    repeated Parameter responses = 6;
+}
+
+message Parameter {
+    string identifier = 1;   // was name in old C# proto
+    string display_name = 2; // was param_type (repurposed)
+    string description = 3;
+    string data_type = 4;    // was bool required — TYPE CHANGE (critical alignment)
+    bool required = 5;        // was string default_value — TYPE CHANGE (critical alignment)
+    string default_value = 6;
+    repeated string constraints = 7;
+}
+
+message Property {
+    string identifier = 1;   // was property_id in old C# proto
+    string display_name = 2;
+    string description = 3;
+    string data_type = 4;    // was property_type in old C# proto
+    bool observable = 5;      // was is_observable in old C# proto
+    bool readonly = 6;
+}
+
+// =============================================================================
+// STATUS MESSAGES
+// =============================================================================
+
+message GetStatusRequest {}
+
+// Fields MUST match Python SiLA2Common.proto exactly
+message StatusResponse {
+    string status = 1;               // was server_status in old C# proto
+    bool server_online = 2;          // was string hardware_status — TYPE CHANGE (critical)
+    bool hardware_online = 3;        // was hardware_connected (same bool type, renamed)
+    string hardware_status = 4;      // was bool is_busy — TYPE CHANGE (critical)
+    string error_message = 5;        // was last_error
+    int64 uptime_seconds = 6;        // was string details — TYPE CHANGE (critical)
+    map<string, string> details = 7; // new: was JSON string in old C# proto
+}
+
+// =============================================================================
+// EXECUTE COMMAND MESSAGES
+// =============================================================================
+
+message ExecuteCommandRequest {
+    string feature = 1;
+    string command = 2;
+    map<string, string> parameters = 3;
+    int32 timeout_seconds = 4;
+}
+
+// Fields MUST match Python SiLA2Common.proto exactly
+message ExecuteCommandResponse {
+    bool success = 1;
+    bool is_intermediate = 2;         // was string error at field 2 — TYPE CHANGE (critical)
+    int32 progress = 3;               // was map result at field 3 — TYPE CHANGE (critical)
+    string status = 4;                // was bool is_intermediate at field 4 — TYPE CHANGE
+    map<string, string> result = 5;   // was int32 progress at field 5 — TYPE CHANGE
+    string error = 6;                 // was string status_message at field 6
+    SiLA2Error sila2_error = 7;
+}
+
+// =============================================================================
+// PROPERTY MESSAGES
+// =============================================================================
+
+message GetPropertyRequest {
+    string feature = 1;
+    string property = 2;  // was property_name in old C# proto
+}
+
+// Fields MUST match Python SiLA2Common.proto exactly
+message PropertyResponse {
+    bool success = 1;       // was string property_name — TYPE CHANGE (critical)
+    string value = 2;
+    string data_type = 3;   // was value_type in old C# proto
+    string error = 4;
+}
+
+// =============================================================================
+// SiLA2 STRUCTURED ERRORS
+// =============================================================================
+
+message SiLA2Error {
+    string error_identifier = 1;
+    string message = 2;
+    repeated ErrorParameter parameters = 3;
+}
+
+message ErrorParameter {
+    string identifier = 1;
+    string value = 2;
+}

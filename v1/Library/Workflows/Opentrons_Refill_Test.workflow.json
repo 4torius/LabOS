@@ -1,0 +1,47 @@
+{
+  "WorkflowName": "Opentrons_Refill_Test",
+  "Description": "Test del sistema di refill tips con notifica all'operatore",
+  "Author": "BicoccaLab",
+  "Version": "1.0",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "Opentrons",
+      "Action": "Initialize",
+      "Description": "Inizializzazione Opentrons"
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "Manual Station",
+      "Action": "RequestOperatorTask",
+      "Parameters": {
+        "task_type": "tip_refill",
+        "description": "SIMULAZIONE REFILL: Ricaricare il tip rack da 1000µL nello slot D3. Assicurarsi che i tips siano inseriti correttamente.",
+        "source_instrument": "Opentrons Flex",
+        "priority": "high",
+        "timeout_seconds": 600
+      },
+      "Description": "Richiesta refill tips - ATTESA CONFERMA OPERATORE"
+    },
+    {
+      "StepNumber": 3,
+      "Instrument": "Opentrons",
+      "Action": "RefillTipRack",
+      "Parameters": {
+        "slot": "D3"
+      },
+      "Description": "Conferma refill tip rack slot D3"
+    },
+    {
+      "StepNumber": 4,
+      "Instrument": "Manual Station",
+      "Action": "SendNotification",
+      "Parameters": {
+        "message": "Tip rack ricaricato con successo. Opentrons pronto per continuare.",
+        "level": "info",
+        "source_instrument": "Opentrons Flex"
+      },
+      "Description": "Notifica completamento refill"
+    }
+  ]
+}

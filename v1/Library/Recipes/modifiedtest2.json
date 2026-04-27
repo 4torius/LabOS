@@ -1,0 +1,99 @@
+﻿{
+  "ProtocolName": "modified_test1_hal",
+  "Description": "Versione HAL del test di modifica",
+  "Requirements": {
+    "MyReservoir": "MyReservoir",
+    "MyPlate": "MyPlate",
+    "HeaterShaker": "HeaterShaker",
+    "MyTrash": "MyTrash",
+    "MyTips": "MyTips"
+  },
+  "Steps": [
+    {
+      "Command": "Comment",
+      "Type": "Comment",
+      "Text": "AVVIO MODIFIED TEST (LOGICA HAL)"
+    },
+    {
+      "Command": "Distribute",
+      "Type": "Distribute",
+      "PipetteMount": "left",
+      "Volume": [
+        80, 80, 80, 80,
+        100, 100, 100, 100,
+        120, 120, 120, 120,
+        80, 80, 80, 80,
+        100, 100, 100, 100,
+        120, 120, 120, 120
+
+      ],
+      "Source": "MyReservoir:A1",
+      "Destinations": [
+        "MyPlate:A1",
+        "MyPlate:B1",
+        "MyPlate:C1",
+        "MyPlate:D1",
+        "MyPlate:A2",
+        "MyPlate:B2",
+        "MyPlate:C2",
+        "MyPlate:D2",
+        "MyPlate:A3",
+        "MyPlate:B3",
+        "MyPlate:C3",
+        "MyPlate:D3",
+        "MyPlate:A4",
+        "MyPlate:B4",   
+        "MyPlate:C4",
+        "MyPlate:D4",
+        "MyPlate:A5",
+        "MyPlate:B5",
+        "MyPlate:C5",
+        "MyPlate:D5",
+        "MyPlate:A6",
+        "MyPlate:B6",
+        "MyPlate:C6",
+        "MyPlate:D6"
+      ],
+      "NewTip": "once",
+      "TrashLocation": "MyTrash",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "Comment",
+      "Type": "Comment",
+      "Text": "STEP 2: Prepare Heater Shaker"
+    },
+    {
+      "Command": "HeaterShaker",
+      "Type": "HeaterShaker",
+      "ModuleID": "HeaterShaker",
+      "OpenLatch": true
+    },
+    {
+      "Command": "MoveLabware",
+      "Type": "MoveLabware",
+      "LabwareID": "MyPlate",
+      "NewLocation": "HeaterShaker",
+      "UseGripper": true
+    },
+    {
+      "Command": "HeaterShaker",
+      "Type": "HeaterShaker",
+      "ModuleID": "HeaterShaker",
+      "CloseLatch": true,
+      "Temperature": 37,
+      "WaitForTemp": true,
+      "RPM": 500,
+      "Duration": 5,
+      "OpenLatch": true
+    },
+    {
+      "Command": "MoveLabware",
+      "Type": "MoveLabware",
+      "LabwareID": "MyPlate",
+      "NewLocation": "D2",
+      "UseGripper": true
+    }
+  ]
+}
+

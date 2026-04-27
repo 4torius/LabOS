@@ -1,0 +1,33 @@
+{
+  "$schema": "./liquidclass.schema.json",
+  "name": "Aqueous",
+  "loadName": "water",
+  "description": "Aqueous liquids (water, buffers, media) - Opentrons verified",
+  "basedOn": "deionized water",
+  
+  "parameters": {
+    "aspirate_rate": 1.0,
+    "dispense_rate": 1.0,
+    "blow_out": false,
+    "touch_tip": false,
+    "mix_after": null,
+    "air_gap": 0,
+    "push_out": 2.0,
+    "delay_aspirate": 0.2,
+    "delay_dispense": 0.2
+  },
+  
+  "opentrons_native": {
+    "aspirate": {
+      "submerge_speed": 100,
+      "retract_speed": 50,
+      "delay_after": 0.2
+    },
+    "dispense": {
+      "submerge_speed": 100,
+      "flow_rate": 50,
+      "retract_speed": 50,
+      "delay_after": 0.2
+    }
+  }
+}

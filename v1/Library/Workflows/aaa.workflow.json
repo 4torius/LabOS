@@ -1,0 +1,17 @@
+{
+  "WorkflowName": "aaa",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "Opentrons Flex",
+      "Action": "ExecuteRecipe",
+      "Parameters": {}
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "RunMeasurement",
+      "Parameters": {}
+    }
+  ]
+}

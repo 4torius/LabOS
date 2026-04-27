@@ -1,0 +1,40 @@
+{
+  "WorkflowName": "tecan",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "PlateOut",
+      "Parameters": {}
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "dhvtaxeapblazkrllljktezzfhuezsyu"
+      }
+    },
+    {
+      "StepNumber": 3,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "PlateIn",
+      "Parameters": {}
+    },
+    {
+      "StepNumber": 4,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "RunMeasurement",
+      "Parameters": {
+        "protocol": "Script1.mdfx"
+      }
+    },
+    {
+      "StepNumber": 5,
+      "Instrument": "Tecan M200 Pro",
+      "Action": "PlateOut",
+      "Parameters": {}
+    }
+  ],
+  "CreatedAt": "2026-03-11T11:13:43.748715"
+}

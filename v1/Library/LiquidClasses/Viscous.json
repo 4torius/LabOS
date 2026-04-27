@@ -1,0 +1,42 @@
+{
+  "$schema": "./liquidclass.schema.json",
+  "name": "Viscous",
+  "loadName": "glycerol_50",
+  "description": "Viscous liquids (50% glycerol, PEG, oils) - Opentrons verified",
+  "basedOn": "50% glycerol",
+  
+  "parameters": {
+    "aspirate_rate": 0.25,
+    "dispense_rate": 0.25,
+    "blow_out": true,
+    "touch_tip": true,
+    "mix_after": [3, 0.5],
+    "air_gap": 0,
+    "push_out": 5.0,
+    "delay_aspirate": 1.0,
+    "delay_dispense": 0.5
+  },
+  
+  "opentrons_native": {
+    "aspirate": {
+      "submerge_speed": 4,
+      "retract_speed": 4,
+      "delay_after": 1.0
+    },
+    "dispense": {
+      "submerge_speed": 4,
+      "flow_rate": 25,
+      "retract_speed": 4,
+      "delay_after": 0.5,
+      "push_out_small_vol": 11.7,
+      "push_out_large_vol": 3.9
+    }
+  },
+  
+  "notes": [
+    "Pipettaggio lento per evitare bolle d'aria",
+    "Delay più lunghi per permettere al liquido di stabilizzarsi",
+    "Touch tip per rimuovere residui dal tip",
+    "Push out maggiore per svuotare completamente il tip"
+  ]
+}

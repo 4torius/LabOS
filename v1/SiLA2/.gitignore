@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Runtime data (keep folders via .gitkeep)
+logs/*
+!logs/.gitkeep
+errors/*
+!errors/.gitkeep
+input/*
+!input/.gitkeep
+output/*
+!output/.gitkeep
+processed/*
+!processed/.gitkeep
+images/*
+!images/.gitkeep
+temp/*
+!temp/.gitkeep
+
+# Tecan C# build artifacts
+TecanSiLA2Server/bin/
+TecanSiLA2Server/obj/
+TecanSiLA2Server/TecanClient/bin/
+TecanSiLA2Server/TecanClient/obj/
+*.user
+*.suo
+
+# Config overrides
+config_test.yaml
+*.local.yaml
+
+# Old/backup files
+*.old
+*.bak
+*_old.*
+*_backup.*

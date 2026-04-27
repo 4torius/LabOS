@@ -1,0 +1,152 @@
+{
+  "source": "Opentrons repo edge branch (shared-data)",
+  "total_files": 24,
+  "load_names": [
+    "eppendorf_96_tiprack_1000ul_eptips",
+    "eppendorf_96_tiprack_10ul_eptips",
+    "ev_resin_tips_flex_96_tiprack_adapter",
+    "geb_96_tiprack_1000ul",
+    "geb_96_tiprack_10ul",
+    "opentrons_96_filtertiprack_1000ul",
+    "opentrons_96_filtertiprack_10ul",
+    "opentrons_96_filtertiprack_200ul",
+    "opentrons_96_filtertiprack_20ul",
+    "opentrons_96_tiprack_1000ul",
+    "opentrons_96_tiprack_10ul",
+    "opentrons_96_tiprack_20ul",
+    "opentrons_96_tiprack_300ul",
+    "opentrons_flex_96_filtertiprack_1000ul",
+    "opentrons_flex_96_filtertiprack_200ul",
+    "opentrons_flex_96_filtertiprack_20ul",
+    "opentrons_flex_96_filtertiprack_50ul",
+    "opentrons_flex_96_tiprack_1000ul",
+    "opentrons_flex_96_tiprack_200ul",
+    "opentrons_flex_96_tiprack_20ul",
+    "opentrons_flex_96_tiprack_50ul",
+    "opentrons_flex_96_tiprack_adapter",
+    "opentrons_flex_tiprack_lid",
+    "tipone_96_tiprack_200ul"
+  ],
+  "definitions": [
+    {
+      "load_name": "eppendorf_96_tiprack_1000ul_eptips",
+      "version": "1",
+      "path": "Library/TipRacks/eppendorf_96_tiprack_1000ul_eptips/1.json"
+    },
+    {
+      "load_name": "eppendorf_96_tiprack_10ul_eptips",
+      "version": "1",
+      "path": "Library/TipRacks/eppendorf_96_tiprack_10ul_eptips/1.json"
+    },
+    {
+      "load_name": "ev_resin_tips_flex_96_tiprack_adapter",
+      "version": "1",
+      "path": "Library/TipRacks/ev_resin_tips_flex_96_tiprack_adapter/1.json"
+    },
+    {
+      "load_name": "geb_96_tiprack_1000ul",
+      "version": "1",
+      "path": "Library/TipRacks/geb_96_tiprack_1000ul/1.json"
+    },
+    {
+      "load_name": "geb_96_tiprack_10ul",
+      "version": "1",
+      "path": "Library/TipRacks/geb_96_tiprack_10ul/1.json"
+    },
+    {
+      "load_name": "opentrons_96_filtertiprack_1000ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_96_filtertiprack_1000ul/1.json"
+    },
+    {
+      "load_name": "opentrons_96_filtertiprack_10ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_96_filtertiprack_10ul/1.json"
+    },
+    {
+      "load_name": "opentrons_96_filtertiprack_200ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_96_filtertiprack_200ul/1.json"
+    },
+    {
+      "load_name": "opentrons_96_filtertiprack_20ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_96_filtertiprack_20ul/1.json"
+    },
+    {
+      "load_name": "opentrons_96_tiprack_1000ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_96_tiprack_1000ul/1.json"
+    },
+    {
+      "load_name": "opentrons_96_tiprack_10ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_96_tiprack_10ul/1.json"
+    },
+    {
+      "load_name": "opentrons_96_tiprack_20ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_96_tiprack_20ul/1.json"
+    },
+    {
+      "load_name": "opentrons_96_tiprack_300ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_96_tiprack_300ul/1.json"
+    },
+    {
+      "load_name": "opentrons_flex_96_filtertiprack_1000ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_flex_96_filtertiprack_1000ul/1.json"
+    },
+    {
+      "load_name": "opentrons_flex_96_filtertiprack_200ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_flex_96_filtertiprack_200ul/1.json"
+    },
+    {
+      "load_name": "opentrons_flex_96_filtertiprack_20ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_flex_96_filtertiprack_20ul/1.json"
+    },
+    {
+      "load_name": "opentrons_flex_96_filtertiprack_50ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_flex_96_filtertiprack_50ul/1.json"
+    },
+    {
+      "load_name": "opentrons_flex_96_tiprack_1000ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_flex_96_tiprack_1000ul/1.json"
+    },
+    {
+      "load_name": "opentrons_flex_96_tiprack_200ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_flex_96_tiprack_200ul/1.json"
+    },
+    {
+      "load_name": "opentrons_flex_96_tiprack_20ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_flex_96_tiprack_20ul/1.json"
+    },
+    {
+      "load_name": "opentrons_flex_96_tiprack_50ul",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_flex_96_tiprack_50ul/1.json"
+    },
+    {
+      "load_name": "opentrons_flex_96_tiprack_adapter",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_flex_96_tiprack_adapter/1.json"
+    },
+    {
+      "load_name": "opentrons_flex_tiprack_lid",
+      "version": "1",
+      "path": "Library/TipRacks/opentrons_flex_tiprack_lid/1.json"
+    },
+    {
+      "load_name": "tipone_96_tiprack_200ul",
+      "version": "1",
+      "path": "Library/TipRacks/tipone_96_tiprack_200ul/1.json"
+    }
+  ]
+}

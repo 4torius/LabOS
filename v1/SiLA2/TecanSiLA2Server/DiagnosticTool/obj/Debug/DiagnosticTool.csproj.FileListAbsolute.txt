@@ -1,0 +1,4 @@
+C:\Users\andre\Desktop\BicoccaLab\v6\SiLA2\TecanSiLA2Server\DiagnosticTool\obj\Debug\DiagnosticTool.csproj.AssemblyReference.cache
+C:\Users\andre\Desktop\BicoccaLab\v6\SiLA2\TecanSiLA2Server\DiagnosticTool\obj\Debug\DiagnosticTool.csproj.CoreCompileInputs.cache
+C:\Users\andre\Desktop\BicoccaLab\v7\SiLA2\TecanSiLA2Server\DiagnosticTool\obj\Debug\DiagnosticTool.csproj.AssemblyReference.cache
+C:\Users\andre\Desktop\BicoccaLab\v7\SiLA2\TecanSiLA2Server\DiagnosticTool\obj\Debug\DiagnosticTool.csproj.CoreCompileInputs.cache

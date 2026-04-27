@@ -1,0 +1,14 @@
+{
+  "run_id": "20260424_105127_NewWorkflow",
+  "workflow_name": "NewWorkflow",
+  "started_at": "2026-04-24T10:51:27.778833",
+  "status": "failed",
+  "steps_completed": 0,
+  "steps_failed": 1,
+  "steps_skipped": 1,
+  "duration_seconds": 5.857361,
+  "errors": [
+    "Step 1: Cannot execute PlateOut on Tecan M200 Pro. Server needs to implement SiLA2Common.ExecuteCommand or provide gRPC stubs."
+  ],
+  "step_results": []
+}

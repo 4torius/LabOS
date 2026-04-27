@@ -1,0 +1,2128 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<style>
+    /* Main Layout */
+    .workflow-page {
+        padding-top: 50px;
+    }
+    
+    .workflow-container {
+        display: flex;
+        gap: 15px;
+        height: calc(100vh - 220px);
+        min-height: 400px;
+    }
+    
+    /* TOOLBAR - Top action bar - Single row layout */
+    .workflow-toolbar {
+        background: linear-gradient(135deg, var(--bs-dark) 0%, #1a1d21 100%);
+        border-radius: 10px;
+        padding: 10px 20px;
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+        border: 1px solid var(--bs-border-color);
+        gap: 15px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    
+    .workflow-toolbar .toolbar-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--bs-light);
+        font-weight: 600;
+        font-size: 1rem;
+        white-space: nowrap;
+    }
+    
+    .workflow-toolbar .toolbar-title i {
+        color: var(--bs-primary);
+        font-size: 1.2rem;
+    }
+    
+    .workflow-toolbar .toolbar-separator {
+        width: 1px;
+        height: 30px;
+        background: var(--bs-border-color);
+        margin: 0 5px;
+    }
+    
+    .workflow-toolbar #workflowName {
+        width: 200px;
+        background: rgba(255,255,255,0.1);
+        border: 1px solid var(--bs-border-color);
+        color: var(--bs-light);
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 0.9rem;
+    }
+    
+    .workflow-toolbar #workflowName:focus {
+        background: rgba(255,255,255,0.15);
+        border-color: var(--bs-primary);
+        box-shadow: 0 0 0 2px rgba(13,110,253,0.25);
+        outline: none;
+    }
+    
+    .workflow-toolbar .toolbar-spacer {
+        flex: 1;
+    }
+    
+    .workflow-toolbar .toolbar-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+    
+    .workflow-toolbar .btn {
+        padding: 8px 16px;
+        font-weight: 500;
+        white-space: nowrap;
+        border-radius: 6px;
+        font-size: 0.85rem;
+    }
+    
+    .workflow-toolbar .btn i {
+        margin-right: 6px;
+    }
+    
+    /* TOOLBOX - Left sidebar */
+    .toolbox {
+        width: 160px;
+        min-width: 160px;
+        background: var(--bs-dark);
+        border-radius: 8px;
+        padding: 12px;
+        flex-shrink: 0;
+        overflow-y: auto;
+        border: 1px solid var(--bs-border-color);
+    }
+    
+    .toolbox-section {
+        margin-bottom: 12px;
+    }
+    
+    .toolbox-section h6 {
+        color: var(--bs-light);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 10px;
+        padding-bottom: 5px;
+        border-bottom: 1px solid var(--bs-secondary);
+    }
+    
+    /* Draggable blocks */
+    .tool-block {
+        background: var(--bs-secondary);
+        border-radius: 6px;
+        padding: 10px;
+        margin-bottom: 8px;
+        cursor: grab;
+        transition: all 0.2s;
+        text-align: center;
+        font-size: 13px;
+        user-select: none;
+    }
+    
+    .tool-block:hover {
+        transform: scale(1.03);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    
+    .tool-block:active {
+        cursor: grabbing;
+        opacity: 0.8;
+    }
+    
+    .tool-block i {
+        font-size: 20px;
+        display: block;
+        margin-bottom: 4px;
+    }
+    
+    /* Color coding for tools */
+    .tool-block.opentrons { border-left: 3px solid #0d6efd; }
+    .tool-block.tecan { border-left: 3px solid #198754; }
+    .tool-block.mobile { border-left: 3px solid #ffc107; }
+    .tool-block.incubator { border-left: 3px solid #dc3545; }
+    .tool-block.delay { border-left: 3px solid #0dcaf0; }
+    .tool-block.loop { border-left: 3px solid #6f42c1; }
+    .tool-block.condition { border-left: 3px solid #fd7e14; }
+    .tool-block.note { border-left: 3px solid #6c757d; }
+    
+    /* CANVAS - Main drop zone */
+    .workflow-canvas {
+        flex: 1;
+        background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+        border-radius: 8px;
+        padding: 20px;
+        min-height: 300px;
+        position: relative;
+        overflow-y: auto;
+        border: 2px solid var(--bs-border-color);
+    }
+    
+    .workflow-canvas.drag-over {
+        background: linear-gradient(180deg, #1a2a4e 0%, #1a3a5e 100%);
+        border: 2px dashed #0d6efd;
+    }
+    
+    /* Placeholder when empty */
+    .canvas-placeholder {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+        color: var(--bs-secondary);
+        pointer-events: none;
+    }
+    
+    .canvas-placeholder i {
+        font-size: 48px;
+        margin-bottom: 10px;
+        display: block;
+    }
+    
+    /* Workflow steps list */
+    .workflow-steps {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+    
+    /* Individual step */
+    .workflow-step {
+        background: var(--bs-dark);
+        border-radius: 8px;
+        padding: 12px 15px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        cursor: pointer;
+        transition: all 0.15s;
+        border: 2px solid transparent;
+    }
+    
+    .workflow-step:hover {
+        background: #2d2d44;
+    }
+    
+    .workflow-step.selected {
+        border-color: #0d6efd;
+        background: #1a2a4e;
+    }
+    
+    /* Step colors */
+    .workflow-step.opentrons { border-left: 4px solid #0d6efd; }
+    .workflow-step.tecan { border-left: 4px solid #198754; }
+    .workflow-step.mobile { border-left: 4px solid #ffc107; }
+    .workflow-step.incubator { border-left: 4px solid #dc3545; }
+    .workflow-step.delay { border-left: 4px solid #0dcaf0; }
+    .workflow-step.loop { border-left: 4px solid #6f42c1; background: rgba(111,66,193,0.1); }
+    .workflow-step.condition { border-left: 4px solid #fd7e14; background: rgba(253,126,20,0.1); }
+    .workflow-step.note { border-left: 4px solid #6c757d; background: rgba(108,117,125,0.1); }
+    
+    .step-number {
+        background: #0d6efd;
+        color: white;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 12px;
+        flex-shrink: 0;
+    }
+    
+    .step-icon {
+        font-size: 22px;
+        width: 30px;
+        text-align: center;
+        flex-shrink: 0;
+    }
+    
+    .step-content {
+        flex: 1;
+        min-width: 0;
+    }
+    
+    .step-title {
+        font-weight: 600;
+        font-size: 14px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    .step-details {
+        font-size: 11px;
+        color: var(--bs-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    .step-actions {
+        display: flex;
+        gap: 3px;
+        flex-shrink: 0;
+    }
+    
+    .step-actions .btn {
+        padding: 2px 6px;
+        font-size: 12px;
+    }
+    
+    /* Step connector lines */
+    .step-connector {
+        width: 2px;
+        height: 15px;
+        background: #0d6efd;
+        margin-left: 28px;
+    }
+    
+    /* PROPERTIES PANEL - Right sidebar */
+    .properties-panel {
+        width: 260px;
+        min-width: 260px;
+        background: var(--bs-dark);
+        border-radius: 8px;
+        padding: 12px;
+        flex-shrink: 0;
+        overflow-y: auto;
+        border: 1px solid var(--bs-border-color);
+    }
+    
+    .properties-panel h6 {
+        margin-bottom: 15px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--bs-secondary);
+    }
+    
+    .property-group {
+        margin-bottom: 15px;
+    }
+    
+    .property-group label {
+        font-size: 12px;
+        color: var(--bs-secondary);
+        margin-bottom: 4px;
+        display: block;
+    }
+    
+    .empty-properties {
+        text-align: center;
+        color: var(--bs-secondary);
+        padding: 40px 20px;
+    }
+    
+    .empty-properties i {
+        font-size: 40px;
+        display: block;
+        margin-bottom: 10px;
+    }
+</style>
+
+<div class="container-fluid workflow-page">
+    <!-- TOOLBAR - Single row: Title | Name | Spacer | Actions -->
+    <div class="workflow-toolbar">
+        <div class="toolbar-title">
+            <i class="bi bi-diagram-3"></i>
+            <span>Workflow Builder</span>
+        </div>
+        
+        <div class="toolbar-separator"></div>
+        
+        <input type="text" id="workflowName" placeholder="Workflow name..." value="NewWorkflow">
+        
+        <div class="toolbar-spacer"></div>
+        
+        <div class="toolbar-actions">
+            <button class="btn btn-outline-info" id="btnTemplates" title="Load from template">
+                <i class="bi bi-layout-text-sidebar-reverse"></i> Templates
+            </button>
+            <div class="toolbar-separator" style="width:1px;height:30px;background:var(--bs-border-color);"></div>
+            <button class="btn btn-outline-secondary" id="btnLoad">
+                <i class="bi bi-folder2-open"></i> Load
+            </button>
+            <button class="btn btn-outline-secondary" id="btnImport" title="Import workflow JSON">
+                <i class="bi bi-upload"></i>
+            </button>
+            <button class="btn btn-outline-secondary" id="btnExport" title="Export workflow JSON">
+                <i class="bi bi-download"></i>
+            </button>
+            <button class="btn btn-outline-primary" id="btnSave">
+                <i class="bi bi-save"></i> Save
+            </button>
+            <button class="btn btn-success" id="btnRun">
+                <i class="bi bi-play-fill"></i> Run
+            </button>
+        </div>
+    </div>
+    
+    <div class="workflow-container">
+        <!-- TOOLBOX -->
+        <div class="toolbox">
+            <div class="toolbox-section" id="toolbox-instruments">
+                <h6><i class="bi bi-cpu"></i> Instruments</h6>
+                <!-- Initial fallback blocks - will be replaced by discovered instruments -->
+                <div class="tool-block opentrons" data-type="opentrons" draggable="true">
+                    <i class="bi bi-droplet-fill text-primary"></i>
+                    <span>Opentrons</span>
+                </div>
+                <div class="tool-block tecan" data-type="tecan" draggable="true">
+                    <i class="bi bi-eye-fill text-success"></i>
+                    <span>Tecan</span>
+                </div>
+                <div class="tool-block mobile" data-type="mobile" draggable="true">
+                    <i class="bi bi-robot text-warning"></i>
+                    <span>Mobile</span>
+                </div>
+                <div class="tool-block incubator" data-type="incubator" draggable="true">
+                    <i class="bi bi-thermometer-half text-danger"></i>
+                    <span>Incubator</span>
+                </div>
+                <div class="tool-block manual" data-type="manual" draggable="true">
+                    <i class="bi bi-hand-index-thumb text-info"></i>
+                    <span>Manual</span>
+                </div>
+            </div>
+            
+            <div class="toolbox-section">
+                <h6><i class="bi bi-clock"></i> Timing</h6>
+                <div class="tool-block delay" data-type="delay" draggable="true">
+                    <i class="bi bi-hourglass-split text-info"></i>
+                    <span>Delay</span>
+                </div>
+            </div>
+            
+            <div class="toolbox-section">
+                <h6><i class="bi bi-code-slash"></i> Logic</h6>
+                <div class="tool-block loop" data-type="loop" draggable="true">
+                    <i class="bi bi-arrow-repeat" style="color:#6f42c1;"></i>
+                    <span>Loop</span>
+                </div>
+                <div class="tool-block condition" data-type="condition" draggable="true">
+                    <i class="bi bi-signpost-split" style="color:#fd7e14;"></i>
+                    <span>IF/Else</span>
+                </div>
+            </div>
+            
+            <div class="toolbox-section">
+                <h6><i class="bi bi-chat-text"></i> Note</h6>
+                <div class="tool-block note" data-type="note" draggable="true">
+                    <i class="bi bi-sticky text-secondary"></i>
+                    <span>Note</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- CANVAS -->
+        <div class="workflow-canvas" id="workflowCanvas">
+            <div class="canvas-placeholder" id="canvasPlaceholder">
+                <i class="bi bi-arrows-move"></i>
+                <p>Drag instruments here<br>to create the workflow</p>
+            </div>
+            <div class="workflow-steps" id="workflowSteps"></div>
+        </div>
+        
+        <!-- PROPERTIES PANEL -->
+        <div class="properties-panel">
+            <h6><i class="bi bi-gear me-2"></i>Properties</h6>
+            <div id="propertiesContent">
+                <div class="empty-properties">
+                    <i class="bi bi-hand-index"></i>
+                    <p>Select a step<br>to configure it</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Load Modal -->
+<div class="modal fade" id="loadModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-folder-open me-2"></i>Load Workflow</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="list-group" id="workflowList">
+                    <p class="text-muted">Loading...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Execution Modal (for HAL selection) -->
+<div class="modal fade" id="executeModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="bi bi-play-fill me-2"></i>Execute Workflow</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3" id="halConfigSection">
+                    <label class="form-label">HAL Config (for Opentrons)</label>
+                    <select class="form-select" id="halSelect">
+                        <option value="">-- None (skip) --</option>
+                    </select>
+                    <small class="text-muted">Required only for Opentrons commands</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Summary</label>
+                    <div class="alert alert-secondary" id="executeSummary">
+                        0 steps to execute
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-success" id="btnConfirmRun">
+                    <i class="bi bi-play-fill"></i> Confirm Execution
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Variables Dialog Modal (Settimana 8) -->
+<div class="modal fade" id="variablesModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="bi bi-input-cursor-text me-2"></i>Workflow Variables</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">This workflow has variables. Fill in the values before executing.</p>
+                <div id="variablesForm"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="btnVariablesNext">
+                    <i class="bi bi-arrow-right"></i> Next
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Templates Modal (Settimana 9) -->
+<div class="modal fade" id="templatesModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-dark">
+                <h5 class="modal-title"><i class="bi bi-layout-text-sidebar-reverse me-2"></i>Experiment Templates</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex gap-2 mb-3">
+                    <input type="text" class="form-control form-control-sm" id="templateSearch" placeholder="Search templates...">
+                    <button class="btn btn-sm btn-outline-success" onclick="saveCurrentAsTemplate()">
+                        <i class="bi bi-plus"></i> Save Current as Template
+                    </button>
+                </div>
+                <div class="list-group" id="templatesList">
+                    <p class="text-muted text-center py-3">Loading templates...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-info text-dark" id="btnLoadTemplate" disabled>
+                    <i class="bi bi-check-lg"></i> Load Selected Template
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Save As Template Modal -->
+<div class="modal fade" id="saveTemplateModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="bi bi-bookmark-plus"></i> Save as Template</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Template Name <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="templateSaveName">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Description</label>
+                    <textarea class="form-control" id="templateSaveDesc" rows="2" placeholder="Optional description..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-success" id="btnSaveTemplateConfirm">Save Template</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Template Confirm Modal -->
+<div class="modal fade" id="deleteTemplateModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content border-danger">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-trash"></i> Delete Template</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Delete template <strong id="deleteTemplateNameLabel"></strong>?</p>
+                <p class="text-danger small mb-0"><i class="bi bi-exclamation-triangle"></i> This cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="btnDeleteTemplateConfirm">Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Hidden file input for import -->
+<input type="file" id="importFileInput" accept=".json" style="display:none;">
+
+
+<script>
+// ============================================================================
+// INSTRUMENTS - Dynamically loaded from SiLA2 servers!
+// The servers are the SOURCE OF TRUTH. This is loaded at runtime.
+// ============================================================================
+var INSTRUMENTS = {};
+var showAllCommands = false; // Toggle for "View All" mode
+
+// UTILITY BLOCKS - These are NOT SiLA2 servers, always available
+var UTILITY_BLOCKS = {
+    delay: {
+        name: 'Delay',
+        icon: 'bi-hourglass-split',
+        color: 'info',
+        isUtility: true,
+        commands: [
+            { id: 'Wait', label: '⏱️ Wait', params: ['seconds'], important: true }
+        ]
+    },
+    loop: {
+        name: 'Loop',
+        icon: 'bi-arrow-repeat',
+        color: 'purple',
+        isControl: true,
+        commands: [
+            { id: 'RepeatN', label: '🔁 Repeat N times', params: ['iterations'], important: true },
+            { id: 'EndLoop', label: '🔚 End Loop', important: true }
+        ]
+    },
+    condition: {
+        name: 'IF/Condition',
+        icon: 'bi-signpost-split',
+        color: 'orange',
+        isControl: true,
+        commands: [
+            { id: 'IfThen', label: '❓ IF condition', params: ['condition'], important: true },
+            { id: 'Else', label: '↪️ Else', important: true },
+            { id: 'EndIf', label: '🔚 End IF', important: true }
+        ]
+    },
+    note: {
+        name: 'Note',
+        icon: 'bi-sticky',
+        color: 'secondary',
+        isAnnotation: true,
+        commands: [
+            { id: 'Comment', label: '📝 Comment', params: ['text'], important: true }
+        ]
+    }
+};
+
+// ICON/COLOR mapping for known instrument types
+var INSTRUMENT_STYLES = {
+    tecan: { icon: 'bi-eye-fill', color: 'success' },
+    opentrons: { icon: 'bi-droplet-fill', color: 'primary' },
+    mobile: { icon: 'bi-robot', color: 'warning' },
+    incubator: { icon: 'bi-thermometer-half', color: 'danger' },
+    manual: { icon: 'bi-hand-index-thumb', color: 'info' },
+    _default: { icon: 'bi-gear', color: 'secondary' }
+};
+
+// Map server names to keys for styling
+function getInstrumentKey(name) {
+    var lower = name.toLowerCase();
+    if (lower.indexOf('tecan') !== -1) return 'tecan';
+    if (lower.indexOf('opentrons') !== -1) return 'opentrons';
+    if (lower.indexOf('mobile') !== -1) return 'mobile';
+    if (lower.indexOf('incubator') !== -1) return 'incubator';
+    if (lower.indexOf('manual') !== -1) return 'manual';
+    return '_default';
+}
+
+// Load instruments from SiLA2 servers via API
+function loadInstrumentsFromServers() {
+    console.log('🔍 Discovering SiLA2 servers...');
+    
+    fetch('/api/instruments/commands')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) {
+            console.log('📡 Instruments loaded:', data.source);
+            
+            var instruments = data.instruments || {};
+            
+            // Convert server data to INSTRUMENTS format
+            Object.keys(instruments).forEach(function(name) {
+                var inst = instruments[name];
+                var key = getInstrumentKey(name);
+                var style = INSTRUMENT_STYLES[key] || INSTRUMENT_STYLES._default;
+                
+                // Build commands array from the commands list
+                // API returns: {commands: [{id, name, description, important, feature, parameters}]}
+                var commands = [];
+                var apiCommands = inst.commands || [];
+                
+                // First, add important commands (with star icon)
+                apiCommands.forEach(function(cmd) {
+                    if (cmd.important) {
+                        var cmdProps = getCommandParams(cmd.id);
+                        commands.push(Object.assign({
+                            id: cmd.id,
+                            label: '⭐ ' + (cmd.name || cmd.id),
+                            description: cmd.description || '',
+                            important: true,
+                            parameters: cmd.parameters || []
+                        }, cmdProps));
+                    }
+                });
+                
+                // Then add non-important commands
+                apiCommands.forEach(function(cmd) {
+                    if (!cmd.important) {
+                        var cmdProps = getCommandParams(cmd.id);
+                        commands.push(Object.assign({
+                            id: cmd.id,
+                            label: cmd.name || cmd.id,
+                            description: cmd.description || '',
+                            important: false,
+                            parameters: cmd.parameters || []
+                        }, cmdProps));
+                    }
+                });
+                
+                // Use lowercase key for consistency
+                INSTRUMENTS[key] = {
+                    name: inst.name || name,
+                    icon: style.icon,
+                    color: style.color,
+                    online: inst.status === 'online',
+                    commands: commands
+                };
+            });
+            
+            // Merge utility blocks
+            Object.keys(UTILITY_BLOCKS).forEach(function(key) {
+                INSTRUMENTS[key] = UTILITY_BLOCKS[key];
+            });
+            
+            // Update toolbox with discovered instruments
+            updateToolbox();
+            
+            console.log('✅ INSTRUMENTS loaded:', Object.keys(INSTRUMENTS));
+        })
+        .catch(function(err) {
+            console.error('❌ Failed to load instruments:', err);
+            // Use utility blocks only as fallback
+            Object.keys(UTILITY_BLOCKS).forEach(function(key) {
+                INSTRUMENTS[key] = UTILITY_BLOCKS[key];
+            });
+            updateToolbox();
+        });
+}
+
+// Get known command parameters (heuristic based on command name)
+function getCommandParams(cmdId) {
+    var paramMap = {
+        'ExecuteRecipe': { params: ['RecipeName'] },
+        'Transfer': { params: ['source_well', 'dest_well', 'volume_ul'] },
+        'RunMeasurement': { params: ['ProtocolFile'] },
+        'SetTemperature': { params: ['target_temperature'] },
+        'SetCO2': { params: ['co2_percent'] },
+        'SetHumidity': { params: ['humidity_percent'] },
+        'StartIncubation': { params: ['duration_minutes'] },
+        'TransportPlate': { params: ['source', 'destination'] },
+        'PickPlate': { params: ['location'] },
+        'PlacePlate': { params: ['location'] },
+        'LoadHardwareConfig': { params: ['ConfigName'] },
+        'NotifyOperator': { params: ['message', 'priority'] },
+        'RequestAction': { params: ['title', 'instructions'] },
+        'WaitForConfirmation': { params: [] },
+        // Manual Station commands
+        'RequestOperatorTask': { params: ['TaskDescription', 'TaskType', 'Priority', 'TimeoutSeconds'] },
+        'ConfirmTaskComplete': { params: ['task_id', 'notes'] },
+        'SendNotification': { params: ['message', 'level'] }
+    };
+    return paramMap[cmdId] || {};
+}
+
+// Dynamically update the toolbox with discovered instruments
+function updateToolbox() {
+    var strumentiContainer = document.getElementById('toolbox-instruments');
+    if (!strumentiContainer) strumentiContainer = document.querySelector('.toolbox-section:first-child');
+    if (!strumentiContainer) return;
+    
+    // Clear existing tool blocks
+    var existingBlocks = strumentiContainer.querySelectorAll('.tool-block');
+    existingBlocks.forEach(function(block) { block.remove(); });
+    
+    // Add discovered instruments (excluding utilities)
+    Object.keys(INSTRUMENTS).forEach(function(key) {
+        var inst = INSTRUMENTS[key];
+        if (inst.isUtility || inst.isControl || inst.isAnnotation) return;
+        
+        var block = document.createElement('div');
+        block.className = 'tool-block ' + key;
+        block.setAttribute('data-type', key);
+        block.setAttribute('draggable', 'true');
+        
+        var iconClass = 'text-' + inst.color;
+        if (inst.color === 'purple') iconClass = '';
+        if (inst.color === 'orange') iconClass = '';
+        
+        var iconStyle = '';
+        if (inst.color === 'purple') iconStyle = 'style="color:#6f42c1;"';
+        if (inst.color === 'orange') iconStyle = 'style="color:#fd7e14;"';
+        
+        // Show online/offline status
+        var statusBadge = inst.online !== false ? 
+            '<span class="badge bg-success ms-1" style="font-size:8px;">●</span>' :
+            '<span class="badge bg-danger ms-1" style="font-size:8px;">○</span>';
+        
+        block.innerHTML = '<i class="bi ' + inst.icon + ' ' + iconClass + '" ' + iconStyle + '></i>' +
+                         '<span>' + (inst.name.length > 12 ? inst.name.substring(0, 10) + '..' : inst.name) + statusBadge + '</span>';
+        
+        strumentiContainer.appendChild(block);
+        
+        // Add drag listeners
+        block.addEventListener('dragstart', function(e) {
+            var type = this.getAttribute('data-type');
+            e.dataTransfer.setData('text/plain', type);
+            e.dataTransfer.effectAllowed = 'copy';
+            this.style.opacity = '0.5';
+        });
+        
+        block.addEventListener('dragend', function() {
+            this.style.opacity = '1';
+        });
+    });
+    
+    console.log('🎨 Toolbox updated with', Object.keys(INSTRUMENTS).length, 'instruments');
+}
+
+// ============================================================================
+// APPLICATION STATE
+// ============================================================================
+var workflowSteps = [];
+var selectedStepIndex = null;
+var recipes = [];
+var protocols = [];
+var halConfigs = [];
+var liquidClasses = [];
+var mobileTasks = [];  // Mobile robot tasks from MobileSiLA2Server
+
+// Dropdown options - will be loaded from lab_config.yaml via API
+// These are defaults that get replaced when config is loaded
+var DROPDOWN_CONFIG = {};
+var LOCATIONS = [];
+var LABWARE_TYPES = [];
+var TIP_RACK_TYPES = [];
+var PRIORITY_OPTIONS = [];
+var TASK_TYPE_OPTIONS = [];
+
+// Parameter names that should use dropdowns (camelCase + snake_case for API compatibility)
+var LOCATION_PARAMS = ['source', 'destination', 'location', 'from', 'to', 'source_location', 'dest_location', 'station', 'newlocation', 'sourcelocation', 'destlocation', 'sourceloc', 'destloc'];
+var TIP_RACK_PARAMS = ['rackslot', 'rack_slot', 'racktype', 'rack_type', 'tiprack', 'tip_rack'];
+var LABWARE_PARAMS = ['labware', 'plate', 'labware_type', 'labwaretype', 'labwareid'];
+var RECIPE_PARAMS = ['recipe', 'recipe_file', 'recipe_name', 'recipename', 'recipefile'];
+var PROTOCOL_PARAMS = ['protocol', 'protocol_file', 'measurement_protocol', 'analysis', 'protocolname', 'protocolcontent', 'protocolfile'];
+var HAL_PARAMS = ['hal_config', 'hardware_config', 'hal', 'halconfig', 'hardwareconfig', 'setupfile', 'setup_file', 'configfile', 'config_file', 'configname'];
+var LIQUID_CLASS_PARAMS = ['liquid_class', 'liquidclass', 'liquidclassname'];
+var PRIORITY_PARAMS = ['priority'];
+var TASK_TYPE_PARAMS = ['task_type', 'tasktype'];
+
+function _pickFirstParam(params, keys) {
+    for (var i = 0; i < keys.length; i++) {
+        var key = keys[i];
+        if (Object.prototype.hasOwnProperty.call(params, key)) {
+            var v = params[key];
+            if (v !== undefined && v !== null && String(v).trim() !== '') {
+                return v;
+            }
+        }
+    }
+    return '';
+}
+
+function normalizeStepParamsForCommand(command, params) {
+    var out = Object.assign({}, params || {});
+    var action = (command || '').toLowerCase();
+
+    if (action === 'executerecipe') {
+        var recipeName = _pickFirstParam(out, ['RecipeName', 'recipe', 'Recipe', 'recipe_name', 'recipe_file', 'recipefile', 'recipename']);
+        if (recipeName) out.RecipeName = recipeName;
+        delete out.recipe;
+        delete out.Recipe;
+        delete out.recipe_name;
+        delete out.recipe_file;
+        delete out.recipefile;
+        delete out.recipename;
+    }
+
+    if (action === 'runmeasurement') {
+        var protocolFile = _pickFirstParam(out, ['ProtocolFile', 'protocol', 'Protocol', 'protocol_file', 'ProtocolPath', 'ProtocolName', 'analysis', 'protocolfile']);
+        if (protocolFile) out.ProtocolFile = protocolFile;
+        delete out.protocol;
+        delete out.Protocol;
+        delete out.protocol_file;
+        delete out.ProtocolPath;
+        delete out.ProtocolName;
+        delete out.analysis;
+        delete out.protocolfile;
+    }
+
+    if (action === 'loadhardwareconfig') {
+        var configName = _pickFirstParam(out, ['ConfigName', 'config_name', 'config', 'hal_config', 'hardware_config', 'HALConfig']);
+        if (configName) out.ConfigName = configName;
+        delete out.config_name;
+        delete out.config;
+        delete out.hal_config;
+        delete out.hardware_config;
+        delete out.HALConfig;
+    }
+
+    if (action === 'requestoperatortask') {
+        var taskDescription = _pickFirstParam(out, ['TaskDescription', 'task_description', 'description', 'message']);
+        var taskType = _pickFirstParam(out, ['TaskType', 'task_type', 'tasktype']);
+        var priority = _pickFirstParam(out, ['Priority', 'priority']);
+        var timeoutSeconds = _pickFirstParam(out, ['TimeoutSeconds', 'timeout_seconds', 'timeout']);
+        var sourceInstrument = _pickFirstParam(out, ['SourceInstrument', 'source_instrument']);
+
+        if (taskDescription) out.TaskDescription = taskDescription;
+        if (taskType) out.TaskType = taskType;
+        if (priority) out.Priority = priority;
+        if (timeoutSeconds) out.TimeoutSeconds = timeoutSeconds;
+        if (sourceInstrument) out.SourceInstrument = sourceInstrument;
+
+        delete out.task_description;
+        delete out.description;
+        delete out.message;
+        delete out.task_type;
+        delete out.tasktype;
+        delete out.priority;
+        delete out.timeout_seconds;
+        delete out.timeout;
+        delete out.source_instrument;
+    }
+
+    return out;
+}
+
+// Show ALL commands by default (true Plug & Play)
+// Important commands are marked with ⭐ for quick access
+var showAllCommands = true;
+
+// Load dropdown configuration from API catalog endpoints
+async function loadDropdownConfig() {
+    try {
+        const [configResp, devicesResp, tiprackResp, platesResp] = await Promise.allSettled([
+            fetch('/api/config'),
+            fetch('/api/devices'),
+            fetch('/api/tipracks'),
+            fetch('/api/library/plates'),
+        ]);
+
+        // Config — only used for folder-based dropdowns (recipe, analysis, etc.)
+        if (configResp.status === 'fulfilled' && configResp.value.ok) {
+            const config = await configResp.value.json();
+            if (config.ui_dropdowns) DROPDOWN_CONFIG = config.ui_dropdowns;
+        }
+
+        // Locations from discovered devices
+        if (devicesResp.status === 'fulfilled' && devicesResp.value.ok) {
+            const devices = await devicesResp.value.json();
+            LOCATIONS = (Array.isArray(devices) ? devices : []).map(d => d.id || d.name).filter(Boolean);
+        }
+        if (!LOCATIONS.length) LOCATIONS = ['opentrons', 'tecan', 'mobile', 'manual_station'];
+
+        // Tip racks from Library/Labware/TipRacks catalog
+        if (tiprackResp.status === 'fulfilled' && tiprackResp.value.ok) {
+            const tr = await tiprackResp.value.json();
+            TIP_RACK_TYPES = tr.load_names || (tr.definitions || []).map(d => d.load_name);
+        }
+        if (!TIP_RACK_TYPES.length) TIP_RACK_TYPES = ['opentrons_flex_96_tiprack_1000ul', 'opentrons_flex_96_tiprack_200ul', 'opentrons_flex_96_tiprack_50ul'];
+
+        // Labware from Library/Labware/Plates catalog
+        if (platesResp.status === 'fulfilled' && platesResp.value.ok) {
+            const pl = await platesResp.value.json();
+            LABWARE_TYPES = (pl.plates || []).map(p => p.id);
+        }
+        if (!LABWARE_TYPES.length) LABWARE_TYPES = ['corning_96_wellplate_360ul_flat', 'corning_384_wellplate_112ul_flat'];
+
+        if (DROPDOWN_CONFIG.priority && DROPDOWN_CONFIG.priority.options) PRIORITY_OPTIONS = DROPDOWN_CONFIG.priority.options;
+        if (DROPDOWN_CONFIG.task_type && DROPDOWN_CONFIG.task_type.options) TASK_TYPE_OPTIONS = DROPDOWN_CONFIG.task_type.options;
+
+    } catch (error) {
+        console.warn('Could not load dropdown config, using defaults:', error);
+        LOCATIONS = ['opentrons', 'tecan', 'mobile', 'manual_station'];
+        LABWARE_TYPES = ['corning_96_wellplate_360ul_flat', 'corning_384_wellplate_112ul_flat'];
+        TIP_RACK_TYPES = ['opentrons_flex_96_tiprack_1000ul', 'opentrons_flex_96_tiprack_200ul', 'opentrons_flex_96_tiprack_50ul'];
+        PRIORITY_OPTIONS = ['normal', 'high', 'urgent'];
+        TASK_TYPE_OPTIONS = ['preparation', 'verification', 'maintenance', 'quality_check'];
+    }
+}
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
+function showNotification(message, type) {
+    // Create toast container if doesn't exist
+    var container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'toast-container position-fixed top-0 end-0 p-3';
+        container.style.zIndex = '9999';
+        document.body.appendChild(container);
+    }
+    
+    // Create toast
+    var toast = document.createElement('div');
+    toast.className = 'toast align-items-center text-white bg-' + (type || 'info') + ' border-0';
+    toast.setAttribute('role', 'alert');
+    toast.innerHTML = 
+        '<div class="d-flex">' +
+            '<div class="toast-body">' + message + '</div>' +
+            '<button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>' +
+        '</div>';
+    
+    container.appendChild(toast);
+    
+    // Show toast
+    var bsToast = new bootstrap.Toast(toast, { delay: 5000 });
+    bsToast.show();
+    
+    // Remove after hidden
+    toast.addEventListener('hidden.bs.toast', function() {
+        toast.remove();
+    });
+}
+
+// ============================================================================
+// INITIALIZE
+// ============================================================================
+document.addEventListener('DOMContentLoaded', async function() {
+    console.log('🚀 Workflow Builder initialized');
+    
+    // Load dropdown configuration from lab_config.yaml FIRST
+    await loadDropdownConfig();
+    
+    // CRITICAL: Load instruments from SiLA2 servers FIRST
+    loadInstrumentsFromServers();
+    
+    // Setup drag & drop for toolbox items
+    setupDragAndDrop();
+    
+    // Setup toolbar buttons
+    document.getElementById('btnSave').addEventListener('click', saveWorkflow);
+    document.getElementById('btnLoad').addEventListener('click', loadWorkflow);
+    document.getElementById('btnRun').addEventListener('click', runWorkflow);
+    document.getElementById('btnConfirmRun').addEventListener('click', confirmExecution);
+    document.getElementById('btnTemplates').addEventListener('click', openTemplatesModal);
+    document.getElementById('btnExport').addEventListener('click', exportWorkflow);
+    document.getElementById('btnImport').addEventListener('click', function() {
+        document.getElementById('importFileInput').click();
+    });
+    document.getElementById('importFileInput').addEventListener('change', importWorkflow);
+    
+    // Add View All toggle button
+    addViewAllToggle();
+    
+    // Load available files
+    loadFiles();
+});
+
+// Add "Filter Commands" toggle to toolbar
+function addViewAllToggle() {
+    var toolbarActions = document.querySelector('.toolbar-actions');
+    if (!toolbarActions) return;
+    
+    var toggleBtn = document.createElement('button');
+    toggleBtn.className = 'btn btn-outline-info btn-sm active';  // Active by default (showing all)
+    toggleBtn.id = 'btnViewAll';
+    toggleBtn.innerHTML = '<i class="bi bi-eye"></i> View All';  // Default: showing all
+    toggleBtn.title = 'Toggle between all commands and important (⭐) only';
+    
+    toggleBtn.addEventListener('click', function() {
+        showAllCommands = !showAllCommands;
+        this.innerHTML = showAllCommands ? 
+            '<i class="bi bi-eye"></i> View All' : 
+            '<i class="bi bi-star"></i> ⭐ Only';
+        this.classList.toggle('active', showAllCommands);
+        
+        // Re-render properties if a step is selected
+        if (selectedStepIndex !== null) {
+            renderProperties();
+        }
+    });
+    
+    // Insert View All button at the beginning of toolbar actions
+    toolbarActions.insertBefore(toggleBtn, toolbarActions.firstChild);
+}
+
+// ============================================================================
+// DRAG & DROP SETUP
+// ============================================================================
+function setupDragAndDrop() {
+    var canvas = document.getElementById('workflowCanvas');
+    
+    // Make all tool blocks draggable
+    var toolBlocks = document.querySelectorAll('.tool-block');
+    for (var i = 0; i < toolBlocks.length; i++) {
+        var block = toolBlocks[i];
+        
+        block.addEventListener('dragstart', function(e) {
+            var type = this.getAttribute('data-type');
+            e.dataTransfer.setData('text/plain', type);
+            e.dataTransfer.effectAllowed = 'copy';
+            this.style.opacity = '0.5';
+            console.log('Drag started:', type);
+        });
+        
+        block.addEventListener('dragend', function(e) {
+            this.style.opacity = '1';
+        });
+    }
+    
+    // Canvas drop zone
+    canvas.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        this.classList.add('drag-over');
+    });
+    
+    canvas.addEventListener('dragleave', function(e) {
+        this.classList.remove('drag-over');
+    });
+    
+    canvas.addEventListener('drop', function(e) {
+        e.preventDefault();
+        this.classList.remove('drag-over');
+        
+        var type = e.dataTransfer.getData('text/plain');
+        console.log('Dropped:', type);
+        
+        if (type && INSTRUMENTS[type]) {
+            addStep(type);
+        }
+    });
+}
+
+// ============================================================================
+// STEP MANAGEMENT
+// ============================================================================
+function addStep(type) {
+    var inst = INSTRUMENTS[type];
+    var step = {
+        id: Date.now(),
+        type: type,
+        command: inst.commands[0].id,
+        params: {},
+        dependsOn: []
+    };
+    
+    workflowSteps.push(step);
+    renderSteps();
+    selectStep(workflowSteps.length - 1);
+    
+    console.log('Step added:', step);
+}
+
+function removeStep(index) {
+    workflowSteps.splice(index, 1);
+    selectedStepIndex = null;
+    renderSteps();
+    renderProperties();
+}
+
+function moveStep(index, direction) {
+    var newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= workflowSteps.length) return;
+    
+    var step = workflowSteps.splice(index, 1)[0];
+    workflowSteps.splice(newIndex, 0, step);
+    selectedStepIndex = newIndex;
+    renderSteps();
+}
+
+function selectStep(index) {
+    selectedStepIndex = index;
+    renderSteps();
+    renderProperties();
+}
+
+// ============================================================================
+// RENDER STEPS
+// ============================================================================
+function renderSteps() {
+    var stepsContainer = document.getElementById('workflowSteps');
+    var placeholder = document.getElementById('canvasPlaceholder');
+    
+    // Show/hide placeholder
+    placeholder.style.display = workflowSteps.length === 0 ? 'block' : 'none';
+    
+    // Clear container
+    stepsContainer.innerHTML = '';
+    
+    for (var i = 0; i < workflowSteps.length; i++) {
+        var step = workflowSteps[i];
+        var inst = INSTRUMENTS[step.type];
+        var cmd = null;
+        
+        for (var j = 0; j < inst.commands.length; j++) {
+            if (inst.commands[j].id === step.command) {
+                cmd = inst.commands[j];
+                break;
+            }
+        }
+        if (!cmd) cmd = inst.commands[0];
+        
+        // Add connector line (except for first)
+        if (i > 0) {
+            var connector = document.createElement('div');
+            connector.className = 'step-connector';
+            stepsContainer.appendChild(connector);
+        }
+        
+        // Create step element
+        var stepEl = document.createElement('div');
+        stepEl.className = 'workflow-step ' + step.type + (selectedStepIndex === i ? ' selected' : '');
+        stepEl.setAttribute('data-index', i.toString());
+        
+        // Get color class
+        var iconStyle = '';
+        if (inst.color === 'purple') iconStyle = 'style="color:#6f42c1;"';
+        else if (inst.color === 'orange') iconStyle = 'style="color:#fd7e14;"';
+        
+        // Format params for display
+        var paramsDisplay = '';
+        var paramKeys = Object.keys(step.params);
+        if (paramKeys.length > 0) {
+            var paramParts = [];
+            for (var k = 0; k < paramKeys.length; k++) {
+                var key = paramKeys[k];
+                if (step.params[key]) {
+                    paramParts.push(key + ': ' + step.params[key]);
+                }
+            }
+            paramsDisplay = paramParts.join(', ');
+        }
+        
+        var depsBadge = (step.dependsOn && step.dependsOn.length > 0) ?
+            ' <span class="badge bg-warning text-dark" title="Depends on steps: ' + step.dependsOn.join(', ') + '" style="font-size:9px;">' +
+            '<i class="bi bi-diagram-2"></i> ' + step.dependsOn.join(',') + '</span>' : '';
+
+        stepEl.innerHTML =
+            '<div class="step-number">' + (i + 1) + '</div>' +
+            '<div class="step-icon">' +
+                '<i class="bi ' + inst.icon + '" ' + iconStyle + '></i>' +
+            '</div>' +
+            '<div class="step-content">' +
+                '<div class="step-title">' + inst.name + ' - ' + cmd.label + depsBadge + '</div>' +
+                '<div class="step-details">' + (paramsDisplay || 'No parameters') + '</div>' +
+            '</div>' +
+            '<div class="step-actions">' +
+                '<button class="btn btn-sm btn-outline-secondary btn-move-up" data-index="' + i + '" ' + (i === 0 ? 'disabled' : '') + '>' +
+                    '<i class="bi bi-arrow-up"></i>' +
+                '</button>' +
+                '<button class="btn btn-sm btn-outline-secondary btn-move-down" data-index="' + i + '" ' + (i === workflowSteps.length - 1 ? 'disabled' : '') + '>' +
+                    '<i class="bi bi-arrow-down"></i>' +
+                '</button>' +
+                '<button class="btn btn-sm btn-outline-danger btn-remove" data-index="' + i + '">' +
+                    '<i class="bi bi-trash"></i>' +
+                '</button>' +
+            '</div>';
+        
+        stepsContainer.appendChild(stepEl);
+    }
+    
+    // Add event listeners to steps
+    var allSteps = document.querySelectorAll('.workflow-step');
+    for (var s = 0; s < allSteps.length; s++) {
+        allSteps[s].addEventListener('click', function(e) {
+            var idx = parseInt(this.getAttribute('data-index'));
+            selectStep(idx);
+        });
+    }
+    
+    // Add event listeners to buttons
+    var upButtons = document.querySelectorAll('.btn-move-up');
+    for (var u = 0; u < upButtons.length; u++) {
+        upButtons[u].addEventListener('click', function(e) {
+            e.stopPropagation();
+            moveStep(parseInt(this.getAttribute('data-index')), -1);
+        });
+    }
+    
+    var downButtons = document.querySelectorAll('.btn-move-down');
+    for (var d = 0; d < downButtons.length; d++) {
+        downButtons[d].addEventListener('click', function(e) {
+            e.stopPropagation();
+            moveStep(parseInt(this.getAttribute('data-index')), 1);
+        });
+    }
+    
+    var removeButtons = document.querySelectorAll('.btn-remove');
+    for (var r = 0; r < removeButtons.length; r++) {
+        removeButtons[r].addEventListener('click', function(e) {
+            e.stopPropagation();
+            removeStep(parseInt(this.getAttribute('data-index')));
+        });
+    }
+}
+
+// ============================================================================
+// RENDER PROPERTIES PANEL
+// ============================================================================
+function renderProperties() {
+    var propertiesContent = document.getElementById('propertiesContent');
+    
+    if (selectedStepIndex === null || !workflowSteps[selectedStepIndex]) {
+        propertiesContent.innerHTML = 
+            '<div class="empty-properties">' +
+                '<i class="bi bi-hand-index"></i>' +
+                '<p>Select a step<br>to configure it</p>' +
+            '</div>';
+        return;
+    }
+    
+    var step = workflowSteps[selectedStepIndex];
+    step.params = normalizeStepParamsForCommand(step.command, step.params);
+    var inst = INSTRUMENTS[step.type];
+    
+    if (!inst) {
+        propertiesContent.innerHTML = '<div class="alert alert-warning">Instrument not available</div>';
+        return;
+    }
+    
+    var html = '';
+    
+    // Instrument info with online status
+    var statusBadge = inst.online !== false ? 
+        '<span class="badge bg-success ms-2">Online</span>' :
+        '<span class="badge bg-danger ms-2">Offline</span>';
+    
+    html += '<div class="alert alert-secondary py-2 mb-3">' +
+        '<strong><i class="bi ' + inst.icon + ' me-2"></i>' + inst.name + '</strong>' +
+        (inst.isUtility || inst.isControl || inst.isAnnotation ? '' : statusBadge) +
+    '</div>';
+    
+    // Command select - filter based on showAllCommands
+    html += '<div class="property-group">' +
+        '<label>Comando ' + (showAllCommands ? '(tutti)' : '(⭐ principali)') + '</label>' +
+        '<select class="form-select form-select-sm" id="propCommand">';
+    
+    // Filter commands based on importance
+    var visibleCommands = inst.commands.filter(function(c) {
+        return showAllCommands || c.important !== false;
+    });
+    
+    for (var i = 0; i < visibleCommands.length; i++) {
+        var c = visibleCommands[i];
+        html += '<option value="' + c.id + '" ' + (step.command === c.id ? 'selected' : '') + '>' + c.label + '</option>';
+    }
+    
+    // If current command is hidden and not in visible list, add it anyway
+    var currentCmdVisible = visibleCommands.some(function(c) { return c.id === step.command; });
+    if (!currentCmdVisible) {
+        var hiddenCmd = inst.commands.find(function(c) { return c.id === step.command; });
+        if (hiddenCmd) {
+            html += '<option value="' + hiddenCmd.id + '" selected>' + hiddenCmd.label + ' (hidden)</option>';
+        }
+    }
+    
+    html += '</select></div>';
+    
+    // Get current command config
+    var cmd = null;
+    for (var j = 0; j < inst.commands.length; j++) {
+        if (inst.commands[j].id === step.command) {
+            cmd = inst.commands[j];
+            break;
+        }
+    }
+    if (!cmd) cmd = inst.commands[0];
+    
+    // Dynamic parameters with smart dropdowns
+    // First check API parameters, then fallback to local cmd.params
+    var paramList = [];
+    
+    // Get API parameters (richer info with displayName, ui_hint)
+    if (cmd.parameters && cmd.parameters.length > 0) {
+        paramList = cmd.parameters.map(function(p) {
+            return typeof p === 'string' ? { name: p } : p;
+        });
+    } else if (cmd.params && cmd.params.length > 0) {
+        // Fallback to local params array
+        paramList = cmd.params.map(function(name) {
+            return { name: name, displayName: name };
+        });
+    }
+    
+    if (paramList.length > 0) {
+        for (var pi = 0; pi < paramList.length; pi++) {
+            var paramObj = paramList[pi];
+            var param = paramObj.name || paramObj;
+            var displayName = paramObj.displayName || param;
+            var uiHint = (paramObj.ui_hint || '').toLowerCase();
+            var paramLower = param.toLowerCase();
+            var currentValue = step.params[param] || paramObj.default || '';
+            
+            html += '<div class="property-group">' + '<label>' + displayName + '</label>';
+            
+            // Check ui_hint first, then check for known parameter types
+            if (uiHint === 'recipe' || RECIPE_PARAMS.indexOf(paramLower) !== -1) {
+                // Recipe dropdown
+                html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
+                html += '<option value="">-- Select Recipe --</option>';
+                for (var ri = 0; ri < recipes.length; ri++) {
+                    html += '<option value="' + recipes[ri] + '"' + (currentValue === recipes[ri] ? ' selected' : '') + '>' + recipes[ri] + '</option>';
+                }
+                html += '</select>';
+            } else if (uiHint === 'location' || LOCATION_PARAMS.indexOf(paramLower) !== -1) {
+                // Location dropdown
+                html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
+                html += '<option value="">-- Select Location --</option>';
+                for (var li = 0; li < LOCATIONS.length; li++) {
+                    html += '<option value="' + LOCATIONS[li] + '"' + (currentValue === LOCATIONS[li] ? ' selected' : '') + '>' + LOCATIONS[li] + '</option>';
+                }
+                html += '</select>';
+            } else if (uiHint === 'tip_rack' || TIP_RACK_PARAMS.indexOf(paramLower) !== -1) {
+                // Tip rack dropdown (actual Opentrons tip rack types for RefillTipRack)
+                html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
+                html += '<option value="">-- Select Tip Rack --</option>';
+                for (var tr = 0; tr < TIP_RACK_TYPES.length; tr++) {
+                    html += '<option value="' + TIP_RACK_TYPES[tr] + '"' + (currentValue === TIP_RACK_TYPES[tr] ? ' selected' : '') + '>' + TIP_RACK_TYPES[tr] + '</option>';
+                }
+                html += '</select>';
+            } else if (uiHint === 'labware' || LABWARE_PARAMS.indexOf(paramLower) !== -1) {
+                // Labware dropdown
+                html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
+                html += '<option value="">-- Select Labware --</option>';
+                for (var lw = 0; lw < LABWARE_TYPES.length; lw++) {
+                    html += '<option value="' + LABWARE_TYPES[lw] + '"' + (currentValue === LABWARE_TYPES[lw] ? ' selected' : '') + '>' + LABWARE_TYPES[lw] + '</option>';
+                }
+                html += '</select>';
+            } else if (uiHint === 'protocol' || PROTOCOL_PARAMS.indexOf(paramLower) !== -1) {
+                // Protocol dropdown
+                html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
+                html += '<option value="">-- Select Protocol --</option>';
+                for (var pr = 0; pr < protocols.length; pr++) {
+                    html += '<option value="' + protocols[pr] + '"' + (currentValue === protocols[pr] ? ' selected' : '') + '>' + protocols[pr] + '</option>';
+                }
+                html += '</select>';
+            } else if (HAL_PARAMS.indexOf(paramLower) !== -1) {
+                // HAL config dropdown
+                html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
+                html += '<option value="">-- Select HAL --</option>';
+                for (var hc = 0; hc < halConfigs.length; hc++) {
+                    html += '<option value="' + halConfigs[hc] + '"' + (currentValue === halConfigs[hc] ? ' selected' : '') + '>' + halConfigs[hc] + '</option>';
+                }
+                html += '</select>';
+            } else if (LIQUID_CLASS_PARAMS.indexOf(paramLower) !== -1) {
+                // Liquid class dropdown
+                html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
+                html += '<option value="">-- Select Liquid Class --</option>';
+                for (var lc = 0; lc < liquidClasses.length; lc++) {
+                    html += '<option value="' + liquidClasses[lc] + '"' + (currentValue === liquidClasses[lc] ? ' selected' : '') + '>' + liquidClasses[lc] + '</option>';
+                }
+                html += '</select>';
+            } else if (PRIORITY_PARAMS.indexOf(paramLower) !== -1) {
+                // Priority dropdown
+                html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
+                html += '<option value="">-- Select Priority --</option>';
+                for (var pi2 = 0; pi2 < PRIORITY_OPTIONS.length; pi2++) {
+                    html += '<option value="' + PRIORITY_OPTIONS[pi2] + '"' + (currentValue === PRIORITY_OPTIONS[pi2] ? ' selected' : '') + '>' + PRIORITY_OPTIONS[pi2].charAt(0).toUpperCase() + PRIORITY_OPTIONS[pi2].slice(1) + '</option>';
+                }
+                html += '</select>';
+            } else if (TASK_TYPE_PARAMS.indexOf(paramLower) !== -1) {
+                // Task type dropdown
+                html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
+                html += '<option value="">-- Select Task Type --</option>';
+                for (var tt = 0; tt < TASK_TYPE_OPTIONS.length; tt++) {
+                    html += '<option value="' + TASK_TYPE_OPTIONS[tt] + '"' + (currentValue === TASK_TYPE_OPTIONS[tt] ? ' selected' : '') + '>' + TASK_TYPE_OPTIONS[tt].replace(/_/g, ' ') + '</option>';
+                }
+                html += '</select>';
+            } else if (uiHint === 'mobile_task' || paramLower === 'taskid' || paramLower === 'task_id') {
+                // Mobile robot task dropdown (from MobileSiLA2Server)
+                html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
+                html += '<option value="">-- Select Mobile Task --</option>';
+                for (var mt = 0; mt < mobileTasks.length; mt++) {
+                    var task = mobileTasks[mt];
+                    var taskId = task.id || task.task_id || task;
+                    var taskName = task.name || task.task_name || taskId;
+                    var subtaskCount = task.subtask_count || 0;
+                    var displayText = taskName + (subtaskCount > 0 ? ' (' + subtaskCount + ' subtasks)' : '');
+                    html += '<option value="' + taskId + '"' + (currentValue === taskId ? ' selected' : '') + '>' + displayText + '</option>';
+                }
+                html += '</select>';
+            } else {
+                // Default text input
+                var preview = _resolveVars(currentValue);
+                html += '<input type="text" class="form-control form-control-sm param-input" ' +
+                       'data-param="' + param + '" ' +
+                       'value="' + currentValue.replace(/"/g, '&quot;') + '" ' +
+                       'placeholder="Enter ' + param + '">';
+                if (preview !== null) {
+                    html += '<div class="form-text text-info mt-1" id="preview_' + param + '">' +
+                        '<i class="bi bi-arrow-right-short"></i> <code>' + preview + '</code></div>';
+                } else {
+                    html += '<div class="form-text text-muted mt-1" id="preview_' + param + '" style="display:none"></div>';
+                }
+            }
+
+            html += '</div>';
+        }
+    }
+    
+    // Append DependsOn selector (Settimana 9)
+    html += _buildDependsOnHTML(selectedStepIndex);
+
+    propertiesContent.innerHTML = html;
+
+    // Bind DependsOn checkboxes
+    _bindDependsOnListeners();
+
+    // Add event listeners
+    var commandSelect = document.getElementById('propCommand');
+    if (commandSelect) {
+        commandSelect.addEventListener('change', function() {
+            updateCommand(this.value);
+        });
+    }
+    
+    var paramInputs = document.querySelectorAll('.param-input');
+    for (var inp = 0; inp < paramInputs.length; inp++) {
+        paramInputs[inp].addEventListener('change', function() {
+            updateParam(this.getAttribute('data-param'), this.value);
+        });
+        paramInputs[inp].addEventListener('input', function() {
+            var previewEl = document.getElementById('preview_' + this.getAttribute('data-param'));
+            if (!previewEl) return;
+            var resolved = _resolveVars(this.value);
+            if (resolved !== null) {
+                previewEl.innerHTML = '<i class="bi bi-arrow-right-short"></i> <code>' + resolved + '</code>';
+                previewEl.style.display = '';
+            } else {
+                previewEl.style.display = 'none';
+            }
+        });
+    }
+}
+
+function updateCommand(cmdId) {
+    if (selectedStepIndex === null) return;
+    workflowSteps[selectedStepIndex].command = cmdId;
+    workflowSteps[selectedStepIndex].params = {};
+    renderSteps();
+    renderProperties();
+}
+
+function updateParam(key, value) {
+    if (selectedStepIndex === null) return;
+    workflowSteps[selectedStepIndex].params[key] = value;
+    workflowSteps[selectedStepIndex].params = normalizeStepParamsForCommand(
+        workflowSteps[selectedStepIndex].command,
+        workflowSteps[selectedStepIndex].params
+    );
+    renderSteps();
+}
+
+// ============================================================================
+// FILE LOADING
+// ============================================================================
+function loadFiles() {
+    // Load recipes
+    fetch('/api/files/recipes')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) { recipes = data.files || []; })
+        .catch(function(e) { console.error('Error loading recipes:', e); });
+    
+    // Load protocols
+    fetch('/api/files/protocols')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) { protocols = data.files || []; })
+        .catch(function(e) { console.error('Error loading protocols:', e); });
+    
+    // Load HAL configs
+    fetch('/api/files/hal')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) { halConfigs = data.files || []; })
+        .catch(function(e) { console.error('Error loading HAL configs:', e); });
+    
+    // Load liquid classes
+    fetch('/api/files/liquidclasses')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) { liquidClasses = data.files || []; })
+        .catch(function(e) { console.error('Error loading liquid classes:', e); });
+    
+    // Load mobile robot tasks (from MobileSiLA2Server)
+    fetch('/api/mobile/tasks')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) { 
+            mobileTasks = data.tasks || [];
+            console.log('📱 Loaded ' + mobileTasks.length + ' mobile tasks');
+        })
+        .catch(function(e) { console.error('Error loading mobile tasks:', e); });
+}
+
+// ============================================================================
+// SAVE WORKFLOW
+// ============================================================================
+function saveWorkflow() {
+    var name = document.getElementById('workflowName').value.trim() || 'Workflow';
+    
+    if (workflowSteps.length === 0) {
+        showToast('warning', 'Empty workflow', 'Add at least one step before saving.');
+        return;
+    }
+
+    var steps = [];
+    for (var i = 0; i < workflowSteps.length; i++) {
+        var step = workflowSteps[i];
+        steps.push({
+            StepNumber: i + 1,
+            Instrument: INSTRUMENTS[step.type].name,
+            Action: step.command,
+            Parameters: normalizeStepParamsForCommand(step.command, step.params),
+            DependsOn: step.dependsOn || []
+        });
+    }
+    
+    var workflow = {
+        WorkflowName: name,
+        Steps: steps
+    };
+    
+    fetch('/api/workflows/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(workflow)
+    })
+    .then(function(resp) { return resp.json(); })
+    .then(function(result) {
+        if (result.success) {
+            showToast('success', 'Saved', result.filename);
+        } else {
+            showToast('error', 'Save failed', result.error || 'Unknown error');
+        }
+    })
+    .catch(function(e) {
+        showToast('error', 'Save error', e.message);
+    });
+}
+
+// ============================================================================
+// LOAD WORKFLOW
+// ============================================================================
+function loadWorkflow() {
+    var modal = new bootstrap.Modal(document.getElementById('loadModal'));
+    var listEl = document.getElementById('workflowList');
+    
+    fetch('/api/files/workflows')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) {
+            if (data.files && data.files.length > 0) {
+                var html = '';
+                for (var i = 0; i < data.files.length; i++) {
+                    var f = data.files[i];
+                    html += '<a href="#" class="list-group-item list-group-item-action workflow-file-item" data-file="' + f + '">' +
+                        '<i class="bi bi-file-earmark-code me-2"></i>' + f +
+                    '</a>';
+                }
+                listEl.innerHTML = html;
+                
+                // Add click handlers
+                var items = document.querySelectorAll('.workflow-file-item');
+                for (var j = 0; j < items.length; j++) {
+                    items[j].addEventListener('click', function(e) {
+                        e.preventDefault();
+                        loadWorkflowFile(this.getAttribute('data-file'));
+                    });
+                }
+            } else {
+                listEl.innerHTML = '<p class="text-muted">No workflows saved</p>';
+            }
+        })
+        .catch(function(e) {
+            listEl.innerHTML = '<p class="text-danger">Error: ' + e.message + '</p>';
+        });
+    
+    modal.show();
+}
+
+function loadWorkflowFile(filename) {
+    fetch('/api/workflows/' + encodeURIComponent(filename))
+        .then(function(resp) { return resp.json(); })
+        .then(function(workflow) {
+            document.getElementById('workflowName').value = workflow.WorkflowName || filename.replace('.workflow.json', '');
+            
+            // Convert workflow format to internal format
+            workflowSteps = [];
+            var steps = workflow.Steps || [];
+            
+            for (var i = 0; i < steps.length; i++) {
+                var s = steps[i];
+                // Find instrument type by name
+                var type = 'note';
+                for (var key in INSTRUMENTS) {
+                    var inst = INSTRUMENTS[key];
+                    if (inst.name === s.Instrument || s.Instrument.toLowerCase().indexOf(key) !== -1) {
+                        type = key;
+                        break;
+                    }
+                }
+                
+                workflowSteps.push({
+                    id: Date.now() + Math.random(),
+                    type: type,
+                    command: s.Action,
+                    params: normalizeStepParamsForCommand(s.Action, s.Parameters || {}),
+                    dependsOn: s.DependsOn || []
+                });
+            }
+            
+            selectedStepIndex = null;
+            renderSteps();
+            renderProperties();
+            
+            bootstrap.Modal.getInstance(document.getElementById('loadModal')).hide();
+            
+            console.log('Workflow loaded:', workflow.WorkflowName);
+        })
+        .catch(function(e) {
+            showToast('error', 'Load error', e.message);
+        });
+}
+
+// ============================================================================
+// RUN WORKFLOW (Settimana 8: variable scanning + step monitoring)
+// ============================================================================
+// _liveVariables persists between runs so the properties panel can preview them
+var _collectedVariables = {};
+var _liveVariables = {};
+
+function _resolveVars(text) {
+    if (!text || typeof text !== 'string') return null;
+    if (text.indexOf('${') === -1) return null; // no variables
+    return text.replace(/\$\{([^}]+)\}/g, function(_, k) {
+        return _liveVariables[k] !== undefined ? _liveVariables[k] : ('${' + k + '}');
+    });
+}
+
+function runWorkflow() {
+    if (workflowSteps.length === 0) {
+        showToast('warning', 'Empty workflow', 'Add at least one step before running.');
+        return;
+    }
+
+    // Build steps for scanning
+    var steps = _buildSteps();
+    var workflowDef = {
+        WorkflowName: document.getElementById('workflowName').value.trim() || 'Workflow',
+        Steps: steps
+    };
+
+    // Scan for ${variable} patterns first
+    fetch('/api/workflows/scan-variables', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(workflowDef)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        _collectedVariables = {};
+        if (data.variables && data.variables.length > 0) {
+            _showVariablesModal(data.variables);
+        } else {
+            _showExecuteModal();
+        }
+    })
+    .catch(function() {
+        // If scan fails, proceed anyway
+        _showExecuteModal();
+    });
+}
+
+function _showVariablesModal(variables) {
+    var form = document.getElementById('variablesForm');
+    form.innerHTML = variables.map(function(v) {
+        return '<div class="mb-3">' +
+            '<label class="form-label fw-semibold">' + v + '</label>' +
+            '<input type="text" class="form-control" id="var_' + v + '" placeholder="Value for ${' + v + '}" autocomplete="off">' +
+            '</div>';
+    }).join('');
+
+    var modal = new bootstrap.Modal(document.getElementById('variablesModal'));
+    modal.show();
+
+    document.getElementById('btnVariablesNext').onclick = function() {
+        variables.forEach(function(v) {
+            var el = document.getElementById('var_' + v);
+            if (el) { _collectedVariables[v] = el.value; _liveVariables[v] = el.value; }
+        });
+        modal.hide();
+        // Re-render properties to refresh variable previews
+        if (selectedStepIndex !== null) renderProperties();
+        _showExecuteModal();
+    };
+}
+
+function _showExecuteModal() {
+    var hasOpentronsSteps = workflowSteps.some(function(s) {
+        return s.type === 'opentrons' || s.type === 'flex' || s.type === 'ot3';
+    });
+    var halSection = document.getElementById('halConfigSection');
+    if (halSection) halSection.style.display = hasOpentronsSteps ? 'block' : 'none';
+    if (hasOpentronsSteps) {
+        var halSelect = document.getElementById('halSelect');
+        halSelect.innerHTML = '<option value="">-- None --</option>' +
+            halConfigs.map(function(h) { return '<option value="' + h + '">' + h + '</option>'; }).join('');
+        // Pre-select active HAL config if set
+        fetch('/api/hardware/active')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.filename) halSelect.value = d.filename;
+            })
+            .catch(function() {});
+    }
+    document.getElementById('executeSummary').textContent = workflowSteps.length + ' steps to execute';
+    new bootstrap.Modal(document.getElementById('executeModal')).show();
+}
+
+function _buildSteps(halConfig) {
+    return workflowSteps.map(function(step, i) {
+        var params = normalizeStepParamsForCommand(step.command, step.params);
+        if (step.type === 'opentrons' && halConfig) params.hal_config = halConfig;
+        return {
+            StepNumber: i + 1,
+            Instrument: (INSTRUMENTS[step.type] || {}).name || step.type,
+            Action: step.command,
+            Parameters: params,
+            DependsOn: step.dependsOn || []
+        };
+    });
+}
+
+function confirmExecution() {
+    var halConfig = document.getElementById('halSelect').value;
+    var workflow = {
+        WorkflowName: document.getElementById('workflowName').value.trim() || 'Workflow',
+        Steps: _buildSteps(halConfig),
+        variables: _collectedVariables
+    };
+
+    bootstrap.Modal.getInstance(document.getElementById('executeModal')).hide();
+    showNotification('Starting workflow...', 'info');
+
+    fetch('/api/workflows/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(workflow)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+        if (result.status === 'completed') {
+            showNotification('Workflow completed! (' + (result.steps_completed || 0) + ' steps)', 'success');
+        } else {
+            showNotification((result.error || result.errors || 'Workflow failed'), 'danger');
+        }
+    })
+    .catch(function(e) { showNotification('Error: ' + e.message, 'danger'); });
+}
+
+
+// ============================================================================
+// TEMPLATES (Settimana 9)
+// ============================================================================
+var _selectedTemplateId = null;
+
+function openTemplatesModal() {
+    _selectedTemplateId = null;
+    document.getElementById('btnLoadTemplate').disabled = true;
+    var modal = new bootstrap.Modal(document.getElementById('templatesModal'));
+    _refreshTemplatesList('');
+    document.getElementById('templateSearch').oninput = function() {
+        _refreshTemplatesList(this.value.toLowerCase());
+    };
+    document.getElementById('btnLoadTemplate').onclick = function() {
+        if (_selectedTemplateId) {
+            _loadTemplate(_selectedTemplateId);
+            bootstrap.Modal.getInstance(document.getElementById('templatesModal')).hide();
+        }
+    };
+    modal.show();
+}
+
+function _refreshTemplatesList(query) {
+    var listEl = document.getElementById('templatesList');
+    listEl.innerHTML = '<p class="text-muted text-center py-3">Loading...</p>';
+    fetch('/api/templates')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var items = (data.templates || []).filter(function(t) {
+                return !query || t.name.toLowerCase().indexOf(query) !== -1 ||
+                    (t.description || '').toLowerCase().indexOf(query) !== -1;
+            });
+            if (items.length === 0) {
+                listEl.innerHTML = '<p class="text-muted text-center py-3">No templates found</p>';
+                return;
+            }
+            listEl.innerHTML = items.map(function(t) {
+                var tags = (t.tags || []).map(function(g) {
+                    return '<span class="badge bg-secondary me-1">' + g + '</span>';
+                }).join('');
+                return '<a href="#" class="list-group-item list-group-item-action template-item" data-id="' + t.id + '">' +
+                    '<div class="d-flex justify-content-between align-items-start">' +
+                        '<div>' +
+                            '<strong>' + t.name + '</strong> <span class="text-muted small">v' + (t.version || '1.0') + '</span><br>' +
+                            '<small class="text-muted">' + (t.description || '') + '</small><br>' +
+                            '<small>' + tags + '<span class="badge bg-dark">' + t.steps + ' steps</span></small>' +
+                        '</div>' +
+                        '<button class="btn btn-sm btn-outline-danger ms-2" onclick="deleteTemplate(event,\'' + t.id + '\')">' +
+                            '<i class="bi bi-trash"></i></button>' +
+                    '</div>' +
+                '</a>';
+            }).join('');
+            document.querySelectorAll('.template-item').forEach(function(el) {
+                el.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    document.querySelectorAll('.template-item').forEach(function(x) { x.classList.remove('active'); });
+                    this.classList.add('active');
+                    _selectedTemplateId = this.getAttribute('data-id');
+                    document.getElementById('btnLoadTemplate').disabled = false;
+                });
+            });
+        })
+        .catch(function() {
+            listEl.innerHTML = '<p class="text-danger text-center">Failed to load templates</p>';
+        });
+}
+
+function _loadTemplate(templateId) {
+    fetch('/api/templates/' + encodeURIComponent(templateId) + '/instantiate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(wf) {
+        document.getElementById('workflowName').value = wf.WorkflowName || templateId;
+        workflowSteps = [];
+        (wf.Steps || []).forEach(function(s, i) {
+            var type = 'note';
+            for (var key in INSTRUMENTS) {
+                var inst = INSTRUMENTS[key];
+                if (inst.name === s.Instrument || s.Instrument.toLowerCase().indexOf(key) !== -1) {
+                    type = key; break;
+                }
+            }
+            workflowSteps.push({
+                id: Date.now() + Math.random(),
+                type: type,
+                command: s.Action,
+                params: normalizeStepParamsForCommand(s.Action, s.Parameters || {}),
+                dependsOn: s.DependsOn || []
+            });
+        });
+        selectedStepIndex = null;
+        renderSteps();
+        renderProperties();
+        showNotification('Template loaded: ' + (wf.WorkflowName || templateId), 'info');
+    })
+    .catch(function(e) { showToast('error', 'Template load error', e.message); });
+}
+
+function saveCurrentAsTemplate() {
+    if (workflowSteps.length === 0) {
+        showToast('warning', 'Empty workflow', 'Add steps before saving as template.');
+        return;
+    }
+    document.getElementById('templateSaveName').value = document.getElementById('workflowName').value.trim() || 'Template';
+    document.getElementById('templateSaveDesc').value = '';
+    var modal = new bootstrap.Modal(document.getElementById('saveTemplateModal'));
+    document.getElementById('btnSaveTemplateConfirm').onclick = function() {
+        var name = document.getElementById('templateSaveName').value.trim();
+        if (!name) { document.getElementById('templateSaveName').classList.add('is-invalid'); return; }
+        document.getElementById('templateSaveName').classList.remove('is-invalid');
+        var desc = document.getElementById('templateSaveDesc').value;
+        var steps = workflowSteps.map(function(step, i) {
+            return {
+                StepNumber: i + 1,
+                Instrument: (INSTRUMENTS[step.type] || {}).name || step.type,
+                Action: step.command,
+                Parameters: normalizeStepParamsForCommand(step.command, step.params),
+                DependsOn: step.dependsOn || []
+            };
+        });
+        fetch('/api/templates/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ TemplateName: name, Description: desc, Steps: steps, Tags: [] })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+            if (res.success) {
+                bootstrap.Modal.getInstance(document.getElementById('saveTemplateModal')).hide();
+                showToast('success', 'Template saved', name);
+                _refreshTemplatesList('');
+            }
+        })
+        .catch(function(e) { showToast('error', 'Save error', e.message); });
+    };
+    modal.show();
+}
+
+var _pendingDeleteTemplateId = null;
+
+function deleteTemplate(e, templateId) {
+    e.stopPropagation();
+    e.preventDefault();
+    _pendingDeleteTemplateId = templateId;
+    document.getElementById('deleteTemplateNameLabel').textContent = templateId;
+    new bootstrap.Modal(document.getElementById('deleteTemplateModal')).show();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('btnDeleteTemplateConfirm').addEventListener('click', function() {
+        if (!_pendingDeleteTemplateId) return;
+        var tid = _pendingDeleteTemplateId;
+        _pendingDeleteTemplateId = null;
+        bootstrap.Modal.getInstance(document.getElementById('deleteTemplateModal')).hide();
+        fetch('/api/templates/' + encodeURIComponent(tid), { method: 'DELETE' })
+            .then(function() {
+                showToast('success', 'Deleted', 'Template removed.');
+                _refreshTemplatesList('');
+            })
+            .catch(function(e) { showToast('error', 'Delete error', e.message); });
+    });
+});
+
+// ============================================================================
+// EXPORT / IMPORT (Settimana 9)
+// ============================================================================
+function exportWorkflow() {
+    if (workflowSteps.length === 0) { showToast('warning', 'Empty workflow', 'Nothing to export.'); return; }
+    var name = document.getElementById('workflowName').value.trim() || 'Workflow';
+    var steps = workflowSteps.map(function(step, i) {
+        return {
+            StepNumber: i + 1,
+            Instrument: (INSTRUMENTS[step.type] || {}).name || step.type,
+            Action: step.command,
+            Parameters: normalizeStepParamsForCommand(step.command, step.params),
+            DependsOn: step.dependsOn || []
+        };
+    });
+    var workflow = { WorkflowName: name, Steps: steps, ExportedAt: new Date().toISOString() };
+    var blob = new Blob([JSON.stringify(workflow, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name.replace(/\s+/g, '_') + '.workflow.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    showNotification('Workflow exported', 'success');
+}
+
+function importWorkflow(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+        try {
+            var wf = JSON.parse(ev.target.result);
+            if (!wf.WorkflowName && !wf.Steps) throw new Error('Not a valid workflow file');
+            document.getElementById('workflowName').value = wf.WorkflowName || file.name.replace('.workflow.json','');
+            workflowSteps = [];
+            (wf.Steps || []).forEach(function(s) {
+                var type = 'note';
+                for (var key in INSTRUMENTS) {
+                    var inst = INSTRUMENTS[key];
+                    if (inst.name === s.Instrument || s.Instrument.toLowerCase().indexOf(key) !== -1) {
+                        type = key; break;
+                    }
+                }
+                workflowSteps.push({
+                    id: Date.now() + Math.random(),
+                    type: type, command: s.Action,
+                    params: normalizeStepParamsForCommand(s.Action, s.Parameters || {}),
+                    dependsOn: s.DependsOn || []
+                });
+            });
+            selectedStepIndex = null;
+            renderSteps();
+            renderProperties();
+            showNotification('Imported: ' + (wf.WorkflowName || file.name), 'success');
+        } catch (err) {
+            showToast('error', 'Import error', err.message);
+        }
+    };
+    reader.readAsText(file);
+    // Reset so same file can be imported again
+    e.target.value = '';
+}
+
+// ============================================================================
+// DEPENDSON — integrated into properties panel and step save (Settimana 9)
+// ============================================================================
+function _buildDependsOnHTML(stepIndex) {
+    if (workflowSteps.length < 2) return '';
+    var step = workflowSteps[stepIndex];
+    var deps = step.dependsOn || [];
+    var options = '';
+    workflowSteps.forEach(function(s, i) {
+        if (i === stepIndex) return;
+        var inst = INSTRUMENTS[s.type] || {};
+        var label = 'Step ' + (i + 1) + ': ' + (inst.name || s.type) + ' / ' + s.command;
+        var checked = deps.indexOf(i + 1) !== -1 ? 'checked' : '';
+        options += '<div class="form-check form-check-sm">' +
+            '<input class="form-check-input depends-on-check" type="checkbox" value="' + (i + 1) + '" id="dep_' + i + '" ' + checked + '>' +
+            '<label class="form-check-label small" for="dep_' + i + '">' + label + '</label></div>';
+    });
+    return '<div class="property-group mt-2">' +
+        '<label><i class="bi bi-diagram-2 me-1 text-warning"></i>Depends on</label>' +
+        '<div id="dependsOnGroup" style="max-height:120px; overflow-y:auto; border:1px solid var(--bs-border-color); border-radius:4px; padding:6px;">' +
+        options + '</div></div>';
+}
+
+function _bindDependsOnListeners() {
+    document.querySelectorAll('.depends-on-check').forEach(function(cb) {
+        cb.addEventListener('change', function() {
+            if (selectedStepIndex === null) return;
+            var checked = Array.from(document.querySelectorAll('.depends-on-check:checked'))
+                .map(function(el) { return parseInt(el.value); });
+            workflowSteps[selectedStepIndex].dependsOn = checked;
+            renderSteps(); // refresh connector display
+        });
+    });
+}
+</script>
+{% endblock %}

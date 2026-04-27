@@ -1,0 +1,118 @@
+\documentclass[a4paper,11pt]{article}
+
+% --- Pacchetti Configurazione ---
+\usepackage[utf8]{inputenc}
+\usepackage[italian]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\usepackage{array}
+
+% --- Definizione Colori e Stile ---
+\definecolor{primaryblue}{rgb}{0.1, 0.3, 0.6}
+\definecolor{grayline}{gray}{0.8}
+
+\titleformat{\section}{\large\bfseries\color{primaryblue}}{\thesection}{1em}{}[\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries\color{primaryblue}}{\thesubsection}{1em}{}
+
+\hypersetup{
+	colorlinks=true,
+	linkcolor=primaryblue,
+	urlcolor=cyan,
+	pdftitle={Report LabOS 2.0 - BicoccaLab v7},
+}
+
+% --- Metadati ---
+\title{\textbf{Report di Stato Avanzamento: LabOS 2.0}\\ \large (BicoccaLab v7)}
+\author{Dipartimento di Automazione e Robotica}
+\date{20 aprile 2026}
+
+\begin{document}
+	
+	\maketitle
+	
+	\section{Introduzione e Visione Strategica}
+	Il progetto \textbf{LabOS 2.0} consolida una piattaforma modulare progettata per eliminare il \textit{"Time-to-Experiment bottleneck"}. Con un \textbf{Technology Readiness Level (TRL) 6/7}, il sistema transita verso un modello di \textbf{Self-Driving Lab (SDL)}.
+	
+	I quattro pilastri strategici identificati sono:
+	\begin{itemize}[label=$\checkmark$]
+		\item \textbf{Coordinamento eterogeneo:} Integrazione multi-vendor unificata.
+		\item \textbf{Adattabilità:} Riconfigurazione rapida dei protocolli (\textit{No-Code}).
+		\item \textbf{Human-in-the-loop:} Sinergia uomo-macchina per task complessi.
+		\item \textbf{Ottimizzazione Closed-loop:} Generazione dati standardizzati per AI.
+	\end{itemize}
+	
+	\section{Infrastruttura Operativa e Workstation}
+	L'architettura garantisce \textbf{scalabilità orizzontale}, permettendo l'aggiunta di moduli senza alterare la logica centrale.
+	
+	
+	
+	\begin{table}[h!]
+		\centering
+		\small
+		\caption{Componenti Standard e Impatto Strategico}
+		\vspace{2mm}
+		\begin{tabular}{@{}p{3cm}p{4cm}p{7cm}@{}}
+			\toprule
+			\textbf{Componente} & \textbf{Ruolo Operativo} & \textbf{Impatto Strategico (\textit{So What?})} \\ \midrule
+			\textbf{Opentrons Flex} & Pipettaggio e preparazione. & HAL e API Python riducono i tempi di ri-validazione del 40\%. \\ \addlinespace
+			\textbf{Tecan M200 Pro} & Analisi spettroscopica. & Integrazione SiLA2 elimina i silos informativi (XML $\to$ Strutturato). \\ \addlinespace
+			\textbf{GoFaGo} & Logistica autonoma. & Cinematica omnidirezionale ottimizza il \textit{footprint} di laboratorio. \\ \addlinespace
+			\textbf{Manual Station} & Intervento assistito. & Garantisce resilienza in caso di variabilità estrema dei materiali. \\ \bottomrule
+		\end{tabular}
+	\end{table}
+	
+	\section{Standardizzazione: Il Motore SiLA2 e HAL}
+	L'adozione dello standard \textbf{SiLA2} (basato su gRPC) garantisce comunicazioni binarie efficienti. L'\textbf{Hardware Abstraction Layer (HAL)} risolve a \textit{runtime} le \textit{logical labware} in \textit{physical slots}, prevenendo errori di \textit{hard-coding}.
+	
+	\subsection{Flusso di Esecuzione del Workflow}
+	\begin{enumerate}
+		\item \textbf{Definizione JSON:} Formato dichiarativo leggibile dall'uomo e dalla macchina.
+		\item \textbf{Risoluzione HAL:} Mapping della ricetta sulla configurazione fisica attuale.
+		\item \textbf{Esecuzione:} Generazione dinamica di protocolli Python e comandi SiLA2.
+		\item \textbf{Standardizzazione:} Consolidamento dei risultati in formato \textbf{AnIML}.
+	\end{enumerate}
+	
+	\section{Validazione Sperimentale: Sintesi Idrogeli}
+	I test di stress hanno definito l'inviluppo di tolleranza per il docking autonomo:
+	\begin{itemize}
+		\item \textbf{Task Tolerance Laterale (X):} $\pm 4$ cm (limite cinematico del braccio).
+		\item \textbf{Task Tolerance Longitudinale (Y):} da $-5$ a $+20$ cm.
+	\end{itemize}
+	
+	\textbf{Criticità identificate:} Il \textbf{Tecan Carrier} presenta il tasso di successo più basso (80\%) a causa della struttura a sbalzo (\textit{cantilevered tray}). È stato rilevato un \textit{drift} di calibrazione della camera di $1.8$ mm e un effetto \textit{"forward-push"} indotto dalla pinza RG6.
+	
+	\section{Analisi del Rischio e Azioni Correttive}
+	\begin{table}[h!]
+		\centering
+		\begin{tabular}{@{}lll@{}}
+			\toprule
+			\textbf{Rischio} & \textbf{Livello} & \textbf{Strategia di Mitigazione} \\ \midrule
+			Tecnologico & Medio-Basso & Manutenzione preventiva e monitoraggio KPI. \\
+			Adozione & Medio & Formazione tramite interfaccia \textit{No-Code}. \\
+			Scalabilità & Basso & Architettura SiLA2 nativamente estensibile. \\ \bottomrule
+		\end{tabular}
+	\end{table}
+	
+	\textbf{Azioni Correttive Prioritarie:}
+	\begin{itemize}
+		\item Sostituzione pinza RG6 con modello a \textbf{cinematica parallela}.
+		\item Passaggio a \textbf{marker ArUco in alluminio} per prevenire deformazioni.
+		\item Stress-test 24/7 per monitoraggio derive termiche.
+	\end{itemize}
+	
+	\section{Roadmap Operativa (90 Giorni)}
+	\begin{description}
+		\item[Mese 1: Hardening] Rilascio pacchetto di qualifica e criteri di accettazione.
+		\item[Mese 2: Monitoring] Report dettagliato su Throughput e \textit{Intervention Rate}.
+		\item[Mese 3: Readiness] Dimostrazione \textit{end-to-end} e transizione operativa finale.
+	\end{description}
+	
+\end{document}

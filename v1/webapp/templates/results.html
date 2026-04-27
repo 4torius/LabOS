@@ -1,0 +1,354 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+/* Plate heatmap grid */
+.plate-grid { display: grid; gap: 3px; margin: 0 auto; }
+.plate-grid.cols-12 { grid-template-columns: repeat(13, 1fr); } /* 1 row label + 12 cols */
+.well-label { display: flex; align-items: center; justify-content: center;
+              font-size: 10px; color: var(--bs-secondary); font-weight: 600; }
+.well-cell { width: 100%; aspect-ratio: 1; border-radius: 50%; border: 1px solid rgba(255,255,255,0.1);
+             cursor: pointer; position: relative; transition: transform 0.1s; }
+.well-cell:hover { transform: scale(1.3); z-index: 10; }
+.well-cell[data-value] { cursor: help; }
+.well-cell.empty { background: #2d2d2d; opacity: 0.4; }
+.heat-legend { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.heat-legend-bar { width: 140px; height: 14px; border-radius: 3px;
+                   background: linear-gradient(to right, #053061, #2166ac, #4dac26, #d6604d, #67001f); }
+</style>
+
+<div class="container-fluid">
+    <h2 class="mb-4"><i class="bi bi-file-earmark-bar-graph"></i> Results</h2>
+
+    <ul class="nav nav-tabs mb-4" id="resultsTabs">
+        <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#animl">AnIML</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#excel">Excel</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#xml">XML</a></li>
+    </ul>
+
+    <div class="tab-content">
+        <!-- AnIML tab -->
+        <div class="tab-pane active" id="animl">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead><tr><th>File</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead>
+                    <tbody>
+                    {% for r in results if r.format == 'AnIML' %}
+                    <tr>
+                        <td><i class="bi bi-file-earmark"></i> {{ r.name }}</td>
+                        <td>{{ (r.size / 1024)|round(1) }} KB</td>
+                        <td>{{ r.modified[:19] }}</td>
+                        <td>
+                            <a href="/api/results/AnIML/{{ r.name }}" class="btn btn-sm btn-outline-primary" download>
+                                <i class="bi bi-download"></i>
+                            </a>
+                            <button class="btn btn-sm btn-outline-info" onclick="viewFile('AnIML','{{ r.name }}')">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-success" onclick="visualizeAnIML('{{ r.name }}')">
+                                <i class="bi bi-grid-3x3-gap"></i> Visualize
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" class="text-muted text-center py-4">No AnIML files found</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Excel and XML tabs -->
+        {% for fmt in ['Excel', 'XML'] %}
+        <div class="tab-pane" id="{{ fmt|lower }}">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead><tr><th>File</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead>
+                    <tbody>
+                    {% for r in results if r.format == fmt %}
+                    <tr>
+                        <td><i class="bi bi-file-earmark"></i> {{ r.name }}</td>
+                        <td>{{ (r.size / 1024)|round(1) }} KB</td>
+                        <td>{{ r.modified[:19] }}</td>
+                        <td>
+                            <a href="/api/results/{{ r.format }}/{{ r.name }}" class="btn btn-sm btn-outline-primary" download>
+                                <i class="bi bi-download"></i>
+                            </a>
+                            <button class="btn btn-sm btn-outline-info" onclick="viewFile('{{ r.format }}','{{ r.name }}')">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" class="text-muted text-center py-4">No {{ fmt }} files found</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Raw file viewer modal -->
+<div class="modal fade" id="viewModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="viewModalTitle">File Content</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <pre id="fileContent" style="max-height:70vh; overflow:auto; background:var(--bs-body-bg); color:var(--bs-body-color); padding:1rem; border-radius:4px; border:1px solid var(--bs-border-color);"></pre>
+            </div>
+            <div class="modal-footer">
+                <a id="downloadLink" href="#" class="btn btn-primary" download><i class="bi bi-download"></i> Download</a>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- AnIML visualization modal -->
+<div class="modal fade" id="animlModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="bi bi-grid-3x3-gap me-2"></i><span id="animlModalTitle">AnIML Visualization</span></h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="animlLoading" class="text-center py-4">
+                    <div class="spinner-border text-success"></div>
+                    <p class="mt-2 text-muted">Parsing AnIML file...</p>
+                </div>
+                <div id="animlContent" style="display:none;">
+                    <!-- Measurement info -->
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <div class="card bg-dark border-secondary">
+                                <div class="card-body py-2">
+                                    <h6 class="card-title text-success mb-2"><i class="bi bi-info-circle me-1"></i> Measurement Info</h6>
+                                    <div id="animlInfo" class="small"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card bg-dark border-secondary">
+                                <div class="card-body py-2">
+                                    <h6 class="card-title text-info mb-2"><i class="bi bi-bar-chart me-1"></i> Statistics</h6>
+                                    <div id="animlStats" class="small"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step tabs (one per ExperimentStep) -->
+                    <ul class="nav nav-tabs mb-3" id="animlStepTabs"></ul>
+                    <div class="tab-content" id="animlStepContent"></div>
+                </div>
+                <div id="animlError" style="display:none;" class="alert alert-danger"></div>
+            </div>
+            <div class="modal-footer">
+                <a id="animlDownloadLink" href="#" class="btn btn-outline-primary" download>
+                    <i class="bi bi-download"></i> Download
+                </a>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ── Raw file viewer ──────────────────────────────────────────────────────────
+async function viewFile(format, filename) {
+    try {
+        const resp = await fetch(`/api/results/${format}/${filename}/view`);
+        const data = await resp.json();
+        document.getElementById('viewModalTitle').textContent = filename;
+        document.getElementById('downloadLink').href = `/api/results/${format}/${filename}`;
+        let content = data.content;
+        if (!data.binary && (format === 'XML' || format === 'AnIML')) {
+            content = content.replace(/></g, '>\n<');
+        }
+        document.getElementById('fileContent').textContent = content;
+        new bootstrap.Modal(document.getElementById('viewModal')).show();
+    } catch (err) {
+        alert('Error loading file: ' + err.message);
+    }
+}
+
+// ── AnIML heatmap visualization ──────────────────────────────────────────────
+async function visualizeAnIML(filename) {
+    const modal = new bootstrap.Modal(document.getElementById('animlModal'));
+    document.getElementById('animlModalTitle').textContent = filename;
+    document.getElementById('animlLoading').style.display = 'block';
+    document.getElementById('animlContent').style.display = 'none';
+    document.getElementById('animlError').style.display = 'none';
+    document.getElementById('animlDownloadLink').href = `/api/results/AnIML/${filename}`;
+    modal.show();
+
+    try {
+        const resp = await fetch(`/api/results/animl/${encodeURIComponent(filename)}/parse`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        _renderAnIML(data);
+    } catch (err) {
+        document.getElementById('animlLoading').style.display = 'none';
+        const errEl = document.getElementById('animlError');
+        errEl.textContent = 'Failed to parse AnIML: ' + err.message;
+        errEl.style.display = 'block';
+    }
+}
+
+function _renderAnIML(data) {
+    // Info card
+    document.getElementById('animlInfo').innerHTML =
+        `<strong>Plate:</strong> ${data.plate_name || '—'}<br>` +
+        `<strong>Type:</strong> <small class="text-muted">${(data.plate_type || '—').substring(0, 60)}</small><br>` +
+        `<strong>Steps:</strong> ${data.experiment_steps.length}`;
+
+    // Step tabs
+    const tabsEl = document.getElementById('animlStepTabs');
+    const contentEl = document.getElementById('animlStepContent');
+    tabsEl.innerHTML = '';
+    contentEl.innerHTML = '';
+
+    if (data.experiment_steps.length === 0) {
+        contentEl.innerHTML = '<p class="text-muted">No experiment steps found.</p>';
+    }
+
+    data.experiment_steps.forEach(function(step, idx) {
+        const tabId = 'animl_step_' + idx;
+        tabsEl.innerHTML += `<li class="nav-item">
+            <a class="nav-link ${idx === 0 ? 'active' : ''}" data-bs-toggle="tab" href="#${tabId}">
+                ${step.step_name || 'Step ' + (idx+1)}
+            </a></li>`;
+        contentEl.innerHTML += `<div class="tab-pane ${idx === 0 ? 'active' : ''}" id="${tabId}">
+            ${_buildStepHTML(step)}
+        </div>`;
+    });
+
+    // Stats from first step
+    if (data.experiment_steps.length > 0) {
+        const s = data.experiment_steps[0].statistics || {};
+        document.getElementById('animlStats').innerHTML = s.count ? `
+            <strong>N:</strong> ${s.count} &nbsp;
+            <strong>Mean:</strong> ${s.mean} ${data.experiment_steps[0].unit}<br>
+            <strong>Min:</strong> ${s.min} &nbsp;
+            <strong>Max:</strong> ${s.max}<br>
+            <strong>Std:</strong> ${s.std}
+        ` : '<span class="text-muted">No statistics available</span>';
+    }
+
+    document.getElementById('animlLoading').style.display = 'none';
+    document.getElementById('animlContent').style.display = 'block';
+}
+
+function _buildStepHTML(step) {
+    const measurements = step.measurements || [];
+    if (measurements.length === 0) return '<p class="text-muted">No measurement data.</p>';
+
+    const values = measurements.map(function(m) { return m.value; }).filter(function(v) { return v !== null && v !== undefined; });
+    const minVal = Math.min.apply(null, values);
+    const maxVal = Math.max.apply(null, values);
+    const range = maxVal - minVal || 1;
+
+    // Build 8×12 grid (96-well plate)
+    const ROWS = ['A','B','C','D','E','F','G','H'];
+    const COLS = 12;
+
+    // Map well → value
+    const wellMap = {};
+    measurements.forEach(function(m) { wellMap[m.well] = m.value; });
+
+    // Column header row
+    let gridHTML = '<div class="plate-grid cols-12" style="max-width:660px;">';
+    gridHTML += '<div class="well-label"></div>';
+    for (let c = 1; c <= COLS; c++) {
+        gridHTML += `<div class="well-label">${c}</div>`;
+    }
+
+    ROWS.forEach(function(row) {
+        gridHTML += `<div class="well-label">${row}</div>`;
+        for (let c = 1; c <= COLS; c++) {
+            const well = row + c;
+            const val = wellMap[well];
+            if (val !== undefined && val !== null) {
+                const norm = (val - minVal) / range;
+                const color = _heatColor(norm);
+                gridHTML += `<div class="well-cell" style="background:${color};"
+                    title="${well}: ${val} ${step.unit}"
+                    data-bs-toggle="tooltip" data-value="${val}"></div>`;
+            } else {
+                gridHTML += '<div class="well-cell empty" title="No data"></div>';
+            }
+        }
+    });
+    gridHTML += '</div>';
+
+    // Legend
+    const legendHTML = `<div class="heat-legend mt-2 mb-3">
+        <span class="text-muted small">${minVal.toFixed(4)}</span>
+        <div class="heat-legend-bar"></div>
+        <span class="text-muted small">${maxVal.toFixed(4)} ${step.unit}</span>
+    </div>`;
+
+    // Technique + parameters
+    let paramHTML = '';
+    if (step.parameters && Object.keys(step.parameters).length > 0) {
+        paramHTML = '<div class="mt-3"><h6 class="text-secondary small text-uppercase">Measurement Settings</h6>' +
+            '<table class="table table-sm table-dark table-bordered" style="font-size:12px;"><tbody>';
+        Object.entries(step.parameters).forEach(function([k, v]) {
+            paramHTML += `<tr><td class="text-muted">${k}</td><td>${v}</td></tr>`;
+        });
+        paramHTML += '</tbody></table></div>';
+    }
+
+    // Data table (collapsible)
+    let tableHTML = `<details class="mt-3"><summary class="text-muted small" style="cursor:pointer;">
+        Show raw data (${measurements.length} wells)</summary>
+        <div class="table-responsive mt-2" style="max-height:260px; overflow-y:auto;">
+        <table class="table table-sm table-dark table-striped" style="font-size:11px;">
+        <thead><tr><th>Well</th><th>Row</th><th>Col</th><th>Value (${step.unit})</th></tr></thead><tbody>`;
+    measurements.forEach(function(m) {
+        tableHTML += `<tr><td>${m.well}</td><td>${m.row}</td><td>${m.col}</td>
+            <td>${m.value !== null ? m.value : '—'}</td></tr>`;
+    });
+    tableHTML += '</tbody></table></div></details>';
+
+    return `<div class="d-flex align-items-center gap-2 mb-2">
+        <span class="badge bg-success">${step.technique || 'Unknown technique'}</span>
+        <span class="badge bg-secondary">${step.value_series || ''}</span>
+    </div>` + gridHTML + legendHTML + paramHTML + tableHTML;
+}
+
+// Heatmap color: blue → green → red (diverging, similar to matplotlib RdYlGn reversed)
+function _heatColor(norm) {
+    // norm: 0 (min/cool) → 1 (max/hot)
+    if (norm <= 0.25) {
+        // deep blue → light blue
+        const t = norm / 0.25;
+        return `rgb(${Math.round(5 + t*30)},${Math.round(48 + t*80)},${Math.round(97 + t*50)})`;
+    } else if (norm <= 0.5) {
+        // light blue → yellow-green
+        const t = (norm - 0.25) / 0.25;
+        return `rgb(${Math.round(35 + t*180)},${Math.round(128 + t*90)},${Math.round(147 - t*110)})`;
+    } else if (norm <= 0.75) {
+        // yellow-green → orange-red
+        const t = (norm - 0.5) / 0.25;
+        return `rgb(${Math.round(215 + t*30)},${Math.round(218 - t*100)},${Math.round(37 - t*30)})`;
+    } else {
+        // orange-red → deep red
+        const t = (norm - 0.75) / 0.25;
+        return `rgb(${Math.round(245 - t*50)},${Math.round(118 - t*110)},${Math.round(7 - t*5)})`;
+    }
+}
+
+// Initialise Bootstrap tooltips after modal shows
+document.getElementById('animlModal').addEventListener('shown.bs.modal', function() {
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el) {
+        new bootstrap.Tooltip(el, { trigger: 'hover', placement: 'top' });
+    });
+});
+</script>
+{% endblock %}

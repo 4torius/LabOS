@@ -1,0 +1,52 @@
+{
+  "id": "corning_96_wellplate_360ul_flat",
+  "display_name": "Corning 96 Well Plate 360 µL Flat",
+  "category": "wellPlate",
+  "format": "96Standard",
+  "rows": 8,
+  "columns": 12,
+  "total_wells": 96,
+  "row_labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H"
+  ],
+  "max_volume_ul": 360,
+  "working_volume_ul": 300,
+  "well_shape": "circular",
+  "well_diameter_mm": 6.86,
+  "well_depth_mm": 10.67,
+  "dimensions_mm": {
+    "x": 127.76,
+    "y": 85.47,
+    "z": 14.22
+  },
+  "bottom_type": "flat",
+  "instruments": [
+    "opentrons",
+    "tecan"
+  ],
+  "opentrons_load_name": "corning_96_wellplate_360ul_flat",
+  "tecan_compatible": true,
+  "brand": "Corning",
+  "catalog_numbers": [
+    "3650",
+    "3916",
+    "3915",
+    "3596",
+    "3370",
+    "3628"
+  ],
+  "tags": [
+    "flat-bottom",
+    "transparent",
+    "cell-culture",
+    "standard"
+  ],
+  "notes": "Standard SBS footprint. Most common plate for absorbance/fluorescence readings."
+}

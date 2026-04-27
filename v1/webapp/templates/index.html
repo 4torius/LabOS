@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid">
+    <h2 class="mb-4">Welcome to LabOS</h2>
+    
+    <div class="row g-4">
+        <div class="col-md-6 col-lg-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <h5><i class="bi bi-hdd-stack"></i> Devices</h5>
+                    <h2>{{ devices|length }}</h2>
+                    <small>Connected instruments</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <h5><i class="bi bi-check-circle"></i> Status</h5>
+                    <h2>Online</h2>
+                    <small>System operational</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-3">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <h5><i class="bi bi-diagram-3"></i> Workflows</h5>
+                    <h2>Ready</h2>
+                    <small>Node-RED integrated</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-3">
+            <div class="card bg-warning text-dark">
+                <div class="card-body">
+                    <h5><i class="bi bi-activity"></i> Active</h5>
+                    <h2>0</h2>
+                    <small>Running workflows</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row mt-5">
+        <div class="col-12">
+            <h4>Quick Actions</h4>
+            <div class="btn-group">
+                <a href="/dashboard" class="btn btn-outline-primary btn-lg">
+                    <i class="bi bi-speedometer2"></i> Open Dashboard
+                </a>
+                <a href="/workflows" class="btn btn-outline-success btn-lg">
+                    <i class="bi bi-diagram-3"></i> Create Workflow
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

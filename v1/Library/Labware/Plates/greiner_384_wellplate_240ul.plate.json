@@ -1,0 +1,58 @@
+{
+  "id": "greiner_384_wellplate_240ul",
+  "display_name": "Greiner 384 Well Plate 240 µL",
+  "category": "wellPlate",
+  "format": "384Standard",
+  "rows": 16,
+  "columns": 24,
+  "total_wells": 384,
+  "row_labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P"
+  ],
+  "max_volume_ul": 240,
+  "working_volume_ul": 200,
+  "well_shape": "square",
+  "well_diameter_mm": null,
+  "well_width_mm": 3.8,
+  "well_length_mm": 3.8,
+  "well_depth_mm": 19.3,
+  "dimensions_mm": {
+    "x": 127.76,
+    "y": 85.48,
+    "z": 22.0
+  },
+  "bottom_type": "flat",
+  "instruments": [
+    "opentrons",
+    "tecan"
+  ],
+  "opentrons_load_name": "greiner_384_wellplate_240ul",
+  "tecan_compatible": true,
+  "brand": "Greiner Bio-One",
+  "catalog_numbers": [
+    "781270",
+    "781271"
+  ],
+  "tags": [
+    "384-well",
+    "flat-bottom",
+    "greiner",
+    "high-throughput"
+  ],
+  "notes": "Greiner 384-well high-volume flat-bottom. 16 rows (A-P) × 24 columns."
+}

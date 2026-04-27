@@ -1,0 +1,37 @@
+# Manual Station SiLA2 Server Configuration
+# ==========================================
+
+server:
+  host: "0.0.0.0"
+  port: 50360
+
+logging:
+  level: INFO
+
+# Task configuration
+tasks:
+  # Default timeout for tasks (seconds)
+  default_timeout: 3600  # 1 hour
+  
+  # How long to keep completed tasks in history
+  history_retention: 86400  # 24 hours
+  
+  # Maximum number of concurrent tasks
+  max_concurrent_tasks: 100
+
+# Notification settings
+notifications:
+  # Enable console notifications
+  console_enabled: true
+  
+  # Enable sound alerts (requires playsound package)
+  sound_enabled: false
+  
+  # Notification retention time (seconds)
+  retention: 3600  # 1 hour
+
+# SiLA2 discovery
+sila2:
+  server_name: "Manual Station"
+  server_uuid: "manual-station-001"
+  vendor_url: "https://github.com/BicoccaLab"

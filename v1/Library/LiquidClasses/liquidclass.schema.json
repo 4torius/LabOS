@@ -1,0 +1,134 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Liquid Class Definition",
+  "description": "Schema for defining custom liquid classes for Opentrons Flex",
+  "type": "object",
+  
+  "required": ["name", "parameters"],
+  
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Unique name of the liquid class (used in recipes)"
+    },
+    "loadName": {
+      "type": "string",
+      "enum": ["water", "glycerol_50", "ethanol_80"],
+      "description": "Opentrons load name for native API (optional)"
+    },
+    "description": {
+      "type": "string",
+      "description": "Description of the liquid class and typical use"
+    },
+    "basedOn": {
+      "type": "string",
+      "description": "Reference liquid this class is based on"
+    },
+    
+    "parameters": {
+      "type": "object",
+      "description": "Pipetting parameters",
+      "required": ["aspirate_rate", "dispense_rate"],
+      "properties": {
+        "aspirate_rate": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 2.0,
+          "description": "Aspiration speed (1.0 = default, 0.25 = 25%)"
+        },
+        "dispense_rate": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 2.0,
+          "description": "Dispensing speed (1.0 = default)"
+        },
+        "blow_out": {
+          "type": "boolean",
+          "default": false,
+          "description": "Execute blow out after dispense"
+        },
+        "touch_tip": {
+          "type": "boolean",
+          "default": false,
+          "description": "Touch well edge after dispense"
+        },
+        "mix_after": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "array",
+              "items": [
+                {"type": "integer", "minimum": 1, "description": "Number of cycles"},
+                {"type": "number", "minimum": 0.1, "maximum": 1.0, "description": "Volume fraction"}
+              ],
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ],
+          "description": "Mix after dispense: [cycles, volume_fraction] or null"
+        },
+        "air_gap": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20,
+          "default": 0,
+          "description": "Air gap in µL after aspiration"
+        },
+        "push_out": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20,
+          "default": 2.0,
+          "description": "Push out volume in µL"
+        },
+        "delay_aspirate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 0.2,
+          "description": "Delay after aspiration in seconds"
+        },
+        "delay_dispense": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 0.2,
+          "description": "Delay after dispensing in seconds"
+        }
+      }
+    },
+    
+    "opentrons_native": {
+      "type": "object",
+      "description": "Advanced parameters for native Opentrons API (optional)",
+      "properties": {
+        "aspirate": {
+          "type": "object",
+          "properties": {
+            "submerge_speed": {"type": "number", "description": "mm/sec"},
+            "retract_speed": {"type": "number", "description": "mm/sec"},
+            "delay_after": {"type": "number", "description": "seconds"},
+            "delay_after_retract": {"type": "number", "description": "seconds"}
+          }
+        },
+        "dispense": {
+          "type": "object",
+          "properties": {
+            "submerge_speed": {"type": "number"},
+            "flow_rate": {"type": "number", "description": "µL/sec"},
+            "retract_speed": {"type": "number"},
+            "delay_after": {"type": "number"},
+            "push_out_small_vol": {"type": "number"},
+            "push_out_large_vol": {"type": "number"}
+          }
+        }
+      }
+    },
+    
+    "notes": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Notes and usage tips"
+    }
+  }
+}

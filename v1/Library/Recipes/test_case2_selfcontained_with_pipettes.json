@@ -1,0 +1,25 @@
+{
+  "ProtocolName": "Test_Case2_SelfContained_WithPipettes",
+  "Description": "Caso 2: Ricetta autodichiarata CON Pipettes (HAL non sovrascrive)",
+  "Pipettes": {
+    "right": "flex_8channel_50"
+  },
+  "Trash": {
+    "default": { "Type": "TrashBin", "Slot": "A3" }
+  },
+  "Labware": {
+    "plate1": { "LoadName": "corning_96_wellplate_360ul_flat", "Slot": "D1" }
+  },
+  "Steps": [
+    {
+      "Command": "Comment",
+      "Type": "Comment",
+      "Text": "TEST CASE 2: Ricetta autodichiarata con Pipettes propri"
+    },
+    {
+      "Command": "Comment",
+      "Type": "Comment",
+      "Text": "I Pipettes della ricetta (right: 8channel) NON devono essere sovrascritti dalla HAL"
+    }
+  ]
+}

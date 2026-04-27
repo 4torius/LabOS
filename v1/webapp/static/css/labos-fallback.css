@@ -1,0 +1,286 @@
+/*
+  Offline fallback styles for LabOS webapp.
+  Applied only when html.bootstrap-fallback is set in base.html.
+*/
+
+html.bootstrap-fallback {
+    color-scheme: dark;
+}
+
+html.bootstrap-fallback body {
+    margin: 0;
+    background: #0f1218;
+    color: #e6e8ee;
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+html.bootstrap-fallback a {
+    color: #9ec5ff;
+    text-decoration: none;
+}
+
+html.bootstrap-fallback a:hover {
+    text-decoration: underline;
+}
+
+html.bootstrap-fallback .container-fluid {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+html.bootstrap-fallback .row {
+    display: flex;
+    flex-wrap: wrap;
+    margin: -0.75rem;
+}
+
+html.bootstrap-fallback .row > [class*="col-"] {
+    box-sizing: border-box;
+    padding: 0.75rem;
+    width: 100%;
+}
+
+html.bootstrap-fallback .col-12 {
+    width: 100%;
+}
+
+@media (min-width: 768px) {
+    html.bootstrap-fallback .col-md-6 {
+        width: 50%;
+    }
+}
+
+@media (min-width: 992px) {
+    html.bootstrap-fallback .col-lg-3 {
+        width: 25%;
+    }
+
+    html.bootstrap-fallback .col-lg-4 {
+        width: 33.3333%;
+    }
+}
+
+html.bootstrap-fallback .navbar {
+    display: flex;
+    align-items: center;
+    min-height: 56px;
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid #222836;
+}
+
+html.bootstrap-fallback .navbar-dark {
+    color: #ffffff;
+}
+
+html.bootstrap-fallback .bg-dark {
+    background: #151a23;
+}
+
+html.bootstrap-fallback .fixed-top {
+    position: fixed;
+    top: 0;
+    right: 0;
+    left: 0;
+    z-index: 1030;
+}
+
+html.bootstrap-fallback .navbar-nav {
+    display: flex;
+    align-items: center;
+}
+
+html.bootstrap-fallback .ms-auto {
+    margin-left: auto;
+}
+
+html.bootstrap-fallback .nav {
+    display: flex;
+    gap: 0.2rem;
+}
+
+html.bootstrap-fallback .flex-column {
+    flex-direction: column;
+}
+
+html.bootstrap-fallback .nav-link {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #d7deea;
+    padding: 0.55rem 0.8rem;
+    border-radius: 8px;
+}
+
+html.bootstrap-fallback .nav-link.active {
+    color: #ffffff;
+}
+
+html.bootstrap-fallback .text-muted {
+    color: #a1a9b8;
+}
+
+html.bootstrap-fallback .text-white {
+    color: #ffffff;
+}
+
+html.bootstrap-fallback .text-dark {
+    color: #111111;
+}
+
+html.bootstrap-fallback .text-primary {
+    color: #6ea8fe;
+}
+
+html.bootstrap-fallback .text-success {
+    color: #75d69c;
+}
+
+html.bootstrap-fallback .text-danger {
+    color: #f08d9a;
+}
+
+html.bootstrap-fallback .text-info {
+    color: #7adcf2;
+}
+
+html.bootstrap-fallback .badge {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+html.bootstrap-fallback .rounded-pill {
+    border-radius: 999px;
+}
+
+html.bootstrap-fallback .bg-primary {
+    background: #0d6efd;
+}
+
+html.bootstrap-fallback .bg-success {
+    background: #198754;
+}
+
+html.bootstrap-fallback .bg-info {
+    background: #0dcaf0;
+    color: #0b141a;
+}
+
+html.bootstrap-fallback .bg-warning {
+    background: #ffc107;
+}
+
+html.bootstrap-fallback .bg-danger {
+    background: #dc3545;
+}
+
+html.bootstrap-fallback .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 0.5rem;
+    padding: 0.55rem 0.95rem;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font: inherit;
+    text-decoration: none;
+}
+
+html.bootstrap-fallback .btn-group {
+    display: inline-flex;
+    gap: 0.5rem;
+}
+
+html.bootstrap-fallback .btn-lg {
+    padding: 0.72rem 1.2rem;
+}
+
+html.bootstrap-fallback .btn-primary {
+    background: #0d6efd;
+    color: #ffffff;
+}
+
+html.bootstrap-fallback .btn-success {
+    background: #198754;
+    color: #ffffff;
+}
+
+html.bootstrap-fallback .btn-outline-primary {
+    border-color: #0d6efd;
+    color: #7db3ff;
+    background: transparent;
+}
+
+html.bootstrap-fallback .btn-outline-success {
+    border-color: #198754;
+    color: #7ad8a9;
+    background: transparent;
+}
+
+html.bootstrap-fallback .card {
+    border: 1px solid #2a3142;
+    border-radius: 0.8rem;
+    background: #151b26;
+    overflow: hidden;
+}
+
+html.bootstrap-fallback .card-header {
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid #2a3142;
+    font-weight: 600;
+}
+
+html.bootstrap-fallback .card-body {
+    padding: 1rem;
+}
+
+html.bootstrap-fallback .mb-4 {
+    margin-bottom: 1.5rem;
+}
+
+html.bootstrap-fallback .mt-5 {
+    margin-top: 3rem;
+}
+
+html.bootstrap-fallback .mt-2 {
+    margin-top: 0.5rem;
+}
+
+html.bootstrap-fallback .mt-3 {
+    margin-top: 1rem;
+}
+
+html.bootstrap-fallback .g-4 {
+    gap: 0;
+}
+
+html.bootstrap-fallback .py-5 {
+    padding-top: 3rem;
+    padding-bottom: 3rem;
+}
+
+html.bootstrap-fallback .small,
+html.bootstrap-fallback small {
+    font-size: 0.86rem;
+}
+
+html.bootstrap-fallback .bi {
+    font-style: normal;
+    opacity: 0.85;
+}
+
+@media (max-width: 900px) {
+    html.bootstrap-fallback .sidebar {
+        position: static;
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid #222836;
+    }
+
+    html.bootstrap-fallback .main-content {
+        margin-left: 0;
+        padding-top: 1rem;
+    }
+}

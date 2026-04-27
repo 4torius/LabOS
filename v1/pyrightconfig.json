@@ -1,0 +1,27 @@
+{
+    "include": [
+        "**/*.py"
+    ],
+    "exclude": [
+        "**/node_modules",
+        "**/__pycache__",
+        "**/venv",
+        "**/*_pb2.py",
+        "**/*_pb2_grpc.py"
+    ],
+    "extraPaths": [
+        "./src/grpc",
+        "./SiLA2/ManualStationSiLA2Server/src",
+        "./SiLA2/OpentronsSiLA2Server/src",
+        "./SiLA2/TecanSiLA2Server/src",
+        "./SiLA2/MobileSiLA2Server/src",
+        "./SiLA2/IncubatorSiLA2Server/src",
+        "./SiLA2/Orchestrator/src"
+    ],
+    "pythonVersion": "3.11",
+    "reportMissingImports": "warning",
+    "reportMissingTypeStubs": false,
+    "reportAttributeAccessIssue": "none",
+    "reportOptionalMemberAccess": "warning",
+    "typeCheckingMode": "basic"
+}

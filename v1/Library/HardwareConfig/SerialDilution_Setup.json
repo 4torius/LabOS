@@ -1,0 +1,25 @@
+{
+  "ConfigName": "SerialDilution_Setup",
+  "Description": "Serial dilution setup with unified logical names and compatibility aliases",
+  "Modules": {
+    "HeaterShaker": { "Type": "heaterShakerModuleV1", "Slot": "A1" }
+  },
+  "Trash": {
+    "MyTrash": { "Type": "TrashBin", "Slot": "A3" },
+    "Bin_Standard": { "Type": "TrashBin", "Slot": "A3" }
+  },
+  "Labware": {
+    "MyTips": { "LoadName": "opentrons_flex_96_filtertiprack_1000ul", "Slot": "C3" },
+    "MyReservoir": { "LoadName": "nest_1_reservoir_290ml", "Slot": "A2" },
+    "MyPlate": { "LoadName": "corning_96_wellplate_360ul_flat", "Slot": "D2" },
+    "Tips_200": { "LoadName": "opentrons_flex_96_filtertiprack_200ul", "Slot": "B3" },
+    "Tips_1000": { "LoadName": "opentrons_flex_96_filtertiprack_1000ul", "Slot": "C3" },
+    "Reservoir_Diluent": { "LoadName": "nest_1_reservoir_290ml", "Slot": "A2" },
+    "Source_Plate": { "LoadName": "corning_96_wellplate_360ul_flat", "Slot": "B2" },
+    "Dilution_Plate": { "LoadName": "corning_96_wellplate_360ul_flat", "Slot": "C2" },
+    "Target_Plate": { "LoadName": "corning_96_wellplate_360ul_flat", "Slot": "D2" }
+  },
+  "Pipettes": {
+    "left": "flex_8channel_1000"
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "WorkflowName": "ELISA_Complete",
+  "Description": "Preparazione campioni su Opentrons + lettura assorbanza su Tecan",
+  "Author": "BicoccaLab",
+  "Version": "1.0",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "Opentrons",
+      "Action": "ExecuteRecipe",
+      "Parameters": {
+        "Recipe": "modified_test1_hal",
+        "UseHAL": true,
+        "HALConfig": "Standard_Flex_Setup"
+      },
+      "Description": "Preparazione campioni su piastra"
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "Tecan",
+      "Action": "Connect",
+      "Description": "Connessione al lettore Tecan"
+    },
+    {
+      "StepNumber": 3,
+      "Instrument": "Tecan",
+      "Action": "PlateIn",
+      "Description": "Inserimento piastra nel lettore"
+    },
+    {
+      "StepNumber": 4,
+      "Instrument": "Tecan",
+      "Action": "SetTemperature",
+      "Parameters": {
+        "Temperature": 37.0
+      },
+      "Description": "Impostazione temperatura 37°C"
+    },
+    {
+      "StepNumber": 5,
+      "Instrument": "Tecan",
+      "Action": "RunProtocol",
+      "Parameters": {
+        "ProtocolFile": "TestIbrido.mdfx",
+        "ProtocolPath": "Library/Analysis/TestIbrido.mdfx"
+      },
+      "Description": "Esegue analisi ibrida (Abs + Fluo)"
+    },
+    {
+      "StepNumber": 6,
+      "Instrument": "Tecan",
+      "Action": "PlateOut",
+      "Description": "Espulsione piastra"
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "ConfigName": "Generic_HAL",
+  "Description": "Generic reusable HAL with 4 source slots (Source_1 to Source_4). Works with any recipe using numbered sources.",
+  "Generated": "20260424_140830",
+  "Trash": {
+    "MyTrash": {
+      "Type": "TrashBin",
+      "Slot": "A3"
+    }
+  },
+  "Labware": {
+    "MyTips": {
+      "LoadName": "opentrons_flex_96_tiprack_1000ul",
+      "Slot": "B3",
+      "DisplayName": "Tip rack 1000µL"
+    },
+    "MyTips_2": {
+      "LoadName": "opentrons_flex_96_tiprack_1000ul",
+      "Slot": "C3",
+      "DisplayName": "Tip rack 1000µL (backup)"
+    },
+    "TargetPlate": {
+      "LoadName": "corning_96_wellplate_360ul_flat",
+      "Slot": "D2",
+      "DisplayName": "Target plate"
+    },
+    "Source_1": {
+      "LoadName": "nest_12_reservoir_15ml",
+      "Slot": "A2",
+      "DisplayName": "Source_1 - Reagent reservoir",
+      "Well": "A1"
+    },
+    "Source_2": {
+      "LoadName": "nest_12_reservoir_15ml",
+      "Slot": "B2",
+      "DisplayName": "Source_2 - Reagent reservoir",
+      "Well": "A1"
+    },
+    "Source_3": {
+      "LoadName": "nest_12_reservoir_15ml",
+      "Slot": "C2",
+      "DisplayName": "Source_3 - Reagent reservoir",
+      "Well": "A1"
+    },
+    "Source_4": {
+      "LoadName": "nest_12_reservoir_15ml",
+      "Slot": "D3",
+      "DisplayName": "Source_4 - Reagent reservoir",
+      "Well": "A1"
+    }
+  },
+  "Pipettes": {
+    "left": "flex_1channel_1000"
+  },
+  "Metadata": {
+    "source": "generic_hal_generator",
+    "total_sources": 4,
+    "slot_assignments": {
+      "B3": "MyTips",
+      "C3": "MyTips_2",
+      "D2": "TargetPlate",
+      "A2": "Source_1",
+      "B2": "Source_2",
+      "C2": "Source_3",
+      "D3": "Source_4"
+    },
+    "note": "Load reagents into Source_1, Source_2, etc. Check recipe metadata for reagent order."
+  }
+}

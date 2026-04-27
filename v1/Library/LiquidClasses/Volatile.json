@@ -1,0 +1,42 @@
+{
+  "$schema": "./liquidclass.schema.json",
+  "name": "Volatile",
+  "loadName": "ethanol_80",
+  "description": "Volatile liquids (80% ethanol, acetone, solvents) - Opentrons verified",
+  "basedOn": "80% ethanol",
+  
+  "parameters": {
+    "aspirate_rate": 0.5,
+    "dispense_rate": 0.5,
+    "blow_out": true,
+    "touch_tip": false,
+    "mix_after": null,
+    "air_gap": 5,
+    "push_out": 1.0,
+    "delay_aspirate": 0.2,
+    "delay_dispense": 0.2
+  },
+  
+  "opentrons_native": {
+    "aspirate": {
+      "submerge_speed": 100,
+      "retract_speed": 100,
+      "delay_after": 0.2,
+      "delay_after_retract": 0.5
+    },
+    "dispense": {
+      "submerge_speed": 100,
+      "flow_rate": 30,
+      "retract_speed": 100,
+      "delay_after": 0.2,
+      "delay_after_retract": 0.5
+    }
+  },
+  
+  "notes": [
+    "Air gap to prevent dripping during movement",
+    "High retract speed to minimize evaporation",
+    "NO touch tip (would cause evaporation)",
+    "Blow out to ensure complete emptying"
+  ]
+}

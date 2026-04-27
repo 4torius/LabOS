@@ -1,0 +1,93 @@
+2026-03-03 13:35:32 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-03-03 13:35:32 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-03-03 13:35:32 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-03-03 13:35:32 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL_20260302_194552.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-03-03 13:35:32 | INFO     | OpentronsSiLA2Server | Initialized tip racks from HAL: ['opentrons_flex_96_filtertiprack_1000ul']
+2026-03-03 13:35:32 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-03-03 13:35:32 | INFO     | OpentronsSiLA2Server | Robot connected: jntlbot
+2026-03-03 13:35:32 | WARNING  | OpentronsSiLA2Server | gRPC servicer not available - server will have no RPC methods
+2026-03-03 13:35:32 | INFO     | OpentronsSiLA2Server | SiLA2Common adapter registered (Plug & Play enabled)
+2026-03-03 13:35:32 | INFO     | OpentronsSiLA2Server | Starting SiLA2 server on 0.0.0.0:50057...
+2026-03-03 13:35:34 | INFO     | OpentronsSiLA2Server | ============================================================
+2026-03-03 13:35:34 | INFO     | OpentronsSiLA2Server |   OpentronsSiLA2Server v1.0.0
+2026-03-03 13:35:34 | INFO     | OpentronsSiLA2Server |   gRPC: 0.0.0.0:50057
+2026-03-03 13:35:34 | INFO     | OpentronsSiLA2Server |   Robot: 169.254.161.83:31950
+2026-03-03 13:35:34 | INFO     | OpentronsSiLA2Server |   Hardware: Standard_Flex_Setup
+2026-03-03 13:35:34 | INFO     | OpentronsSiLA2Server | ============================================================
+2026-03-03 13:40:16 | INFO     | OpentronsSiLA2Server | Initialized tip racks from HAL: ['opentrons_flex_96_tiprack_1000ul', 'opentrons_flex_96_tiprack_1000ul']
+2026-03-03 13:40:51 | INFO     | OpentronsSiLA2Server | Applying Hardware Config (HAL)...
+2026-03-03 13:40:51 | INFO     | OpentronsSiLA2Server | [PLAN] opentrons_flex_96_tiprack_1000ul: need 4, available 188
+2026-03-03 14:26:25 | INFO     | OpentronsSiLA2Server | Updating tip tracker (status: succeeded)...
+2026-03-03 14:26:25 | INFO     | OpentronsSiLA2Server |   + 4 tips (opentrons_flex_96_tiprack_1000ul)
+2026-03-03 14:46:27 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-03-03 14:46:27 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-03-03 14:46:27 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-03-03 14:46:27 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL_20260303_133955.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-03-03 14:46:27 | INFO     | OpentronsSiLA2Server | Initialized tip racks from HAL: ['opentrons_flex_96_filtertiprack_1000ul']
+2026-03-03 14:46:27 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-03-03 14:46:27 | INFO     | OpentronsSiLA2Server | Robot connected: jntlbot
+2026-03-03 14:46:27 | WARNING  | OpentronsSiLA2Server | gRPC servicer not available - server will have no RPC methods
+2026-03-03 14:46:27 | INFO     | OpentronsSiLA2Server | SiLA2Common adapter registered (Plug & Play enabled)
+2026-03-03 14:46:27 | INFO     | OpentronsSiLA2Server | Starting SiLA2 server on 0.0.0.0:50057...
+2026-03-03 14:46:28 | INFO     | OpentronsSiLA2Server | ============================================================
+2026-03-03 14:46:28 | INFO     | OpentronsSiLA2Server |   OpentronsSiLA2Server v1.0.0
+2026-03-03 14:46:28 | INFO     | OpentronsSiLA2Server |   gRPC: 0.0.0.0:50057
+2026-03-03 14:46:28 | INFO     | OpentronsSiLA2Server |   Robot: 169.254.161.83:31950
+2026-03-03 14:46:28 | INFO     | OpentronsSiLA2Server |   Hardware: Standard_Flex_Setup
+2026-03-03 14:46:28 | INFO     | OpentronsSiLA2Server | ============================================================
+2026-03-03 15:04:11 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-03-03 15:04:11 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-03-03 15:04:11 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-03-03 15:04:11 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL_20260303_133955.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-03-03 15:04:11 | INFO     | OpentronsSiLA2Server | Initialized tip racks from HAL: ['opentrons_flex_96_filtertiprack_1000ul']
+2026-03-03 15:04:11 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-03-03 15:04:12 | INFO     | OpentronsSiLA2Server | Robot connected: jntlbot
+2026-03-03 15:04:12 | WARNING  | OpentronsSiLA2Server | gRPC servicer not available - server will have no RPC methods
+2026-03-03 15:04:12 | INFO     | OpentronsSiLA2Server | SiLA2Common adapter registered (Plug & Play enabled)
+2026-03-03 15:04:12 | INFO     | OpentronsSiLA2Server | Starting SiLA2 server on 0.0.0.0:50057...
+2026-03-03 15:04:13 | INFO     | OpentronsSiLA2Server | ============================================================
+2026-03-03 15:04:13 | INFO     | OpentronsSiLA2Server |   OpentronsSiLA2Server v1.0.0
+2026-03-03 15:04:13 | INFO     | OpentronsSiLA2Server |   gRPC: 0.0.0.0:50057
+2026-03-03 15:04:13 | INFO     | OpentronsSiLA2Server |   Robot: 169.254.161.83:31950
+2026-03-03 15:04:13 | INFO     | OpentronsSiLA2Server |   Hardware: Standard_Flex_Setup
+2026-03-03 15:04:13 | INFO     | OpentronsSiLA2Server | ============================================================
+2026-03-03 17:19:39 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-03-03 17:19:39 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-03-03 17:19:39 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-03-03 17:19:39 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL_20260303_133955.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-03-03 17:19:39 | INFO     | OpentronsSiLA2Server | Initialized tip racks from HAL: ['opentrons_flex_96_filtertiprack_1000ul']
+2026-03-03 17:19:39 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-03-03 17:19:39 | INFO     | OpentronsSiLA2Server | Retry 1/5...
+2026-03-03 17:19:41 | INFO     | OpentronsSiLA2Server | Retry 2/5...
+2026-03-03 17:19:43 | INFO     | OpentronsSiLA2Server | Retry 3/5...
+2026-03-03 17:19:46 | INFO     | OpentronsSiLA2Server | Retry 4/5...
+2026-03-03 17:19:48 | WARNING  | OpentronsSiLA2Server | Robot connection failed - server will start without robot
+2026-03-03 17:19:48 | WARNING  | OpentronsSiLA2Server | gRPC servicer not available - server will have no RPC methods
+2026-03-03 17:19:48 | INFO     | OpentronsSiLA2Server | SiLA2Common adapter registered (Plug & Play enabled)
+2026-03-03 17:19:48 | INFO     | OpentronsSiLA2Server | Starting SiLA2 server on 0.0.0.0:50057...
+2026-03-03 17:19:49 | INFO     | OpentronsSiLA2Server | ============================================================
+2026-03-03 17:19:49 | INFO     | OpentronsSiLA2Server |   OpentronsSiLA2Server v1.0.0
+2026-03-03 17:19:49 | INFO     | OpentronsSiLA2Server |   gRPC: 0.0.0.0:50057
+2026-03-03 17:19:49 | INFO     | OpentronsSiLA2Server |   Robot: 169.254.161.83:31950
+2026-03-03 17:19:49 | INFO     | OpentronsSiLA2Server |   Hardware: Standard_Flex_Setup
+2026-03-03 17:19:49 | INFO     | OpentronsSiLA2Server | ============================================================
+2026-03-03 17:21:32 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-03-03 17:21:32 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-03-03 17:21:32 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-03-03 17:21:32 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL_20260303_133955.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-03-03 17:21:32 | INFO     | OpentronsSiLA2Server | Initialized tip racks from HAL: ['opentrons_flex_96_filtertiprack_1000ul']
+2026-03-03 17:21:32 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-03-03 17:21:32 | INFO     | OpentronsSiLA2Server | Retry 1/5...
+2026-03-03 17:21:34 | INFO     | OpentronsSiLA2Server | Retry 2/5...
+2026-03-03 17:21:36 | INFO     | OpentronsSiLA2Server | Retry 3/5...
+2026-03-03 17:21:39 | INFO     | OpentronsSiLA2Server | Retry 4/5...
+2026-03-03 17:21:41 | WARNING  | OpentronsSiLA2Server | Robot connection failed - server will start without robot
+2026-03-03 17:21:41 | WARNING  | OpentronsSiLA2Server | gRPC servicer not available - server will have no RPC methods
+2026-03-03 17:21:41 | INFO     | OpentronsSiLA2Server | SiLA2Common adapter registered (Plug & Play enabled)
+2026-03-03 17:21:41 | INFO     | OpentronsSiLA2Server | Starting SiLA2 server on 0.0.0.0:50057...
+2026-03-03 17:21:42 | INFO     | OpentronsSiLA2Server | ============================================================
+2026-03-03 17:21:42 | INFO     | OpentronsSiLA2Server |   OpentronsSiLA2Server v1.0.0
+2026-03-03 17:21:42 | INFO     | OpentronsSiLA2Server |   gRPC: 0.0.0.0:50057
+2026-03-03 17:21:42 | INFO     | OpentronsSiLA2Server |   Robot: 169.254.161.83:31950
+2026-03-03 17:21:42 | INFO     | OpentronsSiLA2Server |   Hardware: Standard_Flex_Setup
+2026-03-03 17:21:42 | INFO     | OpentronsSiLA2Server | ============================================================
