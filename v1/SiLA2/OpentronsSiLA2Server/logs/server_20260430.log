@@ -1,0 +1,93 @@
+2026-04-30 10:44:09 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-04-30 10:44:09 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-04-30 10:44:09 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-04-30 10:44:09 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-04-30 10:44:09 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-04-30 10:44:09 | INFO     | OpentronsSiLA2Server | Created emergency reset file: C:\Users\PC\Desktop\LabOS\v1\SiLA2\000_EMERGENCY_RESET.json
+2026-04-30 10:44:09 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-04-30 10:44:09 | INFO     | OpentronsSiLA2Server | Retry 1/3...
+2026-04-30 10:44:11 | INFO     | OpentronsSiLA2Server | Retry 2/3...
+2026-04-30 10:44:13 | ERROR    | OpentronsSiLA2Server | Robot not found after retries
+2026-04-30 11:56:41 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-04-30 11:56:41 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-04-30 11:56:41 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-04-30 11:56:41 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-04-30 11:56:41 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-04-30 11:56:41 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-04-30 11:56:41 | INFO     | OpentronsSiLA2Server | Retry 1/3...
+2026-04-30 11:56:43 | INFO     | OpentronsSiLA2Server | Retry 2/3...
+2026-04-30 11:56:46 | ERROR    | OpentronsSiLA2Server | Robot not found after retries
+2026-04-30 14:25:05 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-04-30 14:25:05 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-04-30 14:25:05 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-04-30 14:25:05 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-04-30 14:25:05 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-04-30 14:25:05 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-04-30 14:25:05 | INFO     | OpentronsSiLA2Server | Retry 1/3...
+2026-04-30 14:25:07 | INFO     | OpentronsSiLA2Server | Retry 2/3...
+2026-04-30 14:25:10 | ERROR    | OpentronsSiLA2Server | Robot not found after retries
+2026-04-30 14:25:29 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-04-30 14:25:29 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-04-30 14:25:29 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-04-30 14:25:29 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-04-30 14:25:29 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-04-30 14:25:29 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-04-30 14:25:30 | INFO     | OpentronsSiLA2Server | Retry 1/3...
+2026-04-30 14:25:32 | INFO     | OpentronsSiLA2Server | Retry 2/3...
+2026-04-30 14:25:34 | ERROR    | OpentronsSiLA2Server | Robot not found after retries
+2026-04-30 14:27:42 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-04-30 14:27:42 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-04-30 14:27:42 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-04-30 14:27:42 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-04-30 14:27:42 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-04-30 14:27:42 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-04-30 14:27:42 | INFO     | OpentronsSiLA2Server | Robot connected: jntlbot
+2026-04-30 14:28:07 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-04-30 14:28:07 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-04-30 14:28:07 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-04-30 14:28:07 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-04-30 14:28:07 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-04-30 14:28:07 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-04-30 14:28:07 | INFO     | OpentronsSiLA2Server | Robot connected: jntlbot
+2026-04-30 14:30:03 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-04-30 14:30:03 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-04-30 14:30:03 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-04-30 14:30:03 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-04-30 14:30:03 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-04-30 14:30:03 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-04-30 14:30:03 | INFO     | OpentronsSiLA2Server | Robot connected: jntlbot
+2026-04-30 14:37:19 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-04-30 14:37:19 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-04-30 14:37:19 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-04-30 14:37:19 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-04-30 14:37:19 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-04-30 14:37:19 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-04-30 14:37:19 | INFO     | OpentronsSiLA2Server | Robot connected: jntlbot
+2026-04-30 14:43:18 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-04-30 14:43:18 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-04-30 14:43:18 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-04-30 14:43:18 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-04-30 14:43:18 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-04-30 14:43:18 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-04-30 14:43:18 | INFO     | OpentronsSiLA2Server | Robot connected: jntlbot
+2026-04-30 14:50:06 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-04-30 14:50:06 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-04-30 14:50:06 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-04-30 14:50:06 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-04-30 14:50:06 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-04-30 14:50:06 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-04-30 14:50:06 | INFO     | OpentronsSiLA2Server | Robot connected: jntlbot
+2026-04-30 15:03:04 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-04-30 15:03:04 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-04-30 15:03:04 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-04-30 15:03:04 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-04-30 15:03:04 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-04-30 15:03:04 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-04-30 15:03:05 | INFO     | OpentronsSiLA2Server | Robot connected: jntlbot
+2026-04-30 15:05:54 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-04-30 15:05:54 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-04-30 15:05:54 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-04-30 15:05:54 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-04-30 15:05:54 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-04-30 15:05:54 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-04-30 15:05:54 | INFO     | OpentronsSiLA2Server | Robot connected: jntlbot

@@ -26,26 +26,31 @@ python launcher.py --servers  # Start SiLA2 servers only
 python launcher.py --webapp   # Start webapp only (http://127.0.0.1:5000)
 python launcher.py --cli      # Start interactive CLI
 python launcher.py --status   # Check system status
+python launcher.py --stop     # Stop all running processes
 ```
 
 ### Individual servers
 ```bash
-python SiLA2/OpentronsSiLA2Server/main.py   # Port 50052 (Python)
+python SiLA2/OpentronsSiLA2Server/main.py      # Port 50057 (Python)
 python SiLA2/ManualStationSiLA2Server/main.py  # Port 50360 (Python)
-dotnet run  # (in SiLA2/TecanSiLA2Server/) Port 50051 (C#)
+python SiLA2/MobileSiLA2Server/main.py         # Port 50053 (Python)
+dotnet run  # (in SiLA2/TecanSiLA2Server/) Port 50051 (C# Python wrapper)
 ```
 
 ### Tests
 ```bash
-python test_commands.py       # Test command execution against instruments
-python test_stub_loading.py   # Test gRPC stub loading
-python test_refill.py         # Test refill functionality
-python regen_stubs.py         # Regenerate gRPC stubs from .proto files
+pytest tests/                          # Run all tests
+pytest tests/test_discovery.py         # Single test module
+pytest tests/ -m "not integration"     # Skip tests that need running servers
+pytest tests/ -m opentrons             # Only Opentrons tests
+python regen_stubs.py                  # Regenerate gRPC stubs from .proto files
 ```
+
+Test markers: `integration`, `tecan`, `opentrons`, `manual_station` — all require real hardware on their respective ports.
 
 ### Type checking
 ```bash
-pyright  # Config in pyrightconfig.json
+pyright  # Config in pyrightconfig.json (excludes generated *_pb2.py stubs)
 ```
 
 ## Architecture
@@ -53,23 +58,23 @@ pyright  # Config in pyrightconfig.json
 ### Core Data Flow
 
 ```
-CLI (pnp_console.py) ─┐
-                       ├─→ LabCore (src/lab_core.py) ─→ PnPClient ─→ gRPC ─→ Instrument Servers
-WebApp (webapp/app.py) ┘         ↑
-                          PnPDiscovery
+CLI (utils/cli.py) ──┐
+                      ├─→ LabCore (src/lab_core.py) ─→ client.py ─→ gRPC ─→ Instrument Servers
+WebApp (webapp/) ─────┘         ↑
+                          discovery.py
 ```
 
-**`src/lab_core.py`** is the single unified interface for both CLI and WebApp. All instrument interactions go through it.
+**`src/lab_core.py`** is the singleton unified interface for both CLI and WebApp. All instrument interactions go through it.
 
-### Discovery (`src/pnp_discovery.py`)
+### Discovery (`src/discovery.py`)
 
-Finds servers via four mechanisms (tried in order): mDNS (`_sila2._tcp.local`), port scan (50051–50100), `lab_config.yaml`, and `.sila.xml` XML parsing. Returns `PnPServer` objects with name, host, port, and parsed commands/features.
+Finds servers via three mechanisms: mDNS (`_sila2._tcp.local`), port scan (50051–50100), and `lab_config.yaml`. Returns server objects with name, host, port, and parsed commands/features from `.sila.xml`.
 
-### Command Execution (`src/pnp_client.py`)
+### Command Execution (`src/client.py`)
 
 Generic gRPC client that loads or generates stubs dynamically. Connects to any SiLA2 server and executes commands without hardcoded instrument knowledge. Streaming results are supported.
 
-### Workflow Execution (`src/pnp_workflow_executor.py`)
+### Workflow Execution (`src/workflow.py`)
 
 Loads `.workflow.json` files from `Library/Workflows/`. Validates all steps, builds a dependency graph, executes steps in parallel where possible, and handles failures via categorized retry/intervention logic. On unrecoverable errors, pauses and prompts the operator via the WebApp.
 
@@ -88,30 +93,35 @@ The `SiLA2/_NewInstrumentTemplate/` directory is the canonical starting point fo
 
 `SiLA2/SiLA2Common.proto` defines the standard metadata interface all servers implement. `SiLA2/sila2_common_servicer.py` is a helper to add SiLA2Common to any server. `SiLA2/sila2_mdns_registry.py` handles mDNS registration.
 
-### WebApp (`webapp/app.py`)
+### WebApp (`webapp/`)
 
-FastAPI + Jinja2 + WebSocket. Key routes: `/api/instruments`, `/api/instruments/{name}/commands`, `/api/execute`, `/api/workflows`, `/api/library/*`, `/ws` (real-time updates). The app dynamically generates UI from server metadata — menus are never hardcoded.
+FastAPI + Jinja2 + WebSocket. Routes are split across `webapp/routes/`: `instruments.py`, `workflows.py`, `hardware.py`, `operator.py`, `plates.py`, `batch.py`. The app dynamically generates UI from server metadata — menus are never hardcoded.
 
 ### Configuration (`lab_config.yaml`)
 
 Central config for everything: server definitions (host/port/startup command), discovery settings, workflow execution parameters, error retry strategy, and UI dropdown options (recipes, analysis protocols, locations). Per-server overrides live in each server's own `config.yaml` or `appsettings.json` (Tecan).
 
+### Persistence
+
+SQLite database (`labos.db`) managed via `src/db.py`. Stores experiment history, plate tracking, and run archives.
+
 ### Library Resources (`Library/`)
 
 - `Recipes/` — JSON pipetting recipes for Opentrons
-- `Workflows/` — JSON multi-step workflow definitions
+- `Workflows/` — JSON multi-step workflow definitions (`*.workflow.json`)
 - `HardwareConfig/` — HAL configuration files
 - `Analysis/` — Tecan measurement protocols (`.mdfx`)
 - `MobileTasks/` — Mobile robot task definitions
-- `Results/` — Output data from runs
+- `Labware/` — Plate, pipette, tiprack, reservoir definitions
 
 ## Tech Stack
 
-- **Python 3.10+** with asyncio throughout
+- **Python 3.11+** with asyncio throughout
 - **gRPC + Protocol Buffers** — all inter-service communication (SiLA2 standard)
 - **FastAPI + Uvicorn** — web server
 - **Zeroconf** — mDNS service discovery
-- **C#/.NET** — Tecan server only (`SiLA2/TecanSiLA2Server/`)
+- **C#/.NET** — Tecan official server only (`SiLA2/TecanSiLA2OfficialServer/`)
+- **SQLite** — experiment and plate tracking database
 - **pytest + pytest-asyncio** — test framework
 
 ## Key Patterns
@@ -121,6 +131,3 @@ Central config for everything: server definitions (host/port/startup command), d
 - **Async-first**: All I/O uses asyncio. New code in `src/` and `webapp/` should be async.
 - **Human-in-the-loop**: Workflow failures route to `InterventionRequest` objects consumed by the WebApp for operator decisions (Retry / Skip / Abort).
 - **gRPC stubs**: Pre-generated stubs live in `src/pnp_stubs/`. Run `python regen_stubs.py` after editing any `.proto` file.
-
-## roadmap sviluppo:
-C:\Users\PC\.claude\projects\c--Users-PC-Desktop-LabOS\memory\project_roadmap.md
