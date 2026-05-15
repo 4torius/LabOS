@@ -9,9 +9,7 @@
       "Instrument": "Opentrons",
       "Action": "ExecuteRecipe",
       "Parameters": {
-        "Recipe": "test_case1_requirements",
-        "UseHAL": true,
-        "HALConfig": "Standard_Flex_Setup"
+        "RecipeName": "test_case1_requirements"
       },
       "Description": "Esegue ricetta test_case1_requirements"
     },

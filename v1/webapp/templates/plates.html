@@ -1,568 +1,301 @@
 {% extends "base.html" %}
-{% block content %}
-<div class="container-fluid" style="padding-top: 50px;">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2><i class="bi bi-grid-3x3-gap"></i> Plate Management</h2>
-        <button class="btn btn-outline-primary" onclick="refreshPlates()">
-            <i class="bi bi-arrow-clockwise"></i> Refresh
-        </button>
-    </div>
+{% block extra_css %}
+<style>
+.plate-card { border-left: 3px solid var(--labos-primary); cursor: pointer; }
+.plate-card:hover { background: rgba(102,126,234,0.07); }
+.badge-prepared  { background: #0dcaf0; color:#000; }
+.badge-measured  { background: #198754; }
+.badge-pipetted  { background: #6c757d; }
 
-    <div class="row g-4">
-        <!-- Plates List -->
-        <div class="col-md-7 col-lg-8">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span><i class="bi bi-list"></i> Tracked Plates</span>
-                    <span class="badge bg-secondary" id="plateCount">0 plates</span>
-                </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0" id="platesTable">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Plate ID</th>
-                                    <th>Created</th>
-                                    <th>Wells</th>
-                                    <th>Status</th>
-                                    <th>Analysis</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="platesTableBody">
-                                <tr>
-                                    <td colspan="6" class="text-center text-muted py-4">
-                                        <i class="bi bi-inbox" style="font-size: 32px;"></i>
-                                        <p class="mb-0 mt-2">No plates tracked yet</p>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
+.well-cell {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.15);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.55rem; font-weight: 600; color: #fff;
+    cursor: pointer; position: relative;
+    transition: transform .15s;
+}
+.well-cell:hover { transform: scale(1.2); z-index: 10; }
+.well-cell.empty { background: #2a2a3a; color: #666; border-color: #444; }
+.well-label-col { font-size: 0.65rem; color: #999; text-align: center; width: 34px; }
+.well-label-row { font-size: 0.65rem; color: #999; width: 22px; line-height: 34px; text-align: right; padding-right: 4px; }
 
-        <!-- Right Column -->
-        <div class="col-md-5 col-lg-4">
-
-            <!-- Plate Details / Timeline -->
-            <div class="card" id="plateDetailsCard" style="display: none;">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span><i class="bi bi-diagram-3"></i> Timeline — <code id="detailPlateId"></code></span>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="closeDetails()">
-                        <i class="bi bi-x-lg"></i>
-                    </button>
-                </div>
-                <div class="card-body" id="plateDetailsBody"></div>
-            </div>
-
-            <!-- Quick Actions -->
-            <div class="card mt-3" id="quickActionsCard">
-                <div class="card-header">
-                    <i class="bi bi-lightning"></i> Quick Actions
-                </div>
-                <div class="card-body">
-                    <button class="btn btn-outline-primary w-100 mb-2" onclick="showAddPlateModal()">
-                        <i class="bi bi-plus"></i> Add Plate Manually
-                    </button>
-                    <button class="btn btn-outline-success w-100 mb-2" onclick="exportPlatesCSV()">
-                        <i class="bi bi-download"></i> Export to CSV
-                    </button>
-                </div>
-            </div>
-
-            <!-- Status Legend -->
-            <div class="card mt-3">
-                <div class="card-header">
-                    <i class="bi bi-palette"></i> Status Legend
-                </div>
-                <div class="card-body small">
-                    <div class="d-flex align-items-center mb-2">
-                        <span class="badge bg-secondary me-2">pending</span> Created, awaiting pipetting
-                    </div>
-                    <div class="d-flex align-items-center mb-2">
-                        <span class="badge bg-warning text-dark me-2">executing</span> Pipetting in progress
-                    </div>
-                    <div class="d-flex align-items-center mb-2">
-                        <span class="badge bg-primary me-2">pipetted</span> Pipetting complete
-                    </div>
-                    <div class="d-flex align-items-center mb-2">
-                        <span class="badge bg-info text-dark me-2">incubating</span> In incubator
-                    </div>
-                    <div class="d-flex align-items-center">
-                        <span class="badge bg-success me-2">analyzed</span> Analysis complete
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Add Plate Modal -->
-<div class="modal fade" id="addPlateModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-plus-circle"></i> Add Plate</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label class="form-label">Plate ID <span class="text-danger">*</span></label>
-                    <input type="text" class="form-control" id="newPlateId" placeholder="e.g., PLATE-20240101-001">
-                    <div class="invalid-feedback">Plate ID is required.</div>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Well Count</label>
-                    <select class="form-select" id="newPlateWells">
-                        <option value="96">96-well</option>
-                        <option value="384">384-well</option>
-                        <option value="24">24-well</option>
-                        <option value="48">48-well</option>
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Notes</label>
-                    <textarea class="form-control" id="newPlateNotes" rows="2"></textarea>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="addPlateManually()">Add Plate</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Link Analysis Modal -->
-<div class="modal fade" id="linkAnalysisModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header bg-success text-white">
-                <h5 class="modal-title"><i class="bi bi-link-45deg"></i> Link Analysis</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div class="alert alert-info py-2 small mb-3">
-                    <i class="bi bi-info-circle me-1"></i>
-                    Durante un workflow il collegamento avviene <strong>automaticamente</strong>.
-                    Usa questo form solo per analisi eseguite manualmente o per correzioni retroattive.
-                </div>
-                <input type="hidden" id="linkAnalysisPlateId">
-                <div class="mb-3">
-                    <label class="form-label">Measurement Type</label>
-                    <select class="form-select" id="analysisType">
-                        <option value="absorbance">Absorbance</option>
-                        <option value="fluorescence">Fluorescence</option>
-                        <option value="luminescence">Luminescence</option>
-                        <option value="other">Other</option>
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Protocol Used</label>
-                    <select class="form-select" id="analysisProtocol">
-                        <option value="">— loading protocols… —</option>
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Result File</label>
-                    <div class="input-group">
-                        <select class="form-select" id="analysisResultFilePicker">
-                            <option value="">— pick from library —</option>
-                        </select>
-                        <input type="text" class="form-control" id="analysisResultFile" placeholder="or type path manually">
-                    </div>
-                    <div class="form-text">Select an AnIML file from the Results library, or type a path manually.</div>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Notes</label>
-                    <textarea class="form-control" id="analysisNotes" rows="2"></textarea>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-success" onclick="linkAnalysis()">Link Analysis</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Delete Confirm Modal -->
-<div class="modal fade" id="deletePlateModal" tabindex="-1">
-    <div class="modal-dialog modal-sm">
-        <div class="modal-content border-danger">
-            <div class="modal-header bg-danger text-white">
-                <h5 class="modal-title"><i class="bi bi-trash"></i> Delete Plate</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <p>Delete plate <strong id="deletePlateIdLabel"></strong>?</p>
-                <p class="text-danger mb-0 small"><i class="bi bi-exclamation-triangle"></i> This cannot be undone.</p>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-danger" id="deletePlateConfirmBtn">Delete</button>
-            </div>
-        </div>
-    </div>
-</div>
+.well-tip {
+    display: none; position: absolute; z-index: 100;
+    bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    background: #1a1a2e; border: 1px solid #444; border-radius: 6px;
+    padding: 6px 10px; white-space: nowrap; font-size: 0.72rem; pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,.4);
+}
+.well-cell:hover .well-tip { display: block; }
+</style>
 {% endblock %}
 
-{% block extra_js %}
-<style>
-/* Vertical timeline */
-.plate-timeline { position: relative; padding-left: 1.5rem; }
-.plate-timeline::before {
-    content: '';
-    position: absolute; left: .55rem; top: .4rem; bottom: .4rem;
-    width: 2px; background: var(--bs-border-color);
-}
-.tl-item { position: relative; margin-bottom: 1.1rem; }
-.tl-item:last-child { margin-bottom: 0; }
-.tl-dot {
-    position: absolute; left: -1.5rem; top: .2rem;
-    width: 1rem; height: 1rem; border-radius: 50%;
-    border: 2px solid var(--bs-border-color);
-    background: var(--bs-body-bg);
-}
-.tl-dot.done { border-color: transparent; }
-.tl-body { padding-left: .25rem; }
-.tl-title { font-weight: 600; font-size: .9rem; }
-.tl-meta { font-size: .8rem; color: var(--bs-secondary-color); }
-.tl-pending .tl-title { color: var(--bs-secondary-color); }
-.tl-link-btn { font-size: .75rem; }
-</style>
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-grid-3x3-gap"></i> Plates</h2>
+        <div class="d-flex gap-2 align-items-center">
+            <div class="form-check form-switch mb-0 me-2">
+                <input class="form-check-input" type="checkbox" id="heatmapToggle" checked onchange="toggleHeatmap(this.checked)">
+                <label class="form-check-label text-muted small" for="heatmapToggle">Well grid</label>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" onclick="loadPlates()">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+        </div>
+    </div>
 
-<script>
-let plates = [];
-let _pendingDeleteId = null;
-
-// ─── Data loading ──────────────────────────────────────────────────────────
-
-async function refreshPlates() {
-    try {
-        const resp = await fetch('/api/plates');
-        const data = await resp.json();
-        plates = data.plates || [];
-        renderPlatesTable();
-    } catch (e) {
-        showToast('error', 'Error', 'Could not load plates: ' + e.message);
-    }
-}
-
-// ─── Table ─────────────────────────────────────────────────────────────────
-
-const STATUS_COLORS = {
-    pending: 'secondary', executing: 'warning', pipetted: 'primary',
-    incubating: 'info', analyzed: 'success', completed: 'success'
-};
-
-function renderPlatesTable() {
-    const tbody = document.getElementById('platesTableBody');
-    document.getElementById('plateCount').textContent = `${plates.length} plates`;
-
-    if (plates.length === 0) {
-        tbody.innerHTML = `
-            <tr><td colspan="6" class="text-center text-muted py-4">
-                <i class="bi bi-inbox" style="font-size:32px"></i>
-                <p class="mb-0 mt-2">No plates tracked yet</p>
-            </td></tr>`;
-        return;
-    }
-
-    tbody.innerHTML = plates.map(p => `
-        <tr onclick="showPlateDetails('${p.plate_id}')" style="cursor:pointer" class="${_activeId === p.plate_id ? 'table-active' : ''}">
-            <td><code>${p.plate_id}</code></td>
-            <td>${p.created ? new Date(p.created).toLocaleDateString() : '—'}</td>
-            <td>${p.well_count || '—'}</td>
-            <td><span class="badge bg-${STATUS_COLORS[p.status] || 'secondary'}">${p.status || 'unknown'}</span></td>
-            <td class="text-center">${p.has_analysis ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-dash text-muted"></i>'}</td>
-            <td>
-                <button class="btn btn-sm btn-outline-success" title="Link Analysis"
-                    onclick="event.stopPropagation(); showLinkAnalysisModal('${p.plate_id}')">
-                    <i class="bi bi-link-45deg"></i>
-                </button>
-                <button class="btn btn-sm btn-outline-danger ms-1" title="Delete"
-                    onclick="event.stopPropagation(); confirmDeletePlate('${p.plate_id}')">
-                    <i class="bi bi-trash"></i>
-                </button>
-            </td>
-        </tr>
-    `).join('');
-}
-
-// ─── Timeline detail ───────────────────────────────────────────────────────
-
-let _activeId = null;
-
-async function showPlateDetails(plateId) {
-    try {
-        const resp = await fetch(`/api/plates/${plateId}`);
-        if (!resp.ok) throw new Error(await resp.text());
-        const plate = await resp.json();
-        _activeId = plateId;
-        renderPlatesTable(); // re-highlight active row
-
-        document.getElementById('detailPlateId').textContent = plateId;
-        document.getElementById('plateDetailsBody').innerHTML = buildTimeline(plate);
-        document.getElementById('plateDetailsCard').style.display = '';
-    } catch (e) {
-        showToast('error', 'Error', 'Could not load plate: ' + e.message);
-    }
-}
-
-function closeDetails() {
-    _activeId = null;
-    document.getElementById('plateDetailsCard').style.display = 'none';
-    renderPlatesTable();
-}
-
-function buildTimeline(plate) {
-    const fmt = ts => ts ? new Date(ts).toLocaleString() : null;
-
-    // Created step
-    const createdHtml = `
-        <div class="tl-item">
-            <div class="tl-dot done bg-success"></div>
-            <div class="tl-body">
-                <div class="tl-title text-success">Created</div>
-                <div class="tl-meta">
-                    ${fmt(plate.created) || '—'}<br>
-                    Source: ${plate.source_file || 'manual'} &nbsp;|&nbsp; Wells: ${plate.well_count || '—'}
+    <div class="row g-3">
+        <!-- Plate list -->
+        <div class="col-12 col-lg-4">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-list-ul"></i> Plate List</span>
+                    <small class="text-muted" id="platesCount"></small>
+                </div>
+                <div class="card-body p-0" style="overflow-y:auto; max-height:72vh">
+                    <div id="plateList">
+                        <div class="text-center text-muted py-4">
+                            <div class="spinner-border spinner-border-sm"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
-        </div>`;
+        </div>
 
-    // Pipetting step
-    const pip = plate.pipetting_info;
-    const pipDone = !!pip;
-    const pipHtml = `
-        <div class="tl-item ${pipDone ? '' : 'tl-pending'}">
-            <div class="tl-dot done bg-${pipDone ? 'primary' : 'secondary'}"></div>
-            <div class="tl-body">
-                <div class="tl-title text-${pipDone ? 'primary' : 'secondary'}">Pipetted</div>
-                ${pipDone ? `
-                <div class="tl-meta">
-                    ${fmt(pip.timestamp) || '—'}<br>
-                    Recipe: ${pip.recipe || '—'} &nbsp;|&nbsp; Instrument: ${pip.instrument || '—'}
-                </div>` : '<div class="tl-meta">Not yet executed</div>'}
+        <!-- Plate detail + heatmap -->
+        <div class="col-12 col-lg-8" id="detailPanel">
+            <div class="card">
+                <div class="card-body text-center text-muted py-5">
+                    <i class="bi bi-grid-3x3-gap fs-1 d-block mb-2" style="opacity:.3"></i>
+                    Seleziona una piastra per vedere il layout dei pozzetti e i risultati di misura
+                </div>
             </div>
-        </div>`;
+        </div>
+    </div>
+</div>
 
-    // Analysis steps
-    const analyses = plate.analysis_results || [];
-    let analysisHtml = '';
-    if (analyses.length === 0) {
-        analysisHtml = `
-            <div class="tl-item tl-pending">
-                <div class="tl-dot done bg-secondary"></div>
-                <div class="tl-body">
-                    <div class="tl-title text-secondary">Analyzed</div>
-                    <div class="tl-meta">No analysis linked yet —
-                        <a href="#" class="tl-link-btn" onclick="showLinkAnalysisModal('${plate.plate_id}'); return false;">
-                            <i class="bi bi-link-45deg"></i> Link now
-                        </a>
+<script>
+let selectedPlateId = null;
+let heatmapEnabled = true;
+
+function toggleHeatmap(enabled) {
+    heatmapEnabled = enabled;
+    // Persist choice
+    try { localStorage.setItem('labos_heatmap', enabled ? '1' : '0'); } catch(e) {}
+    if (selectedPlateId) showPlate(selectedPlateId);
+}
+
+function fmtDate(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleString('it-IT', {dateStyle:'short', timeStyle:'short'}); }
+    catch { return iso.slice(0,16).replace('T',' '); }
+}
+
+function statusBadge(s) {
+    const cls = {prepared:'badge-prepared', pipetted:'badge-pipetted', measured:'badge-measured'};
+    return `<span class="badge ${cls[s]||'bg-secondary'}">${s||'—'}</span>`;
+}
+
+async function loadPlates() {
+    const list = document.getElementById('plateList');
+    list.innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div></div>';
+    try {
+        const r = await fetch('/api/db/plates?limit=100');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        document.getElementById('platesCount').textContent = `${d.count} piastr${d.count===1?'a':'e'}`;
+        if (!d.plates || d.plates.length === 0) {
+            list.innerHTML = '<div class="text-center text-muted py-5 px-3">Nessuna piastra ancora — esegui un workflow con uno step Opentrons.</div>';
+            return;
+        }
+        list.innerHTML = d.plates.map(p => `
+            <div class="plate-card p-3 border-bottom" onclick="showPlate('${p.plate_id}')">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="fw-bold small font-monospace">${p.plate_id}</div>
+                        <div class="text-muted small">${p.recipe_name||'—'}</div>
+                    </div>
+                    ${statusBadge(p.status)}
+                </div>
+                <div class="d-flex gap-2 mt-1">
+                    <small class="text-muted">${p.plate_type||'?'}</small>
+                    <small class="text-muted">&bull; ${fmtDate(p.prepared_at)}</small>
+                </div>
+            </div>
+        `).join('');
+    } catch(e) {
+        list.innerHTML = `<div class="text-danger text-center py-4">${e.message}</div>`;
+    }
+}
+
+async function showPlate(plateId) {
+    selectedPlateId = plateId;
+    const panel = document.getElementById('detailPanel');
+    panel.innerHTML = '<div class="card"><div class="text-center py-5"><div class="spinner-border"></div></div></div>';
+
+    try {
+        const [plateResp, heatmapResp] = await Promise.all([
+            fetch(`/api/db/plates/${encodeURIComponent(plateId)}`),
+            fetch(`/api/db/plates/${encodeURIComponent(plateId)}/heatmap`),
+        ]);
+        if (!plateResp.ok) throw new Error('Piastra non trovata');
+        const plate = await plateResp.json();
+        const heatmap = heatmapResp.ok ? await heatmapResp.json() : null;
+
+        const wellInfo = {};
+        for (const w of (plate.wells || [])) wellInfo[w.well_id] = w;
+
+        let html = `<div class="card mb-3">
+            <div class="card-header fw-bold font-monospace d-flex justify-content-between">
+                <span><i class="bi bi-grid-3x3-gap"></i> ${plateId}</span>
+                ${statusBadge(plate.status)}
+            </div>
+            <div class="card-body">
+                <div class="row g-3 mb-3">
+                    <div class="col-6 col-md-4"><div class="text-muted small">Tipo piastra</div><div class="small">${plate.plate_type||'—'}</div></div>
+                    <div class="col-6 col-md-2"><div class="text-muted small">Dimensioni</div>${plate.total_wells||'?'} pozzetti (${plate.rows||'?'}×${plate.columns||'?'})</div>
+                    <div class="col-6 col-md-2"><div class="text-muted small">HAL config</div>${plate.hal_config||'—'}</div>
+                    <div class="col-6 col-md-2"><div class="text-muted small">Ricetta</div>${plate.recipe_name||'—'}</div>
+                    <div class="col-6 col-md-2"><div class="text-muted small">Slot</div>${plate.labware_slot||'—'}</div>
+                    <div class="col-12 col-md-4"><div class="text-muted small">Run ID</div><div class="small text-muted font-monospace">${plate.run_id||'—'}</div></div>
+                    <div class="col-6 col-md-4"><div class="text-muted small">Preparata il</div>${fmtDate(plate.prepared_at)}</div>
+                </div>`;
+
+        if (heatmapEnabled && heatmap && heatmap.grid && heatmap.grid.length > 0) {
+            const vMin = heatmap.value_min;
+            const vMax = heatmap.value_max;
+            const hasValues = vMin !== null && vMax !== null;
+
+            html += `<h6 class="mt-3">Layout pozzetti${hasValues ? ' <small class="text-muted fw-normal">(colore = valore misurato)</small>' : ''}</h6>`;
+            html += `<div style="overflow-x:auto"><div style="display:inline-block;padding-bottom:8px">`;
+
+            // Column labels
+            html += `<div style="display:flex;gap:3px;margin-bottom:2px;padding-left:26px">`;
+            for (let c = 1; c <= heatmap.columns; c++) {
+                html += `<div class="well-label-col">${c}</div>`;
+            }
+            html += `</div>`;
+
+            // Grid rows
+            for (let ri = 0; ri < heatmap.grid.length; ri++) {
+                const rowLabel = heatmap.row_labels[ri];
+                html += `<div style="display:flex;gap:3px;margin-bottom:3px;align-items:center">`;
+                html += `<div class="well-label-row">${rowLabel}</div>`;
+                for (const cell of heatmap.grid[ri]) {
+                    const wi = wellInfo[cell.well_id] || {};
+                    const hasVal = cell.value !== undefined && cell.value !== null;
+                    const bg = hasVal ? valueToColor(cell.value, vMin, vMax) : null;
+                    const style = bg ? `background:${bg}` : '';
+                    const cls = hasVal ? '' : (wi.reagent_name ? '' : 'empty');
+                    const tips = [];
+                    tips.push(`<b>${cell.well_id}</b>`);
+                    if (wi.reagent_name) tips.push(`Reagente: ${wi.reagent_name}`);
+                    if (wi.volume_ul != null) tips.push(`Volume: ${wi.volume_ul} µl`);
+                    if (wi.source_well) tips.push(`Sorgente: ${wi.source_well}`);
+                    if (hasVal) tips.push(`Valore: <b>${cell.value.toFixed(4)}</b> ${cell.unit||''}`);
+                    html += `<div class="well-cell ${cls}" style="${style}">
+                        ${cell.well_id}
+                        <div class="well-tip">${tips.join('<br>')}</div>
+                    </div>`;
+                }
+                html += `</div>`;
+            }
+            html += `</div></div>`;
+
+            if (hasValues) {
+                html += `<div class="d-flex align-items-center gap-2 mt-2 mb-1" style="max-width:360px">
+                    <small class="text-muted text-nowrap">${vMin.toFixed(4)}</small>
+                    <div style="flex:1;height:10px;border-radius:4px;background:linear-gradient(to right,${valueToColor(vMin,vMin,vMax)},${valueToColor((vMin+vMax)/2,vMin,vMax)},${valueToColor(vMax,vMin,vMax)})"></div>
+                    <small class="text-muted text-nowrap">${vMax.toFixed(4)}</small>
+                </div>`;
+            }
+        } else if ((plate.wells||[]).length > 0) {
+            html += `<p class="text-muted small mt-2">${plate.wells.length} pozzetti registrati — nessuna misura disponibile.</p>`;
+        } else {
+            html += `<p class="text-muted small mt-2">Nessun dato di pozzetto disponibile.</p>`;
+        }
+
+        html += `</div></div>`;
+
+        // Measurement stats
+        const mValues = (plate.measurements||[]).map(m=>m.value).filter(v=>v!==null&&v!==undefined);
+        if (mValues.length > 0) {
+            const mean = mValues.reduce((a,b)=>a+b,0)/mValues.length;
+            const mn = Math.min(...mValues), mx = Math.max(...mValues);
+            const std = Math.sqrt(mValues.reduce((s,v)=>s+(v-mean)**2,0)/mValues.length);
+            html += `<div class="card mb-3">
+                <div class="card-header"><i class="bi bi-bar-chart"></i> Statistiche misure (${mValues.length} pozzetti)</div>
+                <div class="card-body">
+                    <div class="row g-2 text-center">
+                        <div class="col-3"><div class="text-muted small">Media</div><div class="fw-bold">${mean.toFixed(4)}</div></div>
+                        <div class="col-3"><div class="text-muted small">Min</div><div class="fw-bold text-info">${mn.toFixed(4)}</div></div>
+                        <div class="col-3"><div class="text-muted small">Max</div><div class="fw-bold text-warning">${mx.toFixed(4)}</div></div>
+                        <div class="col-3"><div class="text-muted small">Dev. Std</div><div class="fw-bold">${std.toFixed(4)}</div></div>
                     </div>
                 </div>
             </div>`;
-    } else {
-        analysisHtml = analyses.map((a, i) => {
-            const fname = a.result_file ? a.result_file.split('/').pop().split('\\').pop() : null;
-            const viewBtn = fname ? `
-                <a href="/results#${encodeURIComponent(fname)}" class="btn btn-sm btn-outline-success tl-link-btn ms-1" target="_blank">
-                    <i class="bi bi-graph-up"></i> View
-                </a>` : '';
-            return `
-                <div class="tl-item">
-                    <div class="tl-dot done bg-success"></div>
-                    <div class="tl-body">
-                        <div class="tl-title text-success">
-                            Analysis ${analyses.length > 1 ? i + 1 : ''} — ${a.measurement_type || 'unknown'}
-                        </div>
-                        <div class="tl-meta">
-                            ${fmt(a.timestamp) || '—'}<br>
-                            Protocol: ${a.protocol || '—'} &nbsp;|&nbsp; Instrument: ${a.instrument || '—'}
-                            ${fname ? `<br>File: <code>${fname}</code> ${viewBtn}` : ''}
-                            ${a.notes ? `<br><em>${a.notes}</em>` : ''}
-                        </div>
-                    </div>
-                </div>`;
-        }).join('');
-    }
-
-    // Status badge + link analysis button
-    const statusColor = STATUS_COLORS[plate.status] || 'secondary';
-    return `
-        <div class="mb-3 d-flex align-items-center gap-2">
-            <span class="badge bg-${statusColor} fs-6">${plate.status || 'unknown'}</span>
-            <button class="btn btn-sm btn-outline-success ms-auto" onclick="showLinkAnalysisModal('${plate.plate_id}')">
-                <i class="bi bi-link-45deg"></i> Link Analysis
-            </button>
-        </div>
-        <div class="plate-timeline">
-            ${createdHtml}${pipHtml}${analysisHtml}
-        </div>`;
-}
-
-// ─── Add plate ─────────────────────────────────────────────────────────────
-
-function showAddPlateModal() {
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    document.getElementById('newPlateId').value = `PLATE-${today}-${String(plates.length + 1).padStart(3, '0')}`;
-    document.getElementById('newPlateId').classList.remove('is-invalid');
-    document.getElementById('newPlateNotes').value = '';
-    new bootstrap.Modal(document.getElementById('addPlateModal')).show();
-}
-
-async function addPlateManually() {
-    const idInput = document.getElementById('newPlateId');
-    const plateId = idInput.value.trim();
-    if (!plateId) {
-        idInput.classList.add('is-invalid');
-        return;
-    }
-    idInput.classList.remove('is-invalid');
-
-    try {
-        const resp = await fetch('/api/plates', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                plate_id: plateId,
-                well_count: parseInt(document.getElementById('newPlateWells').value),
-                notes: document.getElementById('newPlateNotes').value
-            })
-        });
-        if (!resp.ok) {
-            const err = await resp.json();
-            throw new Error(err.detail || resp.statusText);
         }
-        bootstrap.Modal.getInstance(document.getElementById('addPlateModal')).hide();
-        await refreshPlates();
-        showToast('success', 'Plate added', `${plateId} created successfully.`);
-    } catch (e) {
-        showToast('error', 'Error', 'Could not add plate: ' + e.message);
+
+        // Well table (only if there's data)
+        if ((plate.wells||[]).length > 0) {
+            const measByWell = {};
+            for (const m of (plate.measurements||[])) measByWell[m.well_id] = m;
+            html += `<div class="card">
+                <div class="card-header"><i class="bi bi-table"></i> Contenuto pozzetti</div>
+                <div class="card-body p-0">
+                <div class="table-responsive" style="max-height:260px">
+                <table class="table table-sm mb-0">
+                <thead><tr><th>Pozzetto</th><th>Reagente</th><th>Vol (µl)</th><th>Sorgente</th><th>Valore</th><th>Unità</th></tr></thead>
+                <tbody>`;
+            for (const w of plate.wells) {
+                const m = measByWell[w.well_id] || {};
+                html += `<tr>
+                    <td><strong>${w.well_id}</strong></td>
+                    <td>${w.reagent_name||'—'}</td>
+                    <td>${w.volume_ul!=null?w.volume_ul:'—'}</td>
+                    <td class="text-muted small">${w.source_well||'—'}</td>
+                    <td>${m.value!=null?m.value.toFixed(4):'—'}</td>
+                    <td class="text-muted small">${m.unit||'—'}</td>
+                </tr>`;
+            }
+            html += `</tbody></table></div></div></div>`;
+        }
+
+        panel.innerHTML = html;
+    } catch(e) {
+        panel.innerHTML = `<div class="card"><div class="text-danger text-center py-4">${e.message}</div></div>`;
     }
 }
 
-// ─── Link analysis ─────────────────────────────────────────────────────────
-
-async function showLinkAnalysisModal(plateId) {
-    document.getElementById('linkAnalysisPlateId').value = plateId;
-    document.getElementById('analysisResultFile').value = '';
-    document.getElementById('analysisNotes').value = '';
-
-    // Populate protocol dropdown from Library/Analysis
-    const protocolSel = document.getElementById('analysisProtocol');
-    protocolSel.innerHTML = '<option value="">— select protocol —</option>';
-    try {
-        const resp = await fetch('/api/files/protocols');
-        const data = await resp.json();
-        (data.files || []).forEach(f => {
-            const opt = document.createElement('option');
-            opt.value = f;
-            opt.textContent = f;
-            protocolSel.appendChild(opt);
-        });
-    } catch (_) {
-        protocolSel.innerHTML = '<option value="">— protocols unavailable —</option>';
+function valueToColor(v, vMin, vMax) {
+    if (v === null || v === undefined || vMin === vMax) return '#4a90d9';
+    const t = Math.max(0, Math.min(1, (v - vMin) / (vMax - vMin)));
+    const stops = [[0,[66,133,244]],[0.33,[52,168,83]],[0.67,[251,188,4]],[1.0,[234,67,53]]];
+    for (let i = 0; i < stops.length - 1; i++) {
+        const [t0,c0] = stops[i], [t1,c1] = stops[i+1];
+        if (t >= t0 && t <= t1) {
+            const f = (t-t0)/(t1-t0);
+            return `rgb(${Math.round(c0[0]+(c1[0]-c0[0])*f)},${Math.round(c0[1]+(c1[1]-c0[1])*f)},${Math.round(c0[2]+(c1[2]-c0[2])*f)})`;
+        }
     }
-
-    // Populate result file picker from Library/Results/AnIML
-    const picker = document.getElementById('analysisResultFilePicker');
-    picker.innerHTML = '<option value="">— pick from library —</option>';
-    try {
-        const resp = await fetch('/api/files/animl_results');
-        const data = await resp.json();
-        (data.files || []).forEach(f => {
-            const opt = document.createElement('option');
-            opt.value = `Results/AnIML/${f.name}`;
-            opt.textContent = `${f.name}  (${new Date(f.modified).toLocaleDateString()})`;
-            picker.appendChild(opt);
-        });
-    } catch (_) { /* ignore if endpoint unavailable */ }
-
-    new bootstrap.Modal(document.getElementById('linkAnalysisModal')).show();
+    return '#4a90d9';
 }
 
-// Sync picker → manual input
-document.getElementById('analysisResultFilePicker').addEventListener('change', function () {
-    if (this.value) document.getElementById('analysisResultFile').value = this.value;
+window.handleWebSocketMessage = window.handleWebSocketMessage || function(){};
+
+document.addEventListener('DOMContentLoaded', () => {
+    try {
+        const saved = localStorage.getItem('labos_heatmap');
+        if (saved === '0') {
+            heatmapEnabled = false;
+            document.getElementById('heatmapToggle').checked = false;
+        }
+    } catch(e) {}
+    loadPlates();
+    if (location.hash && location.hash.length > 1) showPlate(location.hash.slice(1));
 });
-
-async function linkAnalysis() {
-    const plateId = document.getElementById('linkAnalysisPlateId').value;
-    const resultFile = document.getElementById('analysisResultFile').value.trim()
-        || document.getElementById('analysisResultFilePicker').value;
-
-    try {
-        const resp = await fetch(`/api/plates/${plateId}/analysis`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                measurement_type: document.getElementById('analysisType').value,
-                protocol: document.getElementById('analysisProtocol').value || null,
-                result_file: resultFile,
-                notes: document.getElementById('analysisNotes').value
-            })
-        });
-        if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
-        bootstrap.Modal.getInstance(document.getElementById('linkAnalysisModal')).hide();
-        await refreshPlates();
-        if (_activeId === plateId) await showPlateDetails(plateId);
-        showToast('success', 'Analysis linked', `Linked to plate ${plateId}.`);
-    } catch (e) {
-        showToast('error', 'Error', 'Could not link analysis: ' + e.message);
-    }
-}
-
-// ─── Delete ────────────────────────────────────────────────────────────────
-
-function confirmDeletePlate(plateId) {
-    _pendingDeleteId = plateId;
-    document.getElementById('deletePlateIdLabel').textContent = plateId;
-    new bootstrap.Modal(document.getElementById('deletePlateModal')).show();
-}
-
-document.getElementById('deletePlateConfirmBtn').addEventListener('click', async () => {
-    if (!_pendingDeleteId) return;
-    const plateId = _pendingDeleteId;
-    _pendingDeleteId = null;
-    bootstrap.Modal.getInstance(document.getElementById('deletePlateModal')).hide();
-    try {
-        const resp = await fetch(`/api/plates/${plateId}`, {method: 'DELETE'});
-        if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
-        if (_activeId === plateId) closeDetails();
-        await refreshPlates();
-        showToast('success', 'Deleted', `Plate ${plateId} removed.`);
-    } catch (e) {
-        showToast('error', 'Error', 'Could not delete plate: ' + e.message);
-    }
-});
-
-// ─── Export ────────────────────────────────────────────────────────────────
-
-function exportPlatesCSV() {
-    if (plates.length === 0) {
-        showToast('warning', 'Nothing to export', 'No plates in the list.');
-        return;
-    }
-    const headers = ['plate_id', 'created', 'well_count', 'status', 'has_analysis'];
-    const rows = plates.map(p => [
-        p.plate_id, p.created || '', p.well_count || '', p.status || '',
-        p.has_analysis ? 'Yes' : 'No'
-    ]);
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const a = Object.assign(document.createElement('a'), {
-        href: URL.createObjectURL(new Blob([csv], {type: 'text/csv'})),
-        download: `plates_${new Date().toISOString().slice(0, 10)}.csv`
-    });
-    a.click();
-    URL.revokeObjectURL(a.href);
-}
-
-// ─── Init ──────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', refreshPlates);
 </script>
 {% endblock %}

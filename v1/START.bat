@@ -25,5 +25,4 @@ if exist ".venv\Scripts\activate.bat" (
 
 REM Run the launcher
 python launcher.py
-
-pause
+if errorlevel 1 pause

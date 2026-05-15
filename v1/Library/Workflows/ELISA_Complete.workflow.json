@@ -9,9 +9,7 @@
       "Instrument": "Opentrons",
       "Action": "ExecuteRecipe",
       "Parameters": {
-        "Recipe": "modified_test1_hal",
-        "UseHAL": true,
-        "HALConfig": "Standard_Flex_Setup"
+        "RecipeName": "modified_test1_hal"
       },
       "Description": "Preparazione campioni su piastra"
     },

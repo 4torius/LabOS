@@ -13,23 +13,23 @@ BASE_DIR = Path(__file__).parent.absolute()
 OUT_DIR = BASE_DIR / "src" / "pnp_stubs"
 
 PROTOS = [
-    # SiLA2Common goes to both output dirs
+    # SiLA2Common — used by Strategy 1 (legacy server support) in client.py
     {
         "file": BASE_DIR / "SiLA2" / "SiLA2Common.proto",
         "include": BASE_DIR / "SiLA2",
         "extra_out": BASE_DIR / "SiLA2",
     },
+    # TecanLegacyBridge — Python bridge to C# TecanSiLA2Server COM layer (port 50055)
+    # Used by TecanM200SiLA2Server/src/tecan_bridge_client.py
     {
-        "file": BASE_DIR / "SiLA2" / "OpentronsSiLA2Server" / "Protos" / "OpentronsService.proto",
-        "include": BASE_DIR / "SiLA2" / "OpentronsSiLA2Server" / "Protos",
+        "file": BASE_DIR / "SiLA2" / "TecanM200SiLA2Server" / "src" / "TecanLegacyBridge.proto",
+        "include": BASE_DIR / "SiLA2" / "TecanM200SiLA2Server" / "src",
+        "extra_out": BASE_DIR / "SiLA2" / "TecanM200SiLA2Server" / "src",
     },
+    # PlateReaderService — kept in pnp_stubs as Strategy 2 fallback for direct C# server access
     {
-        "file": BASE_DIR / "SiLA2" / "ManualStationSiLA2Server" / "protos" / "ManualStationService.proto",
-        "include": BASE_DIR / "SiLA2" / "ManualStationSiLA2Server" / "protos",
-    },
-    {
-        "file": BASE_DIR / "SiLA2" / "TecanSiLA2Server" / "Protos" / "PlateReaderService.proto",
-        "include": BASE_DIR / "SiLA2" / "TecanSiLA2Server" / "Protos",
+        "file": BASE_DIR / "SiLA2" / "TecanM200Bridge" / "Protos" / "PlateReaderService.proto",
+        "include": BASE_DIR / "SiLA2" / "TecanM200Bridge" / "Protos",
     },
 ]
 

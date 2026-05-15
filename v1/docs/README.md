@@ -1,117 +1,52 @@
-# 📚 Documentazione Sistema BicoccaLab v6
+# LabOS Documentation
 
-> Sistema di automazione di laboratorio integrato basato su SiLA2
+LabOS is a modular, plug-and-play laboratory automation platform built on the [SiLA2](https://sila-standard.org) open standard. It coordinates heterogeneous laboratory instruments through a unified gRPC interface without any instrument-specific hardcoding in the orchestration layer.
 
-## 📁 Indice Documentazione
+## Instruments
 
-### Documentazione dei Server
+| Instrument | Role |
+|------------|------|
+| Opentrons Flex OT-3 | Liquid handling (1–1000 µL, 12-slot deck, SBS plates) |
+| Tecan Infinite M200 Pro | Plate reading (absorbance, fluorescence, luminescence) |
+| GoFaGo (Robotnik RB-Kairos + ABB GoFa + OnRobot RG6) | Mobile manipulation and plate transport |
+| Manual Station | Human-in-the-loop operator steps |
 
-| Server | Descrizione | Porta | Documentazione |
-|--------|-------------|-------|----------------|
-| **TecanSiLA2Server** | Lettore di micropiastre Tecan M200 Pro | 50051 | [TECAN_SERVER.md](./TECAN_SERVER.md) |
-| **OpentronsSiLA2Server** | Robot per liquid handling Opentrons Flex | 50052 | [OPENTRONS_SERVER.md](./OPENTRONS_SERVER.md) |
-| **MobileSiLA2Server** | Robot mobile GoFaGo (RB Kairos + ABB GoFa) | 50053 | [MOBILE_SERVER.md](./MOBILE_SERVER.md) |
-| **Orchestrator** | Orchestrazione multi-dispositivo | - | [ORCHESTRATOR.md](./ORCHESTRATOR.md) |
+## Quick Start
 
-### Piani e Roadmap
+1. Configure server addresses in `v1/SiLA2/servers_config.yaml`
+2. Start all servers and the orchestrator: `v1/START.bat` (Windows)
+3. Open the web interface: http://localhost:8000
+4. Load a workflow from the Library, click Run
 
-| Documento | Descrizione |
-|-----------|-------------|
-| [NODERED_MIGRATION.md](./NODERED_MIGRATION.md) | Piano migrazione da CLI a Node-RED |
-| [ARCHITECTURE_OVERVIEW.md](./ARCHITECTURE_OVERVIEW.md) | Panoramica architetturale completa |
-
----
-
-## 🏗️ Architettura del Sistema
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           ORCHESTRATOR                                   │
-│                     (Gateway + Workflow Executor)                        │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
-│  │   CLI       │  │   Gateway   │  │  Workflow   │  │   Device    │    │
-│  │  Interface  │  │  (Discovery)│  │  Executor   │  │  Manager    │    │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘    │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                    ┌───────────────┼───────────────┐
-                    │               │               │
-                    ▼               ▼               ▼
-        ┌───────────────┐  ┌───────────────┐  ┌───────────────┐
-        │    TECAN      │  │   OPENTRONS   │  │    MOBILE     │
-        │  SiLA2 Server │  │  SiLA2 Server │  │  SiLA2 Server │
-        │   (C#/.NET)   │  │   (Python)    │  │   (Python)    │
-        │  Port: 50051  │  │  Port: 50052  │  │  Port: 50053  │
-        └───────────────┘  └───────────────┘  └───────────────┘
-                │                   │                   │
-                ▼                   ▼                   ▼
-        ┌───────────────┐  ┌───────────────┐  ┌───────────────┐
-        │  Tecan SDK    │  │ Opentrons API │  │   ROS1 Bridge │
-        │  (iControl)   │  │   HTTP REST   │  │    (rospy)    │
-        └───────────────┘  └───────────────┘  └───────────────┘
-                │                   │                   │
-                ▼                   ▼                   ▼
-        ┌───────────────┐  ┌───────────────┐  ┌───────────────┐
-        │ Tecan M200 Pro│  │ Opentrons Flex│  │    GoFaGo     │
-        │ Plate Reader  │  │ Liquid Handler│  │ Mobile Robot  │
-        └───────────────┘  └───────────────┘  └───────────────┘
-```
-
-## 🔌 Protocollo SiLA2
-
-Tutti i server implementano il protocollo **SiLA2** (Standardization in Lab Automation):
-
-- **Trasporto**: gRPC (HTTP/2)
-- **Serializzazione**: Protocol Buffers
-- **Features**: Comandi, Proprietà, Osservabili
-- **Discovery**: Automatico tramite Gateway
-
-## 📦 Componenti Principali
-
-### 1. TecanSiLA2Server (C#/.NET)
-Server per il lettore di micropiastre Tecan M200 Pro.
-- Letture di assorbanza, fluorescenza, luminescenza
-- Controllo temperatura
-- Output in XML, CSV, AnIML
-
-### 2. OpentronsSiLA2Server (Python)
-Server per il robot Opentrons Flex con HAL (Hardware Abstraction Layer).
-- 60+ comandi per liquid handling
-- Supporto tutti i moduli (HeaterShaker, Thermocycler, etc.)
-- Generatore di protocolli da JSON
-
-### 3. MobileSiLA2Server (Python)
-Server per il robot mobile GoFaGo.
-- Navigazione autonoma
-- Controllo braccio ABB GoFa
-- Trasporto labware tra stazioni
-
-### 4. Orchestrator
-Coordina workflow multi-dispositivo.
-- Gateway per discovery SiLA2
-- Esecuzione workflow JSON
-- Gestione dipendenze e errori
-
-## 🚀 Quick Start
-
-```bash
-# Avvia tutti i server
-.\Start-Lab.ps1
-
-# Oppure singolarmente:
-python start_tecan.py      # Tecan M200 Pro
-python start_opentrons.py  # Opentrons Flex
-python start_mobile.py     # GoFaGo Mobile
-python start_orchestrator.py  # Orchestrator
-```
-
-## 📖 Documentazione Correlata
-
-- [ARCHITECTURE.md](../ARCHITECTURE.md) - Architettura generale
-- [PROTOCOLS.md](../PROTOCOLS.md) - Formati protocolli
-- [QUICKSTART.md](../QUICKSTART.md) - Guida rapida
-- [GUIDA_RICETTE_OPENTRONS_HAL.md](../GUIDA_RICETTE_OPENTRONS_HAL.md) - Ricette Opentrons
+First time on a new computer? See [SETUP.md](SETUP.md) for the full deployment guide.
 
 ---
 
-*Documentazione generata automaticamente - BicoccaLab v6*
+## Documentation Index
+
+| Document | Contents |
+|----------|----------|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Four-layer system architecture, directory structure, design decisions |
+| [WORKFLOW_SYSTEM.md](WORKFLOW_SYSTEM.md) | JSON workflow format, DAG execution model, control flow, manual steps |
+| [HAL_SYSTEM.md](HAL_SYSTEM.md) | Hardware Abstraction Layer: recipe format, HAL config, translation pipeline |
+| [SILA2_INTEGRATION.md](SILA2_INTEGRATION.md) | SiLA2 standard, FDL format, SiLA2Common protocol, stub regeneration |
+| [SERVERS.md](SERVERS.md) | Per-server command reference: Opentrons, Tecan, Mobile Robot, Manual Station |
+| [API_REFERENCE.md](API_REFERENCE.md) | REST endpoints, WebSocket events, gRPC SiLA2Common interface |
+| [ADDING_NEW_INSTRUMENT.md](ADDING_NEW_INSTRUMENT.md) | Step-by-step guide to integrating a new instrument |
+| [SETUP.md](SETUP.md) | New PC deployment: prerequisites, venv, configuration, what to change |
+| [OPERATIONS.md](OPERATIONS.md) | Commissioning, day-to-day use, troubleshooting, LfD task teaching |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Code organization, testing, style guide, adding commands |
+
+---
+
+## Key Concepts
+
+**Plug-and-Play**: The orchestrator discovers instruments at runtime through the PnP registry. Adding a new instrument means deploying a new SiLA2 server — no orchestration code changes.
+
+**SiLA2Common**: A generic execution protocol (GetServerInfo, GetFeatures, ExecuteCommand, GetProperty) that every server implements alongside its native feature interface. This is the only interface the orchestrator uses.
+
+**HAL**: The Hardware Abstraction Layer separates liquid-handling recipes (what to do) from deck configurations (where things physically are). The same recipe runs on any compatible deck.
+
+**DAG Workflows**: Experiments are JSON files with steps and dependencies. Independent steps execute concurrently. Validation runs before any instrument is touched.
+
+**LfD Task Teaching**: Mobile robot manipulation tasks are taught by physically guiding the ABB GoFa arm through the task. No robot programming required.

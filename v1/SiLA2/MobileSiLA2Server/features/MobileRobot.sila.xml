@@ -1,0 +1,314 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Feature SiLA2Version="1.1" FeatureVersion="1.0" MaturityLevel="Draft"
+         Originator="org.labos" Category="mobile"
+         xmlns="http://www.sila-standard.org"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://www.sila-standard.org https://gitlab.com/SiLA2/sila_base/raw/master/schema/FeatureDefinition.xsd">
+
+    <Identifier>MobileRobot</Identifier>
+    <DisplayName>Mobile Robot Controller</DisplayName>
+    <Description>
+        Control interface for the RB Kairos + ABB GoFa 15000 mobile manipulator.
+        Provides navigation, arm control, gripper control, and labware transport
+        operations via ROS1. Gracefully degrades when ROS is unavailable.
+    </Description>
+
+    <!-- ================================================================== -->
+    <!--                            COMMANDS                                  -->
+    <!-- ================================================================== -->
+
+    <Command>
+        <Identifier>Navigate</Identifier>
+        <DisplayName>Navigate to Station</DisplayName>
+        <Description>Navigate the mobile base to a named station. Blocks until navigation completes or fails.</Description>
+        <Observable>Yes</Observable>
+        <Parameter>
+            <Identifier>StationName</Identifier>
+            <DisplayName>Station Name</DisplayName>
+            <Description>Name of the target station (e.g., Home, Opentrons, Tecan, Storage_A1, Storage_A2, Incubator).</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Response>
+            <Identifier>NavigationResult</Identifier>
+            <DisplayName>Navigation Result</DisplayName>
+            <Description>Result message of the navigation operation.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+        <IntermediateResponse>
+            <Identifier>NavigationStatus</Identifier>
+            <DisplayName>Navigation Status</DisplayName>
+            <Description>Current navigation progress (navigating, arrived, failed).</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </IntermediateResponse>
+        <DefinedExecutionErrors>
+            <Identifier>StationNotFound</Identifier>
+            <Identifier>NavigationFailed</Identifier>
+            <Identifier>RobotBusy</Identifier>
+        </DefinedExecutionErrors>
+    </Command>
+
+    <Command>
+        <Identifier>MoveArm</Identifier>
+        <DisplayName>Move Arm</DisplayName>
+        <Description>Move the GoFa arm to a named position. Blocks until the arm reaches the target or fails.</Description>
+        <Observable>Yes</Observable>
+        <Parameter>
+            <Identifier>PositionName</Identifier>
+            <DisplayName>Position Name</DisplayName>
+            <Description>Name of the target arm position (Home, Safe, Travel, Pickup, Place).</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Response>
+            <Identifier>ArmResult</Identifier>
+            <DisplayName>Arm Result</DisplayName>
+            <Description>Result message of the arm movement operation.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+        <IntermediateResponse>
+            <Identifier>ArmStatus</Identifier>
+            <DisplayName>Arm Status</DisplayName>
+            <Description>Current arm movement status (moving, reached, failed).</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </IntermediateResponse>
+        <DefinedExecutionErrors>
+            <Identifier>PositionNotFound</Identifier>
+            <Identifier>ArmMovementFailed</Identifier>
+            <Identifier>RobotBusy</Identifier>
+        </DefinedExecutionErrors>
+    </Command>
+
+    <Command>
+        <Identifier>ControlGripper</Identifier>
+        <DisplayName>Control Gripper</DisplayName>
+        <Description>Open or close the gripper. When closing, applies the force and width for the specified labware type.</Description>
+        <Observable>No</Observable>
+        <Parameter>
+            <Identifier>Action</Identifier>
+            <DisplayName>Action</DisplayName>
+            <Description>Gripper action: open or close.</Description>
+            <DataType>
+                <Constrained>
+                    <DataType>
+                        <Basic>String</Basic>
+                    </DataType>
+                    <Constraints>
+                        <Set>
+                            <Value>open</Value>
+                            <Value>close</Value>
+                        </Set>
+                    </Constraints>
+                </Constrained>
+            </DataType>
+        </Parameter>
+        <Parameter>
+            <Identifier>LabwareType</Identifier>
+            <DisplayName>Labware Type</DisplayName>
+            <Description>Labware profile for gripper force/width (96_well_plate, 384_well_plate, reservoir, tube_rack). Empty string uses default.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Response>
+            <Identifier>GripperResult</Identifier>
+            <DisplayName>Gripper Result</DisplayName>
+            <Description>Result of the gripper operation.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+        <DefinedExecutionErrors>
+            <Identifier>GripperFailed</Identifier>
+            <Identifier>RobotBusy</Identifier>
+        </DefinedExecutionErrors>
+    </Command>
+
+    <Command>
+        <Identifier>MoveLabware</Identifier>
+        <DisplayName>Move Labware</DisplayName>
+        <Description>
+            Full pick-and-place transport: navigate to source, pick up labware,
+            navigate to destination, and place labware. Reports each step via
+            intermediate responses.
+        </Description>
+        <Observable>Yes</Observable>
+        <Parameter>
+            <Identifier>SourceStation</Identifier>
+            <DisplayName>Source Station</DisplayName>
+            <Description>Name of the station where labware is picked up.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Parameter>
+            <Identifier>DestinationStation</Identifier>
+            <DisplayName>Destination Station</DisplayName>
+            <Description>Name of the station where labware is placed.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Parameter>
+            <Identifier>LabwareType</Identifier>
+            <DisplayName>Labware Type</DisplayName>
+            <Description>Type of labware being transported (96_well_plate, 384_well_plate, reservoir, tube_rack).</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Parameter>
+        <Response>
+            <Identifier>TransportResult</Identifier>
+            <DisplayName>Transport Result</DisplayName>
+            <Description>Final result of the labware transport operation.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+        <IntermediateResponse>
+            <Identifier>TransportStatus</Identifier>
+            <DisplayName>Transport Status</DisplayName>
+            <Description>Current step of the transport (navigating_to_source, picking_up, navigating_to_destination, placing, completed).</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </IntermediateResponse>
+        <DefinedExecutionErrors>
+            <Identifier>StationNotFound</Identifier>
+            <Identifier>NavigationFailed</Identifier>
+            <Identifier>ArmMovementFailed</Identifier>
+            <Identifier>GripperFailed</Identifier>
+            <Identifier>RobotBusy</Identifier>
+        </DefinedExecutionErrors>
+    </Command>
+
+    <Command>
+        <Identifier>EmergencyStop</Identifier>
+        <DisplayName>Emergency Stop</DisplayName>
+        <Description>Immediately stop all robot motion. Re-initialization required before resuming.</Description>
+        <Observable>No</Observable>
+        <Response>
+            <Identifier>StopResult</Identifier>
+            <DisplayName>Stop Result</DisplayName>
+            <Description>Confirmation that emergency stop was executed.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+    </Command>
+
+    <Command>
+        <Identifier>GetStatus</Identifier>
+        <DisplayName>Get Status</DisplayName>
+        <Description>Get the full current status of the robot as a JSON object including state, position, battery, and ROS connectivity.</Description>
+        <Observable>No</Observable>
+        <Response>
+            <Identifier>StatusJson</Identifier>
+            <DisplayName>Status JSON</DisplayName>
+            <Description>JSON with fields: state, position (x/y/theta), battery_level, ros_connected, current_station.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+    </Command>
+
+    <Command>
+        <Identifier>GetStations</Identifier>
+        <DisplayName>Get Stations</DisplayName>
+        <Description>List all named stations configured for this robot.</Description>
+        <Observable>No</Observable>
+        <Response>
+            <Identifier>StationsJson</Identifier>
+            <DisplayName>Stations JSON</DisplayName>
+            <Description>JSON array of station objects with name, type, x, y, height, description fields.</Description>
+            <DataType>
+                <Basic>String</Basic>
+            </DataType>
+        </Response>
+    </Command>
+
+    <!-- ================================================================== -->
+    <!--                           PROPERTIES                                 -->
+    <!-- ================================================================== -->
+
+    <Property>
+        <Identifier>RobotStatus</Identifier>
+        <DisplayName>Robot Status</DisplayName>
+        <Description>Current operational status of the mobile robot (idle, navigating, moving_arm, transporting, error, disconnected).</Description>
+        <Observable>Yes</Observable>
+        <DataType>
+            <Basic>String</Basic>
+        </DataType>
+    </Property>
+
+    <Property>
+        <Identifier>CurrentPosition</Identifier>
+        <DisplayName>Current Position</DisplayName>
+        <Description>Current base pose as a JSON object with x, y, and theta fields (meters and radians).</Description>
+        <Observable>Yes</Observable>
+        <DataType>
+            <Basic>String</Basic>
+        </DataType>
+    </Property>
+
+    <Property>
+        <Identifier>BatteryLevel</Identifier>
+        <DisplayName>Battery Level</DisplayName>
+        <Description>Current battery charge level as a percentage (0.0 to 100.0).</Description>
+        <Observable>Yes</Observable>
+        <DataType>
+            <Basic>Real</Basic>
+        </DataType>
+    </Property>
+
+    <!-- ================================================================== -->
+    <!--                     DEFINED EXECUTION ERRORS                         -->
+    <!-- ================================================================== -->
+
+    <DefinedExecutionError>
+        <Identifier>StationNotFound</Identifier>
+        <DisplayName>Station Not Found</DisplayName>
+        <Description>The requested named station is not in the configuration.</Description>
+    </DefinedExecutionError>
+
+    <DefinedExecutionError>
+        <Identifier>NavigationFailed</Identifier>
+        <DisplayName>Navigation Failed</DisplayName>
+        <Description>The robot failed to reach the target station.</Description>
+    </DefinedExecutionError>
+
+    <DefinedExecutionError>
+        <Identifier>RobotBusy</Identifier>
+        <DisplayName>Robot Busy</DisplayName>
+        <Description>The robot is currently executing another operation.</Description>
+    </DefinedExecutionError>
+
+    <DefinedExecutionError>
+        <Identifier>PositionNotFound</Identifier>
+        <DisplayName>Position Not Found</DisplayName>
+        <Description>The requested named arm position is not in the configuration.</Description>
+    </DefinedExecutionError>
+
+    <DefinedExecutionError>
+        <Identifier>ArmMovementFailed</Identifier>
+        <DisplayName>Arm Movement Failed</DisplayName>
+        <Description>The GoFa arm failed to reach the target position.</Description>
+    </DefinedExecutionError>
+
+    <DefinedExecutionError>
+        <Identifier>GripperFailed</Identifier>
+        <DisplayName>Gripper Failed</DisplayName>
+        <Description>The gripper failed to execute the requested action.</Description>
+    </DefinedExecutionError>
+
+</Feature>

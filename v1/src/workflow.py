@@ -498,6 +498,11 @@ class PnPWorkflowExecutor:
                     if key in normalized and normalized.get(key):
                         normalized["ProtocolFile"] = normalized[key]
                         break
+            # PlateID is auto-injected from Opentrons context at execution time;
+            # SampleSetID and PlateType default to empty string when not provided.
+            normalized.setdefault("PlateID", "")
+            normalized.setdefault("SampleSetID", "")
+            normalized.setdefault("PlateType", "")
 
         # Manual station defaults (when executed via server path instead of local shortcut).
         if action == "requestoperatortask":
@@ -581,16 +586,107 @@ class PnPWorkflowExecutor:
 
             normalized_params = self._normalize_params_for_validation(step, step.parameters)
             
-            # Check required parameters
+            # Check required parameters — only flag parameters that are completely
+            # absent (key not in params at all). Empty string is a valid value for
+            # String-type params (e.g. PlateID auto-injected at runtime, SampleSetID
+            # optional), so we do not reject params where the value is "".
             for param in command.parameters:
                 if param.required:
-                    if param.identifier not in normalized_params:
+                    value = normalized_params.get(param.identifier)
+                    if value is None:
                         errors.append(ValidationError(
                             step_number=step.step_number,
                             field=f"Parameters.{param.identifier}",
                             message=f"Required parameter '{param.identifier}' not provided"
                         ))
-        
+
+            # Well-capacity check for ExecuteRecipe steps
+            action_lower = (step.action or "").lower()
+            if action_lower in ("executerecipe", "executerecipebyname"):
+                cap_errors = self._validate_recipe_capacity(step, normalized_params)
+                errors.extend(cap_errors)
+
+        return errors
+
+    def _validate_recipe_capacity(
+        self, step: "WorkflowStep", params: Dict[str, Any]
+    ) -> List["ValidationError"]:
+        """
+        Check that the recipe does not target more wells than the plate can hold.
+        Returns a list of ValidationErrors (empty = OK).
+        """
+        errors: List[ValidationError] = []
+        recipe_name = params.get("RecipeName", "")
+        if not recipe_name:
+            return errors
+        try:
+            import json as _json
+
+            recipe_path = self.base_dir / "Library" / "Recipes" / f"{recipe_name}.json"
+            if not recipe_path.exists():
+                return errors
+            recipe = _json.loads(recipe_path.read_text(encoding="utf-8"))
+
+            # Collect all distinct destination wells per target labware
+            wells_by_labware: Dict[str, set] = {}
+            _cmds = {"Transfer", "TransferWithLiquidClass", "Distribute", "Dispense"}
+            for s in recipe.get("Steps", []):
+                if s.get("Command") not in _cmds:
+                    continue
+                dests = s.get("Destinations") or s.get("Destination") or s.get("Dest") or []
+                if isinstance(dests, str):
+                    dests = [dests]
+                for dest in dests:
+                    if ":" not in dest:
+                        continue
+                    labware, well = dest.split(":", 1)
+                    wells_by_labware.setdefault(labware, set()).add(well)
+
+            # Resolve plate capacity: check HAL first, then recipe's own Labware section
+            plate_total_wells: Dict[str, int] = {}
+
+            # Check recipe's inline Labware definitions
+            for logical, lw_def in recipe.get("Labware", {}).items():
+                load_name = lw_def.get("LoadName", "")
+                if "wellplate" in load_name.lower():
+                    pj = (self.base_dir / "Library" / "Labware" / "Plates"
+                          / f"{load_name}.plate.json")
+                    if pj.exists():
+                        meta = _json.loads(pj.read_text(encoding="utf-8"))
+                        plate_total_wells[logical] = int(meta.get("total_wells", 0))
+
+            # Fall back to active HAL config
+            if not plate_total_wells:
+                active_file = self.base_dir / "Library" / "HardwareConfig" / ".active"
+                if active_file.exists():
+                    hal_name = active_file.read_text(encoding="utf-8").strip()
+                    hal_path = self.base_dir / "Library" / "HardwareConfig" / hal_name
+                    if not hal_path.exists():
+                        hal_path = hal_path.with_suffix(".json")
+                    if hal_path.exists():
+                        hal = _json.loads(hal_path.read_text(encoding="utf-8"))
+                        for logical, lw_def in hal.get("Labware", {}).items():
+                            load_name = lw_def.get("LoadName", "")
+                            if "wellplate" in load_name.lower():
+                                pj = (self.base_dir / "Library" / "Labware" / "Plates"
+                                      / f"{load_name}.plate.json")
+                                if pj.exists():
+                                    meta = _json.loads(pj.read_text(encoding="utf-8"))
+                                    plate_total_wells[logical] = int(meta.get("total_wells", 0))
+
+            for labware, well_set in wells_by_labware.items():
+                capacity = plate_total_wells.get(labware)
+                if capacity and len(well_set) > capacity:
+                    errors.append(ValidationError(
+                        step_number=step.step_number,
+                        field="Parameters.RecipeName",
+                        message=(
+                            f"Recipe '{recipe_name}' targets {len(well_set)} wells "
+                            f"on '{labware}' but plate capacity is {capacity}"
+                        ),
+                    ))
+        except Exception:
+            pass  # capacity check is advisory — never block on parse errors
         return errors
     
     # =========================================================================

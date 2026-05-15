@@ -1,0 +1,26 @@
+# TecanM200SiLA2Server Configuration
+server:
+  host: "0.0.0.0"
+  port: 50051
+
+logging:
+  level: INFO
+
+# Internal bridge: the C# exe lives in bridge/ and is auto-started by main.py.
+bridge:
+  host: "127.0.0.1"
+  port: 50055
+
+# Connection string passed to the C# bridge's Connect() command.
+# Supported values (handled by the C# bridge):
+#   "usb"   / "" / "default"  → porttype=USB, type=READER  (LastConnection)
+#   "sim"   / "simulator"     → porttype=SIM, type=READER  (requires Tecan Simulator app)
+#   "dialog" / "select"       → shows instrument selection dialog
+# NOTE: do NOT pass raw porttype=... strings here; the bridge translates keywords.
+instrument:
+  connection_string: "usb"
+
+sila2:
+  server_name: "TecanM200Pro"
+  server_uuid: "tecan-m200pro-001"
+  vendor_url: "https://www.tecan.com/infinite-product-line?utm_term=infinite%20200%20pro&utm_campaign=[t:GSN][bu:LSB][br:detection][cp:platform][k:product/brand][m:EU]&utm_source=adwords&utm_medium=ppc&hsa_net=adwords&hsa_tgt=kwd-1223309064368&hsa_ad=634909376865&hsa_acc=9279258943&hsa_grp=143490701275&hsa_mt=e&hsa_cam=18664846284&hsa_kw=infinite%20200%20pro&hsa_ver=3&hsa_src=g&gad_source=1&gad_campaignid=18664846284&gbraid=0AAAAAD-14eNr3LjqDi4KYAeNLBmzzVfHp&gclid=CjwKCAjw5ZXQBhBdEiwAI5XVWdf5dS2NzS_Jtrx56CG5HG3fBrSYdFoMzoyr_NNj88tuldfx31_6ThoCKaEQAvD_BwE"

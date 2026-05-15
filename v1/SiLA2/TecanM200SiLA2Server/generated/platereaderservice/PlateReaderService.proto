@@ -1,0 +1,169 @@
+syntax = "proto3";
+
+import "SiLAFramework.proto";
+
+package sila2.org.labos.instruments.platereader.platereaderservice.v1;
+
+/* SiLA2 Feature for controlling the Tecan Infinite M200 Pro plate reader. Supports Absorbance, Fluorescence, and Luminescence measurements. Results are returned in AnIML format for LIMS compatibility. This Python SiLA2 server bridges to a C# COM layer via gRPC proxy. */
+service PlateReaderService {
+  /* Connect to the Tecan plate reader. Pass empty string for default USB connection. */
+  rpc Connect (sila2.org.labos.instruments.platereader.platereaderservice.v1.Connect_Parameters) returns (sila2.org.labos.instruments.platereader.platereaderservice.v1.Connect_Responses) {}
+  /* Disconnect from the plate reader. */
+  rpc Disconnect (sila2.org.labos.instruments.platereader.platereaderservice.v1.Disconnect_Parameters) returns (sila2.org.labos.instruments.platereader.platereaderservice.v1.Disconnect_Responses) {}
+  /* Move the plate carrier into the instrument. */
+  rpc PlateIn (sila2.org.labos.instruments.platereader.platereaderservice.v1.PlateIn_Parameters) returns (sila2.org.labos.instruments.platereader.platereaderservice.v1.PlateIn_Responses) {}
+  /* Eject the plate carrier from the instrument. */
+  rpc PlateOut (sila2.org.labos.instruments.platereader.platereaderservice.v1.PlateOut_Parameters) returns (sila2.org.labos.instruments.platereader.platereaderservice.v1.PlateOut_Responses) {}
+  /* Set the plate temperature target (4–45 °C). */
+  rpc SetTemperature (sila2.org.labos.instruments.platereader.platereaderservice.v1.SetTemperature_Parameters) returns (sila2.org.labos.instruments.platereader.platereaderservice.v1.SetTemperature_Responses) {}
+  /* Disable the temperature control system. */
+  rpc TurnOffTemperature (sila2.org.labos.instruments.platereader.platereaderservice.v1.TurnOffTemperature_Parameters) returns (sila2.org.labos.instruments.platereader.platereaderservice.v1.TurnOffTemperature_Responses) {}
+  /* 
+      Execute a measurement using a .mdfx protocol file.
+      Observable command — reports progress while the measurement runs.
+     */
+  rpc RunMeasurement (sila2.org.labos.instruments.platereader.platereaderservice.v1.RunMeasurement_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
+  /* Monitor the state of RunMeasurement */
+  rpc RunMeasurement_Info (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.ExecutionInfo) {}
+  /* Retrieve intermediate responses of RunMeasurement */
+  rpc RunMeasurement_Intermediate (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.labos.instruments.platereader.platereaderservice.v1.RunMeasurement_IntermediateResponses) {}
+  /* Retrieve result of RunMeasurement */
+  rpc RunMeasurement_Result(sila2.org.silastandard.CommandExecutionUUID) returns (sila2.org.labos.instruments.platereader.platereaderservice.v1.RunMeasurement_Responses) {}
+  /* Retrieve an AnIML result file path by plate ID. */
+  rpc GetAnIMLResult (sila2.org.labos.instruments.platereader.platereaderservice.v1.GetAnIMLResult_Parameters) returns (sila2.org.labos.instruments.platereader.platereaderservice.v1.GetAnIMLResult_Responses) {}
+  /* List all available .mdfx protocol names as a JSON array. */
+  rpc ListProtocols (sila2.org.labos.instruments.platereader.platereaderservice.v1.ListProtocols_Parameters) returns (sila2.org.labos.instruments.platereader.platereaderservice.v1.ListProtocols_Responses) {}
+  /* Whether the instrument is currently connected. */
+  rpc Subscribe_IsConnected (sila2.org.labos.instruments.platereader.platereaderservice.v1.Subscribe_IsConnected_Parameters) returns (stream sila2.org.labos.instruments.platereader.platereaderservice.v1.Subscribe_IsConnected_Responses) {}
+  /* Current operational state of the instrument. */
+  rpc Subscribe_OperationalStatus (sila2.org.labos.instruments.platereader.platereaderservice.v1.Subscribe_OperationalStatus_Parameters) returns (stream sila2.org.labos.instruments.platereader.platereaderservice.v1.Subscribe_OperationalStatus_Responses) {}
+  /* Current plate temperature in degrees Celsius. */
+  rpc Subscribe_CurrentTemperature (sila2.org.labos.instruments.platereader.platereaderservice.v1.Subscribe_CurrentTemperature_Parameters) returns (stream sila2.org.labos.instruments.platereader.platereaderservice.v1.Subscribe_CurrentTemperature_Responses) {}
+  /* JSON-encoded instrument details: serial number, product name, firmware version, simulated flag. */
+  rpc Get_InstrumentInfo (sila2.org.labos.instruments.platereader.platereaderservice.v1.Get_InstrumentInfo_Parameters) returns (sila2.org.labos.instruments.platereader.platereaderservice.v1.Get_InstrumentInfo_Responses) {}
+}
+
+/* Parameters for Connect */
+message Connect_Parameters {
+  sila2.org.silastandard.String ConnectionString = 1;  /* Connection string (e.g. "usb", "sim", "last"). Empty string uses USB default. */
+}
+
+/* Responses of Connect */
+message Connect_Responses {
+}
+
+/* Parameters for Disconnect */
+message Disconnect_Parameters {
+}
+
+/* Responses of Disconnect */
+message Disconnect_Responses {
+}
+
+/* Parameters for PlateIn */
+message PlateIn_Parameters {
+}
+
+/* Responses of PlateIn */
+message PlateIn_Responses {
+}
+
+/* Parameters for PlateOut */
+message PlateOut_Parameters {
+}
+
+/* Responses of PlateOut */
+message PlateOut_Responses {
+}
+
+/* Parameters for SetTemperature */
+message SetTemperature_Parameters {
+  sila2.org.silastandard.Real TargetTemperature = 1;  /* Desired temperature in degrees Celsius. */
+}
+
+/* Responses of SetTemperature */
+message SetTemperature_Responses {
+}
+
+/* Parameters for TurnOffTemperature */
+message TurnOffTemperature_Parameters {
+}
+
+/* Responses of TurnOffTemperature */
+message TurnOffTemperature_Responses {
+}
+
+/* Parameters for RunMeasurement */
+message RunMeasurement_Parameters {
+  sila2.org.silastandard.String ProtocolFile = 1;  /* Name of the .mdfx protocol file (must exist in the Protocols directory). */
+  sila2.org.silastandard.String PlateID = 2;  /* Unique plate identifier for traceability. */
+  sila2.org.silastandard.String SampleSetID = 3;  /* Sample set identifier (used in AnIML output). */
+  sila2.org.silastandard.String PlateType = 4;  /* iControl plate type name (e.g. GRE96ft_Corning360). Empty = use protocol default. */
+}
+
+/* Responses of RunMeasurement */
+message RunMeasurement_Responses {
+  sila2.org.silastandard.String AnIMLFilePath = 1;  /* Path to the saved AnIML result file. */
+  sila2.org.silastandard.String MeasurementType = 2;  /* Type of measurement performed. */
+}
+
+/* Intermediate responses of RunMeasurement */
+message RunMeasurement_IntermediateResponses {
+  sila2.org.silastandard.Integer Progress = 1;  /* Completion percentage (0–100). */
+  sila2.org.silastandard.String StatusMessage = 2;  /* Current status description. */
+}
+
+/* Parameters for GetAnIMLResult */
+message GetAnIMLResult_Parameters {
+  sila2.org.silastandard.String PlateID = 1;  /* Plate identifier to look up. */
+}
+
+/* Responses of GetAnIMLResult */
+message GetAnIMLResult_Responses {
+  sila2.org.silastandard.String AnIMLFilePath = 1;  /* Path to the AnIML result file. */
+}
+
+/* Parameters for ListProtocols */
+message ListProtocols_Parameters {
+}
+
+/* Responses of ListProtocols */
+message ListProtocols_Responses {
+  sila2.org.silastandard.String ProtocolsJson = 1;  /* JSON array of protocol file names. */
+}
+
+/* Parameters for IsConnected */
+message Subscribe_IsConnected_Parameters {
+}
+
+/* Responses of IsConnected */
+message Subscribe_IsConnected_Responses {
+  sila2.org.silastandard.Boolean IsConnected = 1;  /* Whether the instrument is currently connected. */
+}
+
+/* Parameters for OperationalStatus */
+message Subscribe_OperationalStatus_Parameters {
+}
+
+/* Responses of OperationalStatus */
+message Subscribe_OperationalStatus_Responses {
+  sila2.org.silastandard.String OperationalStatus = 1;  /* Current operational state of the instrument. */
+}
+
+/* Parameters for CurrentTemperature */
+message Subscribe_CurrentTemperature_Parameters {
+}
+
+/* Responses of CurrentTemperature */
+message Subscribe_CurrentTemperature_Responses {
+  sila2.org.silastandard.Real CurrentTemperature = 1;  /* Current plate temperature in degrees Celsius. */
+}
+
+/* Parameters for InstrumentInfo */
+message Get_InstrumentInfo_Parameters {
+}
+
+/* Responses of InstrumentInfo */
+message Get_InstrumentInfo_Responses {
+  sila2.org.silastandard.String InstrumentInfo = 1;  /* JSON-encoded instrument details: serial number, product name, firmware version, simulated flag. */
+}

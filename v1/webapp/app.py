@@ -14,6 +14,7 @@ from typing import Dict, List
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 try:
+    from contextlib import asynccontextmanager
     from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
     from fastapi.responses import HTMLResponse, FileResponse
     from fastapi.staticfiles import StaticFiles
@@ -32,6 +33,13 @@ except (ImportError, NameError) as _err:
     logging.warning(f"LabCore not available at startup: {_err}")
     get_lab_core = None
     LAB_CORE_AVAILABLE = False
+
+try:
+    from src import database as _db
+    _DB_AVAILABLE = True
+except ImportError:
+    _db = None
+    _DB_AVAILABLE = False
 
 from webapp.models import DeviceState, AppState
 from src.config_schema import load_lab_config, validate_lab_config
@@ -131,12 +139,39 @@ def create_app() -> "FastAPI":
     if not FASTAPI_AVAILABLE:
         raise ImportError("FastAPI not installed")
 
-    app = FastAPI(title="LabOS WebApp", description="Integrated Lab Automation Platform", version="2.0.0")
-    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
-                       allow_methods=["*"], allow_headers=["*"])
-
     state = AppState()
     ws_manager = ConnectionManager()
+
+    if _DB_AVAILABLE:
+        _db.configure(BASE_DIR / "Results" / "labos.db")
+        _db.init_db()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        state.add_log("info", "LabOS WebApp started")
+        try:
+            _, validation = load_lab_config(BASE_DIR / "lab_config.yaml", apply_defaults=True, strict=True)
+            for warning in validation.warnings:
+                state.add_log("warning", f"Config warning: {warning}", "system")
+        except Exception as e:
+            state.add_log("error", f"Invalid configuration: {e}", "system")
+            raise
+        if lab_core:
+            try:
+                instruments = await lab_core.discover()
+                for inst in instruments:
+                    state.devices[inst.id] = DeviceState(
+                        id=inst.id, name=inst.name, type=inst.type,
+                        status=inst.status, host=inst.host, port=inst.port
+                    )
+                state.add_log("info", f"PnP Discovery: found {len(instruments)} instruments")
+            except Exception as e:
+                state.add_log("warning", f"Startup discovery failed: {e}")
+        yield
+
+    app = FastAPI(title="LabOS WebApp", description="Integrated Lab Automation Platform", version="2.0.0", lifespan=lifespan)
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
+                       allow_methods=["*"], allow_headers=["*"])
 
     # Shared mutable state passed to routers via closure/factory
     pending_operator_actions: list = []
@@ -298,6 +333,14 @@ def create_app() -> "FastAPI":
     async def history_page(request: Request):
         return templates.TemplateResponse("history.html", {"request": request, "title": "History"})
 
+    @app.get("/runs", response_class=HTMLResponse)
+    async def runs_page(request: Request):
+        return templates.TemplateResponse("runs.html", {"request": request, "title": "Run History"})
+
+    @app.get("/plates", response_class=HTMLResponse)
+    async def plates_page(request: Request):
+        return templates.TemplateResponse("plates.html", {"request": request, "title": "Plates"})
+
     # --------------------------------------------------------------------------
     # Settings API
     # --------------------------------------------------------------------------
@@ -414,6 +457,7 @@ def create_app() -> "FastAPI":
     from webapp.routes.workflows import create_workflows_router
     from webapp.routes.operator import create_operator_router
     from webapp.routes.hardware import create_hardware_router
+    from webapp.routes.db import create_db_router
 
     app.include_router(create_batch_router(state, LIBRARY_DIR, plate_tracking, save_plate_tracking, _plate_tracking_lock))
     app.include_router(create_plates_router(state, plate_tracking, save_plate_tracking, _plate_tracking_lock))
@@ -425,6 +469,8 @@ def create_app() -> "FastAPI":
     ))
     app.include_router(create_operator_router(state, ws_manager, lab_core, pending_operator_actions, pending_operator_actions_lock, BASE_DIR, WEBAPP_CONFIG))
     app.include_router(create_hardware_router(BASE_DIR, LIBRARY_DIR, lab_core))
+    if _DB_AVAILABLE:
+        app.include_router(create_db_router(_db))
 
     # --------------------------------------------------------------------------
     # WebSocket
@@ -440,33 +486,6 @@ def create_app() -> "FastAPI":
                     await websocket.send_text("pong")
         except WebSocketDisconnect:
             ws_manager.disconnect(websocket)
-
-    # --------------------------------------------------------------------------
-    # Startup
-    # --------------------------------------------------------------------------
-
-    @app.on_event("startup")
-    async def startup():
-        state.add_log("info", "LabOS WebApp started")
-        try:
-            _, validation = load_lab_config(BASE_DIR / "lab_config.yaml", apply_defaults=True, strict=True)
-            for warning in validation.warnings:
-                state.add_log("warning", f"Config warning: {warning}", "system")
-        except Exception as e:
-            state.add_log("error", f"Invalid configuration: {e}", "system")
-            raise
-
-        if lab_core:
-            try:
-                instruments = await lab_core.discover()
-                for inst in instruments:
-                    state.devices[inst.id] = DeviceState(
-                        id=inst.id, name=inst.name, type=inst.type,
-                        status=inst.status, host=inst.host, port=inst.port
-                    )
-                state.add_log("info", f"PnP Discovery: found {len(instruments)} instruments")
-            except Exception as e:
-                state.add_log("warning", f"Startup discovery failed: {e}")
 
     return app
 

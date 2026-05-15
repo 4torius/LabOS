@@ -983,8 +983,8 @@ async function loadDropdownConfig() {
         LOCATIONS = ['opentrons', 'tecan', 'mobile', 'manual_station'];
         LABWARE_TYPES = ['corning_96_wellplate_360ul_flat', 'corning_384_wellplate_112ul_flat'];
         TIP_RACK_TYPES = ['opentrons_flex_96_tiprack_1000ul', 'opentrons_flex_96_tiprack_200ul', 'opentrons_flex_96_tiprack_50ul'];
-        PRIORITY_OPTIONS = ['normal', 'high', 'urgent'];
-        TASK_TYPE_OPTIONS = ['preparation', 'verification', 'maintenance', 'quality_check'];
+        PRIORITY_OPTIONS = ['low', 'normal', 'high', 'urgent'];
+        TASK_TYPE_OPTIONS = ['manual_operation', 'tip_refill', 'quality_check', 'sample_prep', 'custom'];
     }
 }
 
@@ -1399,7 +1399,19 @@ function renderProperties() {
             html += '<div class="property-group">' + '<label>' + displayName + '</label>';
             
             // Check ui_hint first, then check for known parameter types
-            if (uiHint === 'recipe' || RECIPE_PARAMS.indexOf(paramLower) !== -1) {
+            // Constrained SiLA2 params carry their own options list from the API
+            if (paramObj.options && paramObj.options.length > 0 &&
+                    uiHint !== 'recipe' && uiHint !== 'protocol' && uiHint !== 'hal_config' &&
+                    uiHint !== 'location' && uiHint !== 'labware' && uiHint !== 'tip_rack' &&
+                    uiHint !== 'liquid_class' && uiHint !== 'mobile_task') {
+                html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
+                html += '<option value="">-- Select --</option>';
+                for (var oi = 0; oi < paramObj.options.length; oi++) {
+                    var opt = paramObj.options[oi];
+                    html += '<option value="' + opt + '"' + (currentValue === opt ? ' selected' : '') + '>' + opt.replace(/_/g, ' ') + '</option>';
+                }
+                html += '</select>';
+            } else if (uiHint === 'recipe' || RECIPE_PARAMS.indexOf(paramLower) !== -1) {
                 // Recipe dropdown
                 html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
                 html += '<option value="">-- Select Recipe --</option>';

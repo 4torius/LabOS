@@ -60,7 +60,7 @@ def _load_discovery_config() -> Dict[str, Any]:
     defaults = {
         "enabled": True,
         "scan_interval": 30,
-        "service_type": "_sila2._tcp.local."
+        "service_type": "_sila._tcp.local.",  # sila2 library standard (was _sila2._tcp.local.)
     }
     try:
         config, _ = load_lab_config(config_path, apply_defaults=False, strict=False)
@@ -111,8 +111,11 @@ class PnPParameter:
         if any(x in name_lower for x in ['liquidclass', 'liquid_class']):
             return 'liquid_class'
         
-        # Locations/stations
-        if any(x in name_lower for x in ['source', 'destination', 'location', 'station', 'from', 'to']):
+        # Locations/stations — exclude compound names like "SourceInstrument" that are free-text
+        _loc_kw = ['source', 'destination', 'location', 'station', 'from', 'to']
+        _loc_excl = ['instrument', 'name', 'type', 'file', 'class', 'id']
+        if (any(x in name_lower for x in _loc_kw)
+                and not any(ex in name_lower for ex in _loc_excl)):
             return 'location'
         
         # Tip rack types (specific for RefillTipRack command)
@@ -917,7 +920,7 @@ class PnPDiscovery:
         known_ports = {s.port for s in self.servers.values() if s.port > 0}
         
         # Also check a few common additional ports quickly
-        additional_ports = {50054, 50055, 50056}  # Potential new servers
+        additional_ports = {50054, 50056}  # Potential new servers (50055 is reserved for Tecan internal bridge)
         ports_to_check = known_ports | additional_ports
         
         # Check ports sequentially with gRPC verification
@@ -980,6 +983,98 @@ class PnPDiscovery:
             self.servers[server_key] = server
             logger.info(f"Discovered from port scan: {server.name}")
     
+    def _try_sila2_client_query(self, host: str, port: int, server: PnPServer) -> bool:
+        """
+        Query server metadata via the sila2 standard SilaClient (synchronous).
+
+        Uses SiLAService standard properties (ServerName, ServerType, ImplementedFeatures, etc.)
+        rather than the old custom SiLA2Common_pb2 stubs.  Falls back silently if the sila2
+        library is not available or the server does not respond.
+
+        Returns True if at least the server name was successfully retrieved.
+        """
+        try:
+            import io
+            import xml.etree.ElementTree as ET
+
+            from src.client import get_shared_sila_client  # noqa: PLC0415
+
+            client = get_shared_sila_client(host, port)
+            if client is None:
+                return False
+
+            # ── Server identity ────────────────────────────────────────────
+            try:
+                name = client.SiLAService.ServerName.get()
+                if name:
+                    server.name = name
+            except Exception:
+                pass
+            try:
+                srv_type = client.SiLAService.ServerType.get()
+                if srv_type:
+                    server.server_type = srv_type
+            except Exception:
+                pass
+            try:
+                desc = client.SiLAService.ServerDescription.get()
+                if desc:
+                    server.description = desc
+            except Exception:
+                pass
+            try:
+                vendor = client.SiLAService.ServerVendorURL.get()
+                if vendor:
+                    server.vendor = str(vendor)
+            except Exception:
+                pass
+            try:
+                ver = client.SiLAService.ServerVersion.get()
+                if ver:
+                    server.version = str(ver)
+            except Exception:
+                pass
+            try:
+                uuid_val = client.SiLAService.ServerUUID.get()
+                if uuid_val:
+                    server.uuid = str(uuid_val)
+            except Exception:
+                pass
+
+            # ── Feature definitions ────────────────────────────────────────
+            sila_features = []
+            try:
+                feature_ids = client.SiLAService.ImplementedFeatures.get()
+                for fid in feature_ids:
+                    try:
+                        result = client.SiLAService.GetFeatureDefinition(fid)
+                        xml_str = result.FeatureDefinition
+                        root = ET.parse(io.StringIO(xml_str)).getroot()
+                        feature = self.xml_parser._parse_feature(root)
+                        if feature:
+                            sila_features.append(feature)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            if sila_features:
+                server.features = sila_features
+
+            server.server_online = True
+            server.hardware_online = True
+            if server.hardware_status in ("unknown", "offline"):
+                server.hardware_status = "idle"
+
+            logger.info(
+                "sila2 query OK: %s (%s) — %d feature(s)", server.name, server.server_type, len(sila_features)
+            )
+            return True
+
+        except Exception as exc:
+            logger.debug("sila2 client query failed for %s:%d: %s", host, port, exc)
+            return False
+
     async def _query_server_metadata(self, timeout: float = 2.0):
         """
         Query each online server for its metadata via SiLA2Common service.
@@ -1008,12 +1103,20 @@ class PnPDiscovery:
     
     async def _query_server_info(self, server: PnPServer, timeout: float):
         """
-        Query server via SiLA2Common.GetServerInfo and GetStatus.
-        Falls back to GetFeatures if server info not available.
+        Query server via sila2 SilaClient (preferred) or legacy SiLA2Common stubs (fallback).
         """
         if not GRPC_AVAILABLE:
             return
-        
+
+        # Strategy 1: sila2 standard SilaClient (works with all sila2-library servers)
+        loop = asyncio.get_event_loop()
+        ok = await loop.run_in_executor(
+            None, self._try_sila2_client_query, server.host, server.port, server
+        )
+        if ok:
+            return
+
+        # Strategy 2: legacy SiLA2Common_pb2 stubs (old custom-gRPC servers)
         try:
             # Try to import generated stubs for SiLA2Common
             HAS_COMMON_STUBS = False

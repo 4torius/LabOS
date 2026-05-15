@@ -1,0 +1,219 @@
+syntax = "proto3";
+
+import "SiLAFramework.proto";
+
+package sila2.org.labos.workflow.workflowapi.v1;
+
+/* Simplified workflow-level API for Opentrons Flex robot. 5 feature groups, 17 total commands. Low-level commands (Transfer, Aspirate, etc.) are internal to recipes. */
+service WorkflowAPI {
+  /* Initialize connection to the robot and verify it's ready. */
+  rpc Initialize (sila2.org.labos.workflow.workflowapi.v1.Initialize_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.Initialize_Responses) {}
+  /* Home all robot axes to their default positions. */
+  rpc Home (sila2.org.labos.workflow.workflowapi.v1.Home_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
+  /* Monitor the state of Home */
+  rpc Home_Info (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.ExecutionInfo) {}
+  /* Retrieve result of Home */
+  rpc Home_Result(sila2.org.silastandard.CommandExecutionUUID) returns (sila2.org.labos.workflow.workflowapi.v1.Home_Responses) {}
+  /* Immediately stop all robot operations. */
+  rpc EmergencyStop (sila2.org.labos.workflow.workflowapi.v1.EmergencyStop_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.EmergencyStop_Responses) {}
+  /* Get current robot status including active run information. */
+  rpc GetStatus (sila2.org.labos.workflow.workflowapi.v1.GetStatus_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.GetStatus_Responses) {}
+  /* List available HAL hardware configurations. */
+  rpc ListHardwareConfigs (sila2.org.labos.workflow.workflowapi.v1.ListHardwareConfigs_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.ListHardwareConfigs_Responses) {}
+  /* Load a hardware configuration (HAL) defining deck layout. */
+  rpc LoadHardwareConfig (sila2.org.labos.workflow.workflowapi.v1.LoadHardwareConfig_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.LoadHardwareConfig_Responses) {}
+  /* Get the currently loaded HAL configuration. */
+  rpc GetCurrentConfig (sila2.org.labos.workflow.workflowapi.v1.GetCurrentConfig_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.GetCurrentConfig_Responses) {}
+  /* List available JSON recipe files. */
+  rpc ListRecipes (sila2.org.labos.workflow.workflowapi.v1.ListRecipes_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.ListRecipes_Responses) {}
+  /* Execute a JSON recipe file on the robot. */
+  rpc ExecuteRecipe (sila2.org.labos.workflow.workflowapi.v1.ExecuteRecipe_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
+  /* Monitor the state of ExecuteRecipe */
+  rpc ExecuteRecipe_Info (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.ExecutionInfo) {}
+  /* Retrieve result of ExecuteRecipe */
+  rpc ExecuteRecipe_Result(sila2.org.silastandard.CommandExecutionUUID) returns (sila2.org.labos.workflow.workflowapi.v1.ExecuteRecipe_Responses) {}
+  /* Pause the currently executing recipe. */
+  rpc PauseRun (sila2.org.labos.workflow.workflowapi.v1.PauseRun_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.PauseRun_Responses) {}
+  /* Resume a paused recipe. */
+  rpc ResumeRun (sila2.org.labos.workflow.workflowapi.v1.ResumeRun_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.ResumeRun_Responses) {}
+  /* Abort the current recipe execution. */
+  rpc AbortRun (sila2.org.labos.workflow.workflowapi.v1.AbortRun_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.AbortRun_Responses) {}
+  /* List all tip racks with current usage statistics. */
+  rpc ListTipRacks (sila2.org.labos.workflow.workflowapi.v1.ListTipRacks_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.ListTipRacks_Responses) {}
+  /* Mark a tip rack as refilled/replaced. */
+  rpc RefillTipRack (sila2.org.labos.workflow.workflowapi.v1.RefillTipRack_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.RefillTipRack_Responses) {}
+  /* Reset all tip tracking counters to full. */
+  rpc ResetTipTracking (sila2.org.labos.workflow.workflowapi.v1.ResetTipTracking_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.ResetTipTracking_Responses) {}
+  /* Turn deck lights on or off. */
+  rpc SetLights (sila2.org.labos.workflow.workflowapi.v1.SetLights_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.SetLights_Responses) {}
+  /* Get robot model, serial number, firmware version. */
+  rpc GetRobotInfo (sila2.org.labos.workflow.workflowapi.v1.GetRobotInfo_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.GetRobotInfo_Responses) {}
+  /* Get status of all attached modules (heater/shaker, thermocycler, etc.). */
+  rpc GetModulesStatus (sila2.org.labos.workflow.workflowapi.v1.GetModulesStatus_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.GetModulesStatus_Responses) {}
+}
+
+/* Parameters for Initialize */
+message Initialize_Parameters {
+}
+
+/* Responses of Initialize */
+message Initialize_Responses {
+  sila2.org.silastandard.String InitializeResult = 1;  /* Status message with robot serial number. */
+}
+
+/* Parameters for Home */
+message Home_Parameters {
+}
+
+/* Responses of Home */
+message Home_Responses {
+  sila2.org.silastandard.String HomeResult = 1;  /* Status after homing. */
+}
+
+/* Parameters for EmergencyStop */
+message EmergencyStop_Parameters {
+}
+
+/* Responses of EmergencyStop */
+message EmergencyStop_Responses {
+  sila2.org.silastandard.String StopResult = 1;  /* Confirmation of emergency stop. */
+}
+
+/* Parameters for GetStatus */
+message GetStatus_Parameters {
+}
+
+/* Responses of GetStatus */
+message GetStatus_Responses {
+  sila2.org.silastandard.String StatusResult = 1;  /* Robot status as JSON. */
+}
+
+/* Parameters for ListHardwareConfigs */
+message ListHardwareConfigs_Parameters {
+}
+
+/* Responses of ListHardwareConfigs */
+message ListHardwareConfigs_Responses {
+  sila2.org.silastandard.String ConfigList = 1;  /* JSON array of available configurations. */
+}
+
+/* Parameters for LoadHardwareConfig */
+message LoadHardwareConfig_Parameters {
+  sila2.org.silastandard.String ConfigName = 1;  /* Name of the HAL config file (without .yaml extension). */
+}
+
+/* Responses of LoadHardwareConfig */
+message LoadHardwareConfig_Responses {
+  sila2.org.silastandard.String LoadResult = 1;  /* Loaded configuration details. */
+}
+
+/* Parameters for GetCurrentConfig */
+message GetCurrentConfig_Parameters {
+}
+
+/* Responses of GetCurrentConfig */
+message GetCurrentConfig_Responses {
+  sila2.org.silastandard.String CurrentConfig = 1;  /* Currently loaded configuration as JSON. */
+}
+
+/* Parameters for ListRecipes */
+message ListRecipes_Parameters {
+}
+
+/* Responses of ListRecipes */
+message ListRecipes_Responses {
+  sila2.org.silastandard.String RecipeList = 1;  /* JSON array of recipe names. */
+}
+
+/* Parameters for ExecuteRecipe */
+message ExecuteRecipe_Parameters {
+  sila2.org.silastandard.String RecipeName = 1;  /* Name of the recipe file (without .json extension). */
+}
+
+/* Responses of ExecuteRecipe */
+message ExecuteRecipe_Responses {
+  sila2.org.silastandard.String RunId = 1;  /* ID of the started run for tracking. */
+}
+
+/* Parameters for PauseRun */
+message PauseRun_Parameters {
+}
+
+/* Responses of PauseRun */
+message PauseRun_Responses {
+  sila2.org.silastandard.String PauseResult = 1;  /* Confirmation of pause. */
+}
+
+/* Parameters for ResumeRun */
+message ResumeRun_Parameters {
+}
+
+/* Responses of ResumeRun */
+message ResumeRun_Responses {
+  sila2.org.silastandard.String ResumeResult = 1;  /* Confirmation of resume. */
+}
+
+/* Parameters for AbortRun */
+message AbortRun_Parameters {
+}
+
+/* Responses of AbortRun */
+message AbortRun_Responses {
+  sila2.org.silastandard.String AbortResult = 1;  /* Confirmation of abort. */
+}
+
+/* Parameters for ListTipRacks */
+message ListTipRacks_Parameters {
+}
+
+/* Responses of ListTipRacks */
+message ListTipRacks_Responses {
+  sila2.org.silastandard.String TipRackList = 1;  /* JSON array of tip rack info with usage counts. */
+}
+
+/* Parameters for RefillTipRack */
+message RefillTipRack_Parameters {
+  sila2.org.silastandard.String RackSlot = 1;  /* Slot where the tip rack is located (e.g., 'A1', 'B2'). */
+}
+
+/* Responses of RefillTipRack */
+message RefillTipRack_Responses {
+  sila2.org.silastandard.String RefillResult = 1;  /* Confirmation and new tip count. */
+}
+
+/* Parameters for ResetTipTracking */
+message ResetTipTracking_Parameters {
+}
+
+/* Responses of ResetTipTracking */
+message ResetTipTracking_Responses {
+  sila2.org.silastandard.String ResetResult = 1;  /* Confirmation of reset. */
+}
+
+/* Parameters for SetLights */
+message SetLights_Parameters {
+  sila2.org.silastandard.Boolean On = 1;  /* True to turn lights on, false to turn off. */
+}
+
+/* Responses of SetLights */
+message SetLights_Responses {
+  sila2.org.silastandard.String LightsResult = 1;  /* Current light state. */
+}
+
+/* Parameters for GetRobotInfo */
+message GetRobotInfo_Parameters {
+}
+
+/* Responses of GetRobotInfo */
+message GetRobotInfo_Responses {
+  sila2.org.silastandard.String RobotInfo = 1;  /* Robot details as JSON. */
+}
+
+/* Parameters for GetModulesStatus */
+message GetModulesStatus_Parameters {
+}
+
+/* Responses of GetModulesStatus */
+message GetModulesStatus_Responses {
+  sila2.org.silastandard.String ModulesStatus = 1;  /* Modules status as JSON array. */
+}

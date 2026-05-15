@@ -134,13 +134,12 @@ def validate_lab_config(config: Dict[str, Any]) -> ConfigValidationResult:
         cmd_unix = server_cfg.get("command_unix")
 
         if not remote:
-            if not isinstance(cmd_win, list) or not cmd_win:
+            has_win = isinstance(cmd_win, list) and bool(cmd_win)
+            has_unix = isinstance(cmd_unix, list) and bool(cmd_unix)
+            if not has_win and not has_unix:
                 result.errors.append(
-                    f"servers.{server_key}.command_windows must be a non-empty list for local servers"
-                )
-            if not isinstance(cmd_unix, list) or not cmd_unix:
-                result.errors.append(
-                    f"servers.{server_key}.command_unix must be a non-empty list for local servers"
+                    f"servers.{server_key}: at least one of command_windows or command_unix "
+                    f"must be a non-empty list for local servers"
                 )
         else:
             if (cmd_win and isinstance(cmd_win, list)) or (cmd_unix and isinstance(cmd_unix, list)):

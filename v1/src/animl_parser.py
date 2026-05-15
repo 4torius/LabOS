@@ -120,15 +120,58 @@ def _parse_step(step_el) -> Optional[Dict[str, Any]]:
             'std': round((sum((v - mean) ** 2 for v in valid) / len(valid)) ** 0.5, 6),
         }
 
+    # Infer measurement type from technique name
+    tech_lower = technique.lower()
+    if 'fluorescence' in tech_lower or 'fluo' in tech_lower:
+        measurement_type = 'Fluorescence'
+    elif 'luminescence' in tech_lower or 'lumin' in tech_lower:
+        measurement_type = 'Luminescence'
+    elif 'absorbance' in tech_lower or 'abs' in tech_lower:
+        measurement_type = 'Absorbance'
+    else:
+        measurement_type = 'Unknown'
+
+    # Extract wavelength(s) from parameter dict using common Tecan parameter names
+    wavelength_nm = _extract_param(parameters, (
+        'Wavelength', 'wavelength', 'Wavelength [nm]', 'Detection Wavelength',
+        'Absorbance Wavelength', 'Measurement Wavelength',
+    ))
+    excitation_nm = _extract_param(parameters, (
+        'Excitation Wavelength', 'Excitation', 'Ex Wavelength', 'ExcitationWavelength',
+    ))
+    emission_nm = _extract_param(parameters, (
+        'Emission Wavelength', 'Emission', 'Em Wavelength', 'EmissionWavelength',
+    ))
+    # For absorbance, wavelength_nm is the single wavelength
+    # For fluorescence, prefer excitation/emission pair; fall back to the first found
+    if measurement_type == 'Fluorescence' and not wavelength_nm:
+        wavelength_nm = excitation_nm  # convenience alias
+
     return {
         'step_name': step_name,
         'technique': technique,
+        'measurement_type': measurement_type,
+        'wavelength_nm': wavelength_nm,
+        'excitation_nm': excitation_nm,
+        'emission_nm': emission_nm,
         'parameters': parameters,
         'measurements': measurements,
         'value_series': value_series_name,
         'unit': unit_label,
         'statistics': statistics,
     }
+
+
+def _extract_param(parameters: Dict[str, Any], names: tuple) -> Optional[float]:
+    """Return the first numeric value found among candidate parameter names."""
+    for name in names:
+        val = parameters.get(name)
+        if val is not None:
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                pass
+    return None
 
 
 def _read_scalar(param_el) -> Optional[Any]:

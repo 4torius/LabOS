@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<style>
+.stat-card { border-left: 3px solid var(--labos-primary); }
+.run-row { cursor: pointer; }
+.run-row:hover { background: rgba(102,126,234,0.08); }
+.badge-completed { background: #198754; }
+.badge-failed    { background: #dc3545; }
+.badge-cancelled { background: #6c757d; }
+.badge-running   { background: #0dcaf0; color: #000; }
+.step-row td { font-size: 0.85rem; padding: 4px 8px; }
+.step-ok   { color: #198754; }
+.step-fail { color: #dc3545; }
+.step-skip { color: #6c757d; }
+.detail-panel { display: none; background: var(--bs-body-bg); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-database"></i> Run History</h2>
+        <div class="d-flex gap-2">
+            <select class="form-select form-select-sm" id="filterStatus" style="width:140px" onchange="loadRuns()">
+                <option value="">All status</option>
+                <option value="completed">Completed</option>
+                <option value="failed">Failed</option>
+                <option value="cancelled">Cancelled</option>
+            </select>
+            <button class="btn btn-sm btn-outline-secondary" onclick="loadRuns()">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Stats row -->
+    <div class="row g-3 mb-4" id="statsRow">
+        <div class="col-6 col-md-2">
+            <div class="card stat-card h-100">
+                <div class="card-body py-2">
+                    <div class="text-muted small">Total runs</div>
+                    <div class="fs-4 fw-bold" id="statTotal">—</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-2">
+            <div class="card stat-card h-100" style="border-color:#198754">
+                <div class="card-body py-2">
+                    <div class="text-muted small">Completed</div>
+                    <div class="fs-4 fw-bold text-success" id="statCompleted">—</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-2">
+            <div class="card stat-card h-100" style="border-color:#dc3545">
+                <div class="card-body py-2">
+                    <div class="text-muted small">Failed</div>
+                    <div class="fs-4 fw-bold text-danger" id="statFailed">—</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-2">
+            <div class="card stat-card h-100" style="border-color:#ffc107">
+                <div class="card-body py-2">
+                    <div class="text-muted small">Avg duration</div>
+                    <div class="fs-4 fw-bold" id="statAvgDur">—</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-4">
+            <div class="card stat-card h-100" style="border-color:#0dcaf0">
+                <div class="card-body py-2">
+                    <div class="text-muted small">Last run</div>
+                    <div class="fs-6" id="statLastRun">—</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Run table -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-list-ul"></i> Workflow Runs</span>
+            <small class="text-muted" id="runsCount"></small>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th style="width:30px"></th>
+                            <th>Workflow</th>
+                            <th>Started</th>
+                            <th>Status</th>
+                            <th>Duration</th>
+                            <th>Steps</th>
+                            <th>Run ID</th>
+                        </tr>
+                    </thead>
+                    <tbody id="runsTable">
+                        <tr><td colspan="7" class="text-center text-muted py-4">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card-footer d-flex justify-content-between align-items-center">
+            <button class="btn btn-sm btn-outline-secondary" id="btnPrev" onclick="changePage(-1)" disabled>
+                <i class="bi bi-chevron-left"></i> Prev
+            </button>
+            <small class="text-muted" id="pageInfo">Page 1</small>
+            <button class="btn btn-sm btn-outline-secondary" id="btnNext" onclick="changePage(1)">
+                Next <i class="bi bi-chevron-right"></i>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Detail modal -->
+<div class="modal fade" id="detailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="detailTitle">Run details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="detailBody">
+                <div class="text-center text-muted py-4">Loading...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const PAGE_SIZE = 25;
+let currentPage = 0;
+let totalCount = 0;
+
+function fmtDuration(s) {
+    if (s == null) return '—';
+    s = parseFloat(s);
+    if (s < 60) return s.toFixed(1) + 's';
+    var m = Math.floor(s / 60), sec = Math.round(s % 60);
+    return m + 'm ' + sec + 's';
+}
+
+function fmtDate(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleString('it-IT', {dateStyle:'short', timeStyle:'short'}); }
+    catch { return iso.slice(0,16).replace('T', ' '); }
+}
+
+function statusBadge(s) {
+    const cls = {completed:'badge-completed', failed:'badge-failed', cancelled:'badge-cancelled', running:'badge-running'};
+    return `<span class="badge ${cls[s]||'bg-secondary'}">${s||'—'}</span>`;
+}
+
+async function loadStats() {
+    try {
+        const r = await fetch('/api/db/stats');
+        if (!r.ok) return;
+        const d = await r.json();
+        document.getElementById('statTotal').textContent     = d.total_runs ?? '—';
+        document.getElementById('statCompleted').textContent = d.completed  ?? '—';
+        document.getElementById('statFailed').textContent    = d.failed     ?? '—';
+        document.getElementById('statAvgDur').textContent    = fmtDuration(d.avg_duration_seconds);
+        document.getElementById('statLastRun').textContent   = fmtDate(d.last_run_at);
+    } catch(e) { console.warn('stats error', e); }
+}
+
+async function loadRuns() {
+    const status   = document.getElementById('filterStatus').value;
+    const offset   = currentPage * PAGE_SIZE;
+    let url = `/api/db/runs?limit=${PAGE_SIZE}&offset=${offset}`;
+    if (status) url += `&status=${encodeURIComponent(status)}`;
+
+    const tbody = document.getElementById('runsTable');
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div></td></tr>';
+
+    try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        totalCount = d.count;
+
+        document.getElementById('runsCount').textContent = `${d.count} run${d.count!==1?'s':''}`;
+        document.getElementById('pageInfo').textContent  = `Page ${currentPage+1} of ${Math.max(1, Math.ceil(totalCount/PAGE_SIZE))}`;
+        document.getElementById('btnPrev').disabled = currentPage === 0;
+        document.getElementById('btnNext').disabled = (offset + PAGE_SIZE) >= totalCount;
+
+        if (!d.runs || d.runs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No runs found</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = d.runs.map(run => {
+            const steps = run.steps_completed + (run.steps_failed||0);
+            const total = run.steps_total || '?';
+            const failTxt = run.steps_failed ? ` <span class="text-danger">(${run.steps_failed} failed)</span>` : '';
+            return `<tr class="run-row" onclick="showDetail('${run.run_id}')">
+                <td><i class="bi bi-chevron-right text-muted small"></i></td>
+                <td><strong>${run.workflow_name||'—'}</strong></td>
+                <td class="text-nowrap">${fmtDate(run.started_at)}</td>
+                <td>${statusBadge(run.status)}</td>
+                <td>${fmtDuration(run.duration_seconds)}</td>
+                <td>${run.steps_completed||0}/${total}${failTxt}</td>
+                <td class="text-muted small" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                    title="${run.run_id}">${run.run_id}</td>
+            </tr>`;
+        }).join('');
+    } catch(e) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-4">${e.message}</td></tr>`;
+    }
+}
+
+async function showDetail(runId) {
+    const modal = new bootstrap.Modal(document.getElementById('detailModal'));
+    document.getElementById('detailTitle').textContent = 'Run: ' + runId;
+    document.getElementById('detailBody').innerHTML = '<div class="text-center py-4"><div class="spinner-border"></div></div>';
+    modal.show();
+
+    try {
+        const r = await fetch(`/api/db/runs/${encodeURIComponent(runId)}`);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        const result = d.result || {};
+        const stepResults = result.step_results || [];
+        const measurements = d.measurements || [];
+
+        let html = `
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-md-3"><div class="text-muted small">Status</div>${statusBadge(d.status)}</div>
+            <div class="col-6 col-md-3"><div class="text-muted small">Duration</div>${fmtDuration(d.duration_seconds)}</div>
+            <div class="col-6 col-md-3"><div class="text-muted small">Steps</div>${d.steps_completed||0}/${d.steps_total||'?'}</div>
+            <div class="col-6 col-md-3"><div class="text-muted small">Started</div>${fmtDate(d.started_at)}</div>
+        </div>`;
+
+        if (stepResults.length > 0) {
+            html += `<h6 class="mt-3">Steps</h6>
+            <div class="table-responsive"><table class="table table-sm">
+            <thead><tr><th>#</th><th>Instrument</th><th>Action</th><th>Status</th><th>Time</th></tr></thead>
+            <tbody>` + stepResults.map(s => {
+                const iconCls = s.status==='completed'?'step-ok':s.status==='skipped'?'step-skip':'step-fail';
+                const icon = s.status==='completed'?'check-circle':s.status==='skipped'?'skip-forward':'x-circle';
+                return `<tr class="step-row">
+                    <td>${s.step||'—'}</td>
+                    <td>${s.instrument||'—'}</td>
+                    <td>${s.action||s.command||'—'}</td>
+                    <td class="${iconCls}"><i class="bi bi-${icon}"></i> ${s.status||'—'}${s.error?`<br><small class="text-danger">${s.error}</small>`:''}</td>
+                    <td class="text-nowrap text-muted small">${s.timestamp?fmtDate(s.timestamp):''}</td>
+                </tr>`;
+            }).join('') + `</tbody></table></div>`;
+        }
+
+        if (measurements.length > 0) {
+            html += `<h6 class="mt-3">Measurements (Tecan)</h6>
+            <div class="table-responsive"><table class="table table-sm">
+            <thead><tr><th>Instrument</th><th>Command</th><th>Time</th><th>AnIML</th></tr></thead>
+            <tbody>` + measurements.map(m => {
+                const animlLink = m.animl_path
+                    ? `<a href="/api/results/AnIML/${encodeURIComponent(m.animl_path.split(/[\\/]/).pop())}" class="btn btn-xs btn-outline-primary btn-sm py-0 px-1" download><i class="bi bi-download"></i></a>`
+                    : '<span class="text-muted">—</span>';
+                return `<tr><td>${m.instrument||'—'}</td><td>${m.command||'—'}</td>
+                    <td class="text-muted small">${fmtDate(m.executed_at)}</td><td>${animlLink}</td></tr>`;
+            }).join('') + `</tbody></table></div>`;
+        }
+
+        if (result.errors && result.errors.length > 0) {
+            html += `<h6 class="mt-3 text-danger">Errors</h6><ul class="list-unstyled">` +
+                result.errors.map(e => `<li><i class="bi bi-exclamation-triangle text-danger"></i> ${e}</li>`).join('') + `</ul>`;
+        }
+
+        document.getElementById('detailBody').innerHTML = html;
+    } catch(e) {
+        document.getElementById('detailBody').innerHTML = `<div class="text-danger text-center py-4">${e.message}</div>`;
+    }
+}
+
+function changePage(dir) {
+    currentPage = Math.max(0, currentPage + dir);
+    loadRuns();
+}
+
+window.handleWebSocketMessage = window.handleWebSocketMessage || function(){};
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadStats();
+    loadRuns();
+});
+</script>
+{% endblock %}

@@ -211,7 +211,7 @@ class LabCore:
 
         # Discovery cache: avoid re-running gRPC discovery on every API call
         self._last_discovery_time: float = 0.0
-        self._discovery_cache_ttl: float = 10.0  # seconds
+        self._discovery_cache_ttl: float = 30.0  # seconds
         
         # Load config
         self._load_config()
@@ -535,12 +535,25 @@ class LabCore:
 
         self._discovery = PnPDiscovery(self.base_dir)
         await self._discovery.discover_all(timeout=timeout)
-        
+
         self._instruments = {}
-        
+
+        # Build port → config key map so instruments keep stable IDs across renames
+        _port_to_key: Dict[int, str] = {}
+        try:
+            import yaml as _yaml
+            _cfg_raw = _yaml.safe_load((self.base_dir / "lab_config.yaml").read_text())
+            for _k, _v in (_cfg_raw or {}).get("servers", {}).items():
+                _p = int((_v or {}).get("port", 0))
+                if _p:
+                    _port_to_key[_p] = _k
+        except Exception:
+            pass
+
         for server in self._discovery.list_servers():
-            # Create instrument ID
-            inst_id = server.name.lower().replace(" ", "_")
+            # Prefer the lab_config key (stable across SiLA2 server name changes);
+            # fall back to normalised server name for servers not in config.
+            inst_id = _port_to_key.get(server.port) or server.name.lower().replace(" ", "_")
             
             # All commands from GetFeatures are shown (no important_commands filter)
             

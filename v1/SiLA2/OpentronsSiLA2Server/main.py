@@ -1,113 +1,142 @@
 #!/usr/bin/env python3
 """
-OpentronsSiLA2Server - Main Entry Point
-=======================================
+OpentronsSiLA2Server - Main Entry Point (sila2 standard library)
+================================================================
 
-Start the SiLA2 server for Opentrons Flex robot control.
+Starts the SiLA2-compliant server for the Opentrons Flex liquid handler.
+Uses the official sila2 Python library (v0.14+) instead of raw gRPC.
 
 Usage:
-    python main.py                  # Start with default config
-    python main.py --config other.yaml  # Start with custom config
-    python main.py --test           # Run connection test
+    python main.py                       # default config.yaml, insecure
+    python main.py --config other.yaml
+    python main.py --port 50058          # override port
+    python main.py --secure              # enable TLS (self-signed cert generated)
 """
 
 import argparse
-import asyncio
-import sys
+import contextlib
+import logging
 import os
+import signal
+import sys
+from pathlib import Path
+from uuid import UUID, uuid4
 
-# Ensure src is in path
+# Add server root to sys.path so that absolute imports work for both
+# "generated.*" and "src.*" packages.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src import OpentronsSiLA2Server, ServerConfig
+from sila2.server import SilaServer
+
+from generated.workflowapi import WorkflowAPIFeature
 
 
-def print_banner():
-    """Print startup banner."""
+def _get_persistent_uuid(server_dir: str) -> UUID:
+    uuid_file = Path(server_dir) / ".server_uuid"
+    if uuid_file.exists():
+        return UUID(uuid_file.read_text().strip())
+    new_uuid = uuid4()
+    uuid_file.write_text(str(new_uuid))
+    return new_uuid
+from src.config import ServerConfig
+from src.workflow_api_impl import WorkflowAPIImpl
+
+
+class _SuppressSubscriptionManagerLogs(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not record.name.startswith("SubscriptionManagerThread")
+
+
+def _print_banner(config: ServerConfig) -> None:
     print()
-    print("╔══════════════════════════════════════════════════════════╗")
-    print("║           OPENTRONS SiLA2 SERVER                         ║")
-    print("║           Python Implementation v1.0.0                   ║")
-    print("╚══════════════════════════════════════════════════════════╝")
+    print("=" * 60)
+    print("  OPENTRONS SiLA2 SERVER  -  sila2 standard library")
+    print("=" * 60)
+    print(f"  Server : {config.host}:{config.port}")
+    print(f"  Robot  : {config.robot_ip}:{config.robot_port}")
     print()
 
 
-async def run_server(config_path: str):
-    """Run the SiLA2 server."""
-    print_banner()
-    
-    # Load configuration
-    print(f"Loading config: {config_path}")
-    config = ServerConfig(config_path)
-    
-    # Validate
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="OpentronsSiLA2Server — SiLA2 standard library server"
+    )
+    parser.add_argument("--config", "-c", default="config.yaml")
+    parser.add_argument("--port", "-p", type=int, default=None)
+    parser.add_argument(
+        "--secure",
+        action="store_true",
+        default=False,
+        help="Enable TLS (auto-generates a self-signed certificate)",
+    )
+    parser.add_argument(
+        "--no-discovery",
+        action="store_true",
+        default=False,
+        help="Disable mDNS/DNS-SD auto-discovery",
+    )
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    for handler in logging.root.handlers:
+        handler.addFilter(_SuppressSubscriptionManagerLogs())
+
+    config = ServerConfig(args.config)
     is_valid, error = config.validate()
     if not is_valid:
-        print(f"❌ Configuration error: {error}")
+        print(f"Configuration error: {error}")
         return 1
-    
-    print(f"  Server:  {config.host}:{config.port}")
-    print(f"  Robot:   {config.robot_ip}:{config.robot_port}")
-    print(f"  HAL:     {config.hardware_config_folder}")
-    print()
-    
-    # Create and run server
-    server = OpentronsSiLA2Server(config)
-    
-    try:
-        await server.start()
-        return 0
-    except KeyboardInterrupt:
-        print("\n⚠️  Shutdown requested...")
-        return 0
-    except Exception as e:
-        print(f"❌ Server error: {e}")
-        return 1
-    finally:
-        await server.stop()
 
+    if args.port:
+        config.port = args.port
 
-async def run_test():
-    """Run connection test."""
-    from tests.test_connection import test_robot_connection
-    
-    print_banner()
-    print("Running connection test...\n")
-    
-    # Load config for parameters
-    config = ServerConfig("config.yaml")
-    
-    success = await test_robot_connection(
-        host=config.robot_ip,
-        port=config.robot_port,
-        local_address=config.robot_local_address or ""
-    )
-    
-    return 0 if success else 1
+    _print_banner(config)
 
+    # ── Build the SiLA2 standard server ──────────────────────────────────────
+    sila_server = SilaServer(
+        server_name="OpentronsFlex",
+        server_type="LiquidHandler",
+        server_description="Opentrons Flex Liquid Handler — BicoccaLab",
+        server_version="1.0",
+        server_vendor_url="https://bicocca.lab",
+        server_uuid=_get_persistent_uuid(os.path.dirname(os.path.abspath(__file__))),
+    )
 
-def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="OpentronsSiLA2Server - SiLA2 Server for Opentrons Flex"
-    )
-    parser.add_argument(
-        "--config", "-c",
-        default="config.yaml",
-        help="Path to configuration file (default: config.yaml)"
-    )
-    parser.add_argument(
-        "--test", "-t",
-        action="store_true",
-        help="Run connection test instead of starting server"
-    )
-    
-    args = parser.parse_args()
-    
-    if args.test:
-        return asyncio.run(run_test())
+    impl = WorkflowAPIImpl(sila_server, config)
+    sila_server.set_feature_implementation(WorkflowAPIFeature, impl)
+
+    # ── Start ─────────────────────────────────────────────────────────────────
+    enable_discovery = not args.no_discovery
+
+    if args.secure:
+        sila_server.start(config.host, config.port, enable_discovery=enable_discovery)
+        if sila_server.generated_ca:
+            ca_path = os.path.join(os.path.dirname(args.config), "generated_ca.pem")
+            with open(ca_path, "wb") as fp:
+                fp.write(sila_server.generated_ca)
+            print(f"  CA cert: {ca_path}")
     else:
-        return asyncio.run(run_server(args.config))
+        sila_server.start_insecure(config.host, config.port, enable_discovery=enable_discovery)
+
+    print(f"  Mode   : {'TLS' if args.secure else 'insecure (lab network)'}")
+    print(f"  mDNS   : {'enabled' if enable_discovery else 'disabled'}")
+    print(f"  Status : Running - waiting for connections...")
+    print()
+
+    # ── Graceful shutdown ─────────────────────────────────────────────────────
+    signal.signal(signal.SIGTERM, lambda *_: sila_server.grpc_server.stop(0))
+
+    try:
+        with contextlib.suppress(KeyboardInterrupt):
+            sila_server.grpc_server.wait_for_termination()
+    finally:
+        sila_server.stop()
+        print("\nServer stopped.")
+
+    return 0
 
 
 if __name__ == "__main__":

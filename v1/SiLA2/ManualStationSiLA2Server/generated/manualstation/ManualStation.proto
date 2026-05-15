@@ -1,0 +1,136 @@
+syntax = "proto3";
+
+import "SiLAFramework.proto";
+
+package sila2.org.labos.operator.manualstation.v1;
+
+/* Virtual station for operator interactions in automated workflows. Handles manual tasks that require human intervention, notifications, and confirmation of completed operations. Use cases: - Manual operations in complex workflows (e.g., "add reagent manually") - Tip refill notifications when Opentrons runs low - Quality control checkpoints - Sample preparation steps */
+service ManualStation {
+  /* 
+            Request the operator to perform a manual task.
+            The workflow will wait until the operator confirms completion.
+            A notification is sent to all connected clients (CLI, WebApp).
+         */
+  rpc RequestOperatorTask (sila2.org.labos.operator.manualstation.v1.RequestOperatorTask_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
+  /* Monitor the state of RequestOperatorTask */
+  rpc RequestOperatorTask_Info (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.ExecutionInfo) {}
+  /* Retrieve intermediate responses of RequestOperatorTask */
+  rpc RequestOperatorTask_Intermediate (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.labos.operator.manualstation.v1.RequestOperatorTask_IntermediateResponses) {}
+  /* Retrieve result of RequestOperatorTask */
+  rpc RequestOperatorTask_Result(sila2.org.silastandard.CommandExecutionUUID) returns (sila2.org.labos.operator.manualstation.v1.RequestOperatorTask_Responses) {}
+  /* Called by the operator to confirm that a manual task has been completed. This releases the workflow to continue. */
+  rpc ConfirmTaskComplete (sila2.org.labos.operator.manualstation.v1.ConfirmTaskComplete_Parameters) returns (sila2.org.labos.operator.manualstation.v1.ConfirmTaskComplete_Responses) {}
+  /* Cancel a pending operator task. */
+  rpc CancelTask (sila2.org.labos.operator.manualstation.v1.CancelTask_Parameters) returns (sila2.org.labos.operator.manualstation.v1.CancelTask_Responses) {}
+  /* Get all currently active (pending or in progress) operator tasks. */
+  rpc GetActiveTasks (sila2.org.labos.operator.manualstation.v1.GetActiveTasks_Parameters) returns (sila2.org.labos.operator.manualstation.v1.GetActiveTasks_Responses) {}
+  /* Get history of completed and cancelled tasks. */
+  rpc GetTaskHistory (sila2.org.labos.operator.manualstation.v1.GetTaskHistory_Parameters) returns (sila2.org.labos.operator.manualstation.v1.GetTaskHistory_Responses) {}
+  /* Send a notification to the operator without requiring confirmation. Used for informational messages. */
+  rpc SendNotification (sila2.org.labos.operator.manualstation.v1.SendNotification_Parameters) returns (sila2.org.labos.operator.manualstation.v1.SendNotification_Responses) {}
+  /* Current status of the manual station (idle, waiting_for_operator, busy). */
+  rpc Subscribe_StationStatus (sila2.org.labos.operator.manualstation.v1.Subscribe_StationStatus_Parameters) returns (stream sila2.org.labos.operator.manualstation.v1.Subscribe_StationStatus_Responses) {}
+  /* Number of tasks waiting for operator action. */
+  rpc Subscribe_PendingTaskCount (sila2.org.labos.operator.manualstation.v1.Subscribe_PendingTaskCount_Parameters) returns (stream sila2.org.labos.operator.manualstation.v1.Subscribe_PendingTaskCount_Responses) {}
+  /* The most recent notification message (JSON with timestamp, message, level, source). */
+  rpc Subscribe_LastNotification (sila2.org.labos.operator.manualstation.v1.Subscribe_LastNotification_Parameters) returns (stream sila2.org.labos.operator.manualstation.v1.Subscribe_LastNotification_Responses) {}
+}
+
+/* Parameters for RequestOperatorTask */
+message RequestOperatorTask_Parameters {
+  sila2.org.silastandard.String TaskDescription = 1;  /* Description of the task for the operator to perform. */
+  sila2.org.silastandard.String TaskType = 2;  /* Type of task (manual_operation, tip_refill, quality_check, sample_prep, custom). */
+  sila2.org.silastandard.String Priority = 3;  /* Task priority (low, normal, high, urgent). */
+  sila2.org.silastandard.String SourceInstrument = 4;  /* The instrument that requested this task (e.g., "Opentrons Flex"). */
+  sila2.org.silastandard.Integer TimeoutSeconds = 5;  /* Maximum time to wait for operator response (0 = no timeout). */
+}
+
+/* Responses of RequestOperatorTask */
+message RequestOperatorTask_Responses {
+  sila2.org.silastandard.String TaskId = 1;  /* Unique identifier for tracking this task. */
+}
+
+/* Intermediate responses of RequestOperatorTask */
+message RequestOperatorTask_IntermediateResponses {
+  sila2.org.silastandard.String TaskStatus = 1;  /* Current status of the task (pending, in_progress, completed, cancelled, timeout). */
+}
+
+/* Parameters for ConfirmTaskComplete */
+message ConfirmTaskComplete_Parameters {
+  sila2.org.silastandard.String TaskId = 1;  /* ID of the task to confirm. */
+  sila2.org.silastandard.String Notes = 2;  /* Optional notes from the operator about the completed task. */
+}
+
+/* Responses of ConfirmTaskComplete */
+message ConfirmTaskComplete_Responses {
+  sila2.org.silastandard.String ConfirmationResult = 1;  /* Result of the confirmation. */
+}
+
+/* Parameters for CancelTask */
+message CancelTask_Parameters {
+  sila2.org.silastandard.String TaskId = 1;  /* ID of the task to cancel. */
+  sila2.org.silastandard.String Reason = 2;  /* Reason for cancellation. */
+}
+
+/* Responses of CancelTask */
+message CancelTask_Responses {
+  sila2.org.silastandard.String CancelResult = 1;  /* Result of the cancellation. */
+}
+
+/* Parameters for GetActiveTasks */
+message GetActiveTasks_Parameters {
+}
+
+/* Responses of GetActiveTasks */
+message GetActiveTasks_Responses {
+  sila2.org.silastandard.String ActiveTasks = 1;  /* JSON list of active tasks with their details. */
+}
+
+/* Parameters for GetTaskHistory */
+message GetTaskHistory_Parameters {
+  sila2.org.silastandard.Integer Limit = 1;  /* Maximum number of tasks to return. */
+}
+
+/* Responses of GetTaskHistory */
+message GetTaskHistory_Responses {
+  sila2.org.silastandard.String TaskHistory = 1;  /* JSON list of historical tasks. */
+}
+
+/* Parameters for SendNotification */
+message SendNotification_Parameters {
+  sila2.org.silastandard.String Message = 1;  /* Notification message text. */
+  sila2.org.silastandard.String Level = 2;  /* Notification level (info, warning, error). */
+  sila2.org.silastandard.String SourceInstrument = 3;  /* The instrument that sent this notification. */
+}
+
+/* Responses of SendNotification */
+message SendNotification_Responses {
+  sila2.org.silastandard.String NotificationId = 1;  /* Unique identifier for the notification. */
+}
+
+/* Parameters for StationStatus */
+message Subscribe_StationStatus_Parameters {
+}
+
+/* Responses of StationStatus */
+message Subscribe_StationStatus_Responses {
+  sila2.org.silastandard.String StationStatus = 1;  /* Current status of the manual station (idle, waiting_for_operator, busy). */
+}
+
+/* Parameters for PendingTaskCount */
+message Subscribe_PendingTaskCount_Parameters {
+}
+
+/* Responses of PendingTaskCount */
+message Subscribe_PendingTaskCount_Responses {
+  sila2.org.silastandard.Integer PendingTaskCount = 1;  /* Number of tasks waiting for operator action. */
+}
+
+/* Parameters for LastNotification */
+message Subscribe_LastNotification_Parameters {
+}
+
+/* Responses of LastNotification */
+message Subscribe_LastNotification_Responses {
+  sila2.org.silastandard.String LastNotification = 1;  /* The most recent notification message (JSON with timestamp, message, level, source). */
+}

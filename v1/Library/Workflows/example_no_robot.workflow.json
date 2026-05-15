@@ -6,7 +6,7 @@
       "Instrument": "OpentronsFlex",
       "Action": "ExecuteRecipe",
       "Parameters": {
-        "recipe": "modifiedtest1.json"
+        "RecipeName": "modifiedtest1.json"
       }
     },
     {

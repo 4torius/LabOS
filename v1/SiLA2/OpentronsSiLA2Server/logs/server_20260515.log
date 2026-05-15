@@ -1,0 +1,80 @@
+2026-05-15 10:16:25 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-05-15 10:16:25 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-05-15 10:16:25 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-05-15 10:16:25 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-05-15 10:16:25 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-05-15 10:16:25 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-05-15 10:22:45 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-05-15 10:22:45 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-05-15 10:22:45 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-05-15 10:22:45 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-05-15 10:22:45 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-05-15 10:22:45 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-05-15 10:25:05 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-05-15 10:25:05 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-05-15 10:25:05 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-05-15 10:25:05 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-05-15 10:25:05 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-05-15 10:25:05 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-05-15 10:36:56 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-05-15 10:36:56 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-05-15 10:36:56 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-05-15 10:36:56 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-05-15 10:36:56 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-05-15 10:36:56 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-05-15 11:04:33 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-05-15 11:04:33 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-05-15 11:04:33 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-05-15 11:04:33 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-05-15 11:04:33 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-05-15 11:04:33 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-05-15 11:08:45 | INFO     | OpentronsSiLA2Server | Applying Hardware Config (HAL)...
+2026-05-15 11:08:45 | INFO     | OpentronsSiLA2Server | [PLAN] opentrons_flex_96_filtertiprack_1000ul: need 6, available 72
+2026-05-15 11:10:34 | INFO     | OpentronsSiLA2Server | Updating tip tracker (status: succeeded)...
+2026-05-15 11:10:34 | INFO     | OpentronsSiLA2Server |   + 6 tips (opentrons_flex_96_filtertiprack_1000ul)
+2026-05-15 11:48:51 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-05-15 11:48:51 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-05-15 11:48:51 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-05-15 11:48:51 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-05-15 11:48:51 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-05-15 11:48:51 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-05-15 14:53:00 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-05-15 14:53:00 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-05-15 14:53:00 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-05-15 14:53:00 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-05-15 14:53:00 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-05-15 14:53:00 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-05-15 14:57:52 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-05-15 14:57:52 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-05-15 14:57:52 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-05-15 14:57:52 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-05-15 14:57:52 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-05-15 14:57:52 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-05-15 15:08:12 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-05-15 15:08:12 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-05-15 15:08:12 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-05-15 15:08:12 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-05-15 15:08:12 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-05-15 15:08:12 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-05-15 15:10:29 | INFO     | OpentronsSiLA2Server | Applying Hardware Config (HAL)...
+2026-05-15 15:10:29 | INFO     | OpentronsSiLA2Server | [PLAN] opentrons_flex_96_filtertiprack_1000ul: need 6, available 66
+2026-05-15 15:12:15 | INFO     | OpentronsSiLA2Server | Updating tip tracker (status: succeeded)...
+2026-05-15 15:12:15 | INFO     | OpentronsSiLA2Server |   + 6 tips (opentrons_flex_96_filtertiprack_1000ul)
+2026-05-15 16:49:27 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-05-15 16:49:27 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-05-15 16:49:27 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-05-15 16:49:27 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-05-15 16:49:27 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-05-15 16:49:27 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-05-15 16:51:25 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-05-15 16:51:25 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-05-15 16:51:25 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-05-15 16:51:25 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-05-15 16:51:25 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-05-15 16:51:25 | INFO     | OpentronsSiLA2Server | Components initialized
+2026-05-15 16:53:54 | INFO     | OpentronsSiLA2Server | Initializing OpentronsSiLA2Server...
+2026-05-15 16:53:54 | INFO     | OpentronsSiLA2Server | Directories initialized
+2026-05-15 16:53:54 | INFO     | OpentronsSiLA2Server | Hardware config folder: C:\Users\PC\Desktop\LabOS\v1\Library\HardwareConfig
+2026-05-15 16:53:54 | INFO     | OpentronsSiLA2Server | Available configs: ['Generic_HAL.json', 'Generic_HAL_20260424_140830.json', 'Generic_HAL_20260424_141133.json', 'SerialDilution_Setup.json', 'Standard_Flex_Setup.json']
+2026-05-15 16:53:54 | INFO     | OpentronsSiLA2Server | Tip state synchronized with HAL | kept=['opentrons_flex_96_filtertiprack_1000ul'] added=[] removed=[]
+2026-05-15 16:53:54 | INFO     | OpentronsSiLA2Server | Components initialized

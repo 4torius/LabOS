@@ -7,14 +7,13 @@ A GENERIC gRPC client that can execute commands on ANY SiLA2 server.
 NO HARDCODED COMMAND MAPPINGS - commands are executed based on server metadata.
 
 Execution strategies:
-1. SiLA2Common.ExecuteCommand - preferred, truly generic
-2. Dynamic stub loading - load generated stubs at runtime
-3. Server-specific stubs - fallback for legacy servers
+0. sila2 library SilaClient - standard SiLA2 protocol (preferred for new servers)
+1. SiLA2Common.ExecuteCommand - legacy custom protocol (old servers)
+2. Dynamic stub loading - load generated stubs at runtime (legacy)
 
 To add a new instrument:
-- Just create the server with SiLA2Common service implemented
-- OR provide generated _pb2.py and _pb2_grpc.py stubs
-- The client automatically uses the right approach
+- Create a SiLA2 server with the sila2 library (sila2-codegen + FeatureImplementationBase)
+- The client automatically discovers and calls it via Strategy 0
 
 NO CODE CHANGES NEEDED HERE.
 """
@@ -24,6 +23,7 @@ import importlib
 import logging
 import os
 import sys
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -44,6 +44,97 @@ except ImportError:
 from .discovery import PnPServer, PnPCommand, PnPFeature
 
 logger = logging.getLogger(__name__)
+
+# ── Shared SilaClient cache ────────────────────────────────────────────────────
+# The sila2 library registers proto descriptors in a process-global pool on first
+# import.  Creating a second SilaClient for the same server re-compiles the same
+# proto and conflicts with the already-registered descriptor.  We keep exactly one
+# SilaClient per (host, port) and share it between discovery and command execution.
+_sila_clients: Dict[str, Any] = {}
+_sila_clients_lock = threading.Lock()
+
+
+def get_shared_sila_client(host: str, port: int) -> Any:
+    """Return the cached SilaClient for (host, port), creating it if necessary."""
+    key = f"{host}:{port}"
+    with _sila_clients_lock:
+        if key in _sila_clients:
+            return _sila_clients[key]
+        try:
+            from sila2.client import SilaClient  # noqa: PLC0415
+            client = SilaClient(host, port, insecure=True)
+            _sila_clients[key] = client
+            logger.debug("sila2 shared client created for %s", key)
+            return client
+        except Exception as exc:
+            logger.warning("sila2 shared client creation failed for %s: %s", key, exc, exc_info=True)
+            return None
+
+
+def invalidate_shared_sila_client(host: str, port: int) -> None:
+    """Remove and close the cached SilaClient (e.g. after a connection error)."""
+    key = f"{host}:{port}"
+    with _sila_clients_lock:
+        client = _sila_clients.pop(key, None)
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+
+#                           HELPERS
+
+def _normalize_params_for_command(
+    params: Dict[str, Any],
+    cmd_parameters: list,
+) -> Dict[str, Any]:
+    """
+    Map workflow parameter keys to the SiLA2 command parameter identifiers.
+
+    Three-pass strategy so workflow JSON files with slightly different naming
+    conventions (e.g. "recipe", "Recipe", "recipe_name") still resolve to the
+    correct SiLA2 identifier (e.g. "RecipeName").
+
+    Keys that don't match any parameter are silently dropped (workflow-level
+    hints like UseHAL / HALConfig are not SiLA2 params).
+    """
+    if not cmd_parameters:
+        return {}
+
+    out: Dict[str, Any] = {}
+    remaining = {p.identifier: p for p in cmd_parameters}
+
+    # Pass 1 — exact match
+    for k, v in params.items():
+        if k in remaining:
+            out[k] = v
+            del remaining[k]
+
+    # Pass 2 — case-insensitive exact
+    for k, v in params.items():
+        if k in out:
+            continue
+        kl = k.lower()
+        for pid in list(remaining):
+            if kl == pid.lower():
+                out[pid] = v
+                del remaining[pid]
+                break
+
+    # Pass 3 — substring: "Recipe" ↔ "RecipeName", "recipe_name" ↔ "RecipeName"
+    for k, v in params.items():
+        if k in out:
+            continue
+        kn = k.replace("_", "").lower()
+        for pid in list(remaining):
+            pn = pid.replace("_", "").lower()
+            if kn in pn or pn in kn:
+                out[pid] = v
+                del remaining[pid]
+                break
+
+    return out
 
 
 #                           DATA STRUCTURES
@@ -139,12 +230,11 @@ class PnPClient:
             except Exception:
                 pass
             del self._channels[address]
-        
         if address in self._stubs:
             del self._stubs[address]
-        
+        self._invalidate_sila_client(server.host, server.port)
         server.server_online = False
-    
+
     async def disconnect_all(self):
         """Disconnect from all servers."""
         for address in list(self._channels.keys()):
@@ -199,26 +289,156 @@ class PnPClient:
             )
         
         feature_obj, cmd_obj = cmd_info
-        
+
         # Try execution strategies in order of preference
-        
-        # Strategy 1: SiLA2Common.ExecuteCommand (truly generic)
+
+        # Strategy 0: sila2 standard library SilaClient (preferred, works with all sila2-compliant servers)
+        result = await self._execute_via_sila2_client(server, feature_obj, cmd_obj, params, timeout, on_progress)
+        if result is not None:
+            return result
+
+        # Strategy 1: SiLA2Common.ExecuteCommand (legacy custom protocol)
         result = await self._execute_via_common(server, feature_obj, cmd_obj, params, timeout, on_progress)
         if result is not None:
             return result
-        
-        # Strategy 2: Dynamic stub (loaded at runtime)
+
+        # Strategy 2: Dynamic stub (loaded at runtime, legacy)
         result = await self._execute_via_stub(server, feature_obj, cmd_obj, params, timeout, on_progress)
         if result is not None:
             return result
-        
+
         # Strategy 3: Fallback - indicate what's needed
         return CommandResult(
             success=False,
             error=f"Cannot execute {command} on {server.name}. "
-                  f"Server needs to implement SiLA2Common.ExecuteCommand or provide gRPC stubs."
+                  f"Server needs sila2 library, SiLA2Common.ExecuteCommand, or gRPC stubs."
         )
     
+    def _get_sila_client(self, host: str, port: int) -> Any:
+        return get_shared_sila_client(host, port)
+
+    def _invalidate_sila_client(self, host: str, port: int) -> None:
+        invalidate_shared_sila_client(host, port)
+
+    async def _execute_via_sila2_client(
+        self,
+        server: PnPServer,
+        feature: PnPFeature,
+        command: PnPCommand,
+        params: Dict[str, Any],
+        timeout: float,
+        on_progress: Optional[Callable],
+    ) -> Optional[CommandResult]:
+        """
+        Execute via sila2 library SilaClient (standard SiLA2 protocol).
+
+        Works with any server built with the sila2 Python library.
+        Runs the synchronous SilaClient in a thread executor so the event loop is not blocked.
+        Uses a cached SilaClient to avoid descriptor pool conflicts on repeated calls.
+        """
+        fid = feature.identifier
+        feature_name = fid.split("/")[-2] if "/" in fid else fid
+        command_name = command.identifier
+
+        def _run_sync() -> Optional[CommandResult]:
+            import time as _time
+
+            try:
+                from sila2.framework.errors.defined_execution_error import DefinedExecutionError
+            except ImportError:
+                DefinedExecutionError = None
+
+            try:
+                from sila2.client.client_observable_command_instance import ClientObservableCommandInstance
+            except ImportError:
+                ClientObservableCommandInstance = None
+
+            try:
+                sila_client = self._get_sila_client(server.host, server.port)
+                if sila_client is None:
+                    return None
+
+                feature_obj = getattr(sila_client, feature_name, None)
+                if feature_obj is None:
+                    logger.warning(
+                        "sila2 client: feature '%s' not found on %s (available: %s)",
+                        feature_name, server.name,
+                        list(sila_client._features.keys()),
+                    )
+                    return None
+
+                method = getattr(feature_obj, command_name, None)
+                if method is None:
+                    logger.warning(
+                        "sila2 client: command '%s' not found in feature '%s'",
+                        command_name, feature_name,
+                    )
+                    return None
+
+                sila_params = _normalize_params_for_command(params, command.parameters)
+                result = method(**sila_params)
+
+                if command.observable and ClientObservableCommandInstance and isinstance(result, ClientObservableCommandInstance):
+                    # sila2 observable command: poll until done, then fetch responses.
+                    # The command is already running on the server at this point.
+                    poll_timeout = timeout if (timeout and timeout > 0) else 14400.0  # 4h default for long-running recipes
+                    deadline = _time.monotonic() + poll_timeout
+                    while not result.done:
+                        if _time.monotonic() > deadline:
+                            result.cancel_execution_info_subscription()
+                            return CommandResult(
+                                success=True,
+                                data={"status": "running", "execution_uuid": str(result.execution_uuid)},
+                            )
+                        if on_progress and result.progress is not None:
+                            on_progress(int(result.progress), str(result.status or ""))
+                        _time.sleep(0.2)
+
+                    try:
+                        responses = result.get_responses()
+                        result.cancel_execution_info_subscription()
+                    except Exception as exc:
+                        result.cancel_execution_info_subscription()
+                        if DefinedExecutionError and isinstance(exc, DefinedExecutionError):
+                            return CommandResult(success=False, error=str(exc))
+                        logger.warning(
+                            "sila2 observable get_responses (%s.%s) failed: %s",
+                            feature_name, command_name, exc, exc_info=True,
+                        )
+                        self._invalidate_sila_client(server.host, server.port)
+                        return None
+
+                    if hasattr(responses, "_asdict"):
+                        data = responses._asdict()
+                        return CommandResult(success=True, data={k: str(v) for k, v in data.items()})
+                    return CommandResult(success=True, data={"value": str(responses)})
+
+                else:
+                    # Non-observable command: result is the response directly.
+                    if hasattr(result, "_asdict"):
+                        data = result._asdict()
+                        return CommandResult(
+                            success=True,
+                            data={k: str(v) for k, v in data.items()},
+                        )
+                    return CommandResult(success=True, data={"value": str(result)})
+
+            except Exception as exc:
+                if DefinedExecutionError and isinstance(exc, DefinedExecutionError):
+                    return CommandResult(success=False, error=str(exc))
+                logger.warning(
+                    "sila2 client (%s.%s) failed: %s", feature_name, command_name, exc, exc_info=True
+                )
+                self._invalidate_sila_client(server.host, server.port)
+                return None
+
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, _run_sync)
+        except Exception as exc:
+            logger.warning("sila2 client executor error: %s", exc, exc_info=True)
+            return None
+
     async def _execute_via_common(
         self,
         server: PnPServer,
@@ -229,9 +449,7 @@ class PnPClient:
         on_progress: Optional[Callable]
     ) -> Optional[CommandResult]:
         """
-        Execute via SiLA2Common.ExecuteCommand.
-        
-        This is the PREFERRED method - truly generic, works with any compliant server.
+        Execute via SiLA2Common.ExecuteCommand (legacy custom protocol).
         """
         try:
             # Try to import SiLA2Common stubs

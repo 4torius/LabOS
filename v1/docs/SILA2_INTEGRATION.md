@@ -1,355 +1,252 @@
-# SiLA2 Integration Guide
+# LabOS — SiLA2 Integration
 
-## Come Rendere il Sistema SiLA2-Native
+## What Is SiLA2?
 
-Questa guida spiega come sfruttare al massimo il protocollo SiLA2 nel sistema BicoccaLab.
+SiLA2 (Standardization in Lab Automation 2) is an open standard for laboratory instrument communication. It defines:
+- **gRPC** as the transport layer
+- **Protocol Buffers** for message serialization
+- **Feature Definition Language (FDL)** — XML files that describe instrument capabilities
 
----
-
-## 1. Architettura Attuale vs SiLA2-Native
-
-### Attuale (Ibrido)
-```
-lab_console.py
-├── OpentronsFlex (HTTP REST diretto)    ❌ Non SiLA2
-├── TecanM200Pro (gRPC con stubs)        ✓ SiLA2-like
-└── MobileRobot (gRPC con stubs)         ✓ SiLA2-like
-```
-
-### Target (SiLA2-Native)
-```
-lab_console.py
-└── SiLA2ServerRegistry
-    ├── OpentronsSiLA2Server (gRPC)      ✓ SiLA2
-    ├── TecanSiLA2Server (gRPC)          ✓ SiLA2
-    └── MobileSiLA2Server (gRPC)         ✓ SiLA2
-```
+SiLA2 is maintained by the [SiLA2 Consortium](https://sila-standard.org) and is adopted by major instrument vendors (Sartorius, Hamilton, Tecan, Roche).
 
 ---
 
-## 2. Componenti Creati
+## SiLA2 Stack in LabOS
 
-### 2.1 `sila_discovery.py` - Feature Discovery
-Legge automaticamente le feature da:
-- `.sila.xml` (Feature Definition Language)
-- `.proto` (Protocol Buffers)
-
-```python
-from sila_discovery import SiLADiscovery
-
-discovery = SiLADiscovery()
-servers = discovery.discover_all()
-
-# Ogni server ha features, commands, properties
-for feature in servers["tecan"].features:
-    for cmd in feature.commands:
-        print(f"{cmd.identifier}: {cmd.parameters}")
 ```
-
-### 2.2 `sila2_client.py` - Client Generico SiLA2
-Client unificato che parla con qualsiasi server SiLA2:
-
-```python
-from sila2_client import SiLA2ServerRegistry
-
-registry = SiLA2ServerRegistry()
-await registry.discover_and_connect()
-
-# Esegui comando su qualsiasi server
-result = await registry.execute(
-    server="tecan",
-    feature="PlateReaderService",
-    command="SetTemperature",
-    params={"target_temperature": 37.0}
-)
+FDL XML file              (human-readable capability description)
+    │
+    ▼  sila2-codegen
+Protocol Buffer (.proto)  (message and service definitions)
+    │
+    ▼  protoc + grpc plugin
+Python stubs              (generated client/server binding code)
+    │
+    ▼  implemented in
+SiLA2 Server              (instrument wrapper process)
+    │
+    ▼  gRPC over TCP (default port range 50051–50099)
+SiLA2 Client              (orchestrator or test script)
 ```
 
 ---
 
-## 3. Piano di Migrazione SiLA2
+## FDL File Structure
 
-### Fase 1: Usare i Server SiLA2 Esistenti ✅
+Each SiLA2 server declares its capabilities in a `.sila.xml` file stored in `SiLA2/<ServerName>/features/`:
 
-I server esistono già:
-- `OpentronsSiLA2Server/` (porta 50052)
-- `TecanSiLA2Server/` (porta 50051)  
-- `MobileSiLA2Server/` (porta 50053)
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<Feature SiLA2Version="1.1" FeatureVersion="1.0.0"
+         MaturityLevel="Draft"
+         Originator="it.bicoccalab"
+         Category="automation"
+         xmlns="http://www.sila-standard.org">
 
-**Azione**: Modificare `lab_console.py` per usare gRPC invece di HTTP per Opentrons.
+  <Identifier>WorkflowAPI</Identifier>
+  <DisplayName>Workflow API</DisplayName>
+  <Description>Liquid handling workflow execution on Opentrons Flex OT-3.</Description>
 
-### Fase 2: Implementare SiLAService Standard
+  <!-- Commands -->
+  <Command>
+    <Identifier>ExecuteRecipe</Identifier>
+    <DisplayName>Execute Recipe</DisplayName>
+    <Description>Execute a liquid handling recipe with a HAL configuration.</Description>
+    <Parameters>
+      <Parameter>
+        <Identifier>recipe</Identifier>
+        <DisplayName>Recipe File</DisplayName>
+        <Description>Filename in Library/Recipes/</Description>
+        <DataType><Basic>String</Basic></DataType>
+      </Parameter>
+      <Parameter>
+        <Identifier>hal_config</Identifier>
+        <DisplayName>HAL Config File</DisplayName>
+        <Description>Filename in Library/HardwareConfig/</Description>
+        <DataType><Basic>String</Basic></DataType>
+      </Parameter>
+    </Parameters>
+    <Responses>
+      <Response>
+        <Identifier>status</Identifier>
+        <DataType><Basic>String</Basic></DataType>
+      </Response>
+    </Responses>
+  </Command>
 
-Ogni server SiLA2 dovrebbe implementare:
+  <!-- Properties -->
+  <Property Identifier="RobotStatus" Observable="Yes">
+    <DisplayName>Robot Status</DisplayName>
+    <DataType>
+      <Constrained>
+        <DataType><Basic>String</Basic></DataType>
+        <Constraints>
+          <Set>
+            <Value>idle</Value>
+            <Value>running</Value>
+            <Value>error</Value>
+          </Set>
+        </Constraints>
+      </Constrained>
+    </DataType>
+  </Property>
+
+</Feature>
+```
+
+---
+
+## SiLA2Common — The Generic Execution Protocol
+
+LabOS extends SiLA2 with a custom `SiLA2Common` service that every server implements alongside its native feature. This is the interface the orchestrator uses exclusively.
+
+### Proto Definition (`SiLA2Common.proto`)
 
 ```protobuf
-service SiLAService {
-    rpc GetServerInfo(Empty) returns (ServerInfo);
-    rpc GetImplementedFeatures(Empty) returns (FeatureList);
-    rpc GetFeatureDefinition(FeatureId) returns (FeatureDefinition);
+syntax = "proto3";
+package sila2common;
+
+service SiLA2CommonService {
+  rpc GetServerInfo  (Empty)         returns (ServerInfo);
+  rpc GetFeatures    (Empty)         returns (FeatureList);
+  rpc ExecuteCommand (CommandRequest) returns (CommandResponse);
+  rpc GetProperty    (PropertyRequest) returns (PropertyResponse);
+}
+
+message ServerInfo {
+  string server_name    = 1;
+  string server_type    = 2;
+  string server_version = 3;
+  string status         = 4;
+}
+
+message CommandRequest {
+  string command_id  = 1;
+  string params_json = 2;   // JSON-encoded key-value map
+}
+
+message CommandResponse {
+  bool   success      = 1;
+  string result_json  = 2;
+  string error_detail = 3;
 }
 ```
 
-**Azione**: Aggiungere questi RPC ai server esistenti.
+### Why SiLA2Common?
 
-### Fase 3: Observable Commands & Properties
+Without it, the orchestrator would need to import each instrument's generated Python stub at compile time — tightly coupling the orchestration layer to every instrument integration. SiLA2Common breaks this coupling: the orchestrator dispatches commands as JSON strings over a single generic interface, and instrument-specific logic lives entirely in the server process.
 
-SiLA2 supporta:
-1. **Observable Commands**: Streaming di progress durante esecuzione
-2. **Observable Properties**: Sottoscrizione a cambiamenti di stato
+**Adding a new instrument** means deploying a new SiLA2Common-compliant server. The orchestrator discovers and commands it with zero code changes.
 
-```python
-# Subscribe to temperature changes
-async for observation in client.subscribe_property(
-    "PlateReaderService", 
-    "CurrentTemperature"
-):
-    print(f"Temp: {observation.value}°C")
+---
+
+## Implementing a SiLA2 Server
+
+Every server in `v1/SiLA2/` follows the same pattern:
+
+### File Structure
+```
+SiLA2/YourInstrumentSiLA2Server/
+├── config.yaml              # Port, hardware connection, server name
+├── main.py                  # Entry point — starts gRPC server
+├── features/
+│   └── YourInstrument.sila.xml  # FDL capability description
+└── src/
+    ├── __init__.py
+    ├── servicer.py          # Implements native feature + SiLA2Common
+    ├── YourInstrument_pb2.py      # Generated (do not edit)
+    └── YourInstrument_pb2_grpc.py # Generated (do not edit)
 ```
 
-### Fase 4: Error Handling SiLA2
-
-SiLA2 definisce errori standardizzati:
+### Servicer Template
 
 ```python
-class SiLA2Error(Enum):
-    VALIDATION_ERROR = "ValidationError"
-    EXECUTION_ERROR = "ExecutionError" 
-    FRAMEWORK_ERROR = "FrameworkError"
-    UNDEFINED_EXECUTION_ERROR = "UndefinedExecutionError"
+# src/servicer.py
+import json
+from SiLA2Common_pb2 import ServerInfo, CommandResponse
+from SiLA2Common_pb2_grpc import SiLA2CommonServiceServicer
+
+class YourInstrumentServicer(SiLA2CommonServiceServicer):
+
+    def GetServerInfo(self, request, context):
+        return ServerInfo(
+            server_name="your_instrument",
+            server_type="YourInstrument",
+            server_version="1.0.0",
+            status="idle"
+        )
+
+    def GetFeatures(self, request, context):
+        # Return FDL metadata parsed from .sila.xml
+        ...
+
+    def ExecuteCommand(self, request, context):
+        params = json.loads(request.params_json)
+        try:
+            result = self._dispatch(request.command_id, params)
+            return CommandResponse(success=True, result_json=json.dumps(result))
+        except Exception as e:
+            return CommandResponse(success=False, error_detail=str(e))
+
+    def _dispatch(self, command_id, params):
+        if command_id == "YourCommand":
+            return self._your_command(params)
+        raise ValueError(f"Unknown command: {command_id}")
+
+    def _your_command(self, params):
+        # Instrument interaction here
+        return {"status": "done"}
 ```
 
 ---
 
-## 4. Dove è il DAG?
+## Regenerating Protobuf Stubs
 
-### Posizione
-`SiLA2/Orchestrator/workflow_executor.py`
+If you modify a `.proto` file:
 
-### Struttura
-
-```
-WorkflowStep
-├── id: "prepare_samples"
-├── depends_on: []                    # Nessuna dipendenza
-├── instrument: "opentrons"
-└── action: "run_recipe"
-
-WorkflowStep  
-├── id: "read_plate"
-├── depends_on: ["prepare_samples"]   # Dipende da prepare_samples
-├── instrument: "tecan"
-└── action: "run_analysis"
+```bash
+python -m grpc_tools.protoc \
+  -I. \
+  --python_out=. \
+  --grpc_python_out=. \
+  SiLA2Common.proto
 ```
 
-### Algoritmo DAG (linee 425-475)
-
-```python
-while True:
-    # Trova step con dipendenze soddisfatte
-    ready_steps = [
-        step for step in steps
-        if step.status == PENDING
-        and all(get_step(dep).status == COMPLETED 
-                for dep in step.depends_on)
-    ]
-    
-    # Esegui step pronti
-    for step in ready_steps:
-        await execute_step(step)
-```
-
-### Limitazione Attuale
-L'esecuzione è **sequenziale**. Per step paralleli:
-
-```python
-# ATTUALE: sequenziale
-for step in ready_steps:
-    await execute_step(step)
-
-# FUTURO: parallelo
-await asyncio.gather(*[
-    execute_step(step) for step in ready_steps
-])
-```
+This regenerates `SiLA2Common_pb2.py` and `SiLA2Common_pb2_grpc.py`. Do not edit generated files manually.
 
 ---
 
-## 5. Esempio Workflow SiLA2-Native
+## Port Assignments
 
-```json
-{
-  "workflow": {
-    "id": "elisa_full",
-    "name": "Complete ELISA Protocol",
-    "version": "2.0.0"
-  },
-  "variables": {
-    "plate_id": "ELISA_001",
-    "temp": 37.0
-  },
-  "steps": [
-    {
-      "id": "connect_tecan",
-      "instrument": "tecan",
-      "action": "sila2_command",
-      "params": {
-        "feature": "PlateReaderService",
-        "command": "Connect",
-        "args": {}
-      },
-      "depends_on": []
-    },
-    {
-      "id": "prepare_samples",
-      "instrument": "opentrons",
-      "action": "sila2_command",
-      "params": {
-        "feature": "LiquidHandling",
-        "command": "Transfer",
-        "args": {
-          "volume": 100,
-          "source": "A1",
-          "destination": "B1"
-        }
-      },
-      "depends_on": []
-    },
-    {
-      "id": "set_temperature",
-      "instrument": "tecan",
-      "action": "sila2_command",
-      "params": {
-        "feature": "PlateReaderService",
-        "command": "SetTemperature",
-        "args": {"target_temperature": "${temp}"}
-      },
-      "depends_on": ["connect_tecan"]
-    },
-    {
-      "id": "load_plate",
-      "instrument": "tecan",
-      "action": "sila2_command",
-      "params": {
-        "feature": "PlateReaderService",
-        "command": "PlateIn"
-      },
-      "depends_on": ["prepare_samples", "set_temperature"]
-    },
-    {
-      "id": "measure",
-      "instrument": "tecan",
-      "action": "sila2_observable",
-      "params": {
-        "feature": "PlateReaderService",
-        "command": "RunMeasurement",
-        "args": {
-          "protocol_file": "Absorbance_450nm.mdfx",
-          "plate_id": "${plate_id}"
-        }
-      },
-      "depends_on": ["load_plate"]
-    }
-  ]
-}
-```
+| Server | Default Port |
+|--------|-------------|
+| Opentrons SiLA2 Server | 50052 |
+| Tecan SiLA2 Server | 50051 |
+| Mobile SiLA2 Server | 50053 |
+| Manual Station SiLA2 Server | 50054 |
+| New instruments | 50055–50099 |
+
+Ports are configured in each server's `config.yaml`.
 
 ---
 
-## 6. Checklist Migrazione
+## Discovery Over mDNS
 
-### Server-side
+To enable automatic mDNS discovery, a server can broadcast a `_sila2._tcp.local.` service record:
 
-- [ ] Aggiungere `SiLAService` a OpentronsSiLA2Server
-- [ ] Aggiungere `SiLAService` a TecanSiLA2Server
-- [ ] Aggiungere `SiLAService` a MobileSiLA2Server
-- [ ] Implementare `GetImplementedFeatures()`
-- [ ] Implementare error handling SiLA2 standard
-
-### Client-side
-
-- [ ] Integrare `sila2_client.py` in `lab_console.py`
-- [ ] Sostituire `OpentronsFlex` HTTP con client gRPC
-- [ ] Aggiornare `WorkflowExecutor` per usare `SiLA2ServerRegistry`
-- [ ] Implementare property subscriptions per monitoring live
-
-### Workflow
-
-- [ ] Aggiungere action type `sila2_command`
-- [ ] Aggiungere action type `sila2_observable`
-- [ ] Implementare esecuzione parallela di step indipendenti
-- [ ] Aggiungere retry con backoff esponenziale
-
----
-
-## 6.5 mDNS Service Discovery
-
-Il sistema supporta la scoperta automatica dei server SiLA2 tramite mDNS/DNS-SD, come definito nello standard SiLA2.
-
-### Service Type
-I server SiLA2 si registrano con il service type: `_sila2._tcp.local.`
-
-### Implementazione Python (MobileSiLA2Server)
 ```python
-from zeroconf import Zeroconf, ServiceInfo
+from zeroconf import ServiceInfo, Zeroconf
+import socket
 
-service_info = ServiceInfo(
+info = ServiceInfo(
     "_sila2._tcp.local.",
-    f"{server_name}._sila2._tcp.local.",
-    addresses=[socket.inet_aton(ip)],
-    port=port,
-    properties={
-        "name": server_name,
-        "type": server_type,
-        "vendor": "BicoccaLab",
-        "version": version
-    }
+    "opentrons._sila2._tcp.local.",
+    addresses=[socket.inet_aton("127.0.0.1")],
+    port=50052,
+    properties={"server-name": "opentrons", "server-type": "WorkflowAPI"}
 )
-zeroconf.register_service(service_info)
+zeroconf = Zeroconf()
+zeroconf.register_service(info)
 ```
 
-### Implementazione C# (TecanSiLA2Server)
-```csharp
-using Makaretu.Dns;
-
-var mdns = new MulticastService();
-var sd = new ServiceDiscovery(mdns);
-
-sd.Advertise(new ServiceProfile(
-    instanceName: "TecanM200Pro",
-    serviceName: "_sila2._tcp",
-    port: 50051,
-    txtRecords: new Dictionary<string, string> {
-        ["name"] = "Tecan M200 Pro",
-        ["type"] = "plate_reader"
-    }
-));
-```
-
-### Discovery Client
-```python
-from src.pnp_discovery import PnPDiscovery
-
-discovery = PnPDiscovery(base_dir)
-servers = await discovery.discover_all()  # Include mDNS discovery
-```
-
----
-
-## 7. Vantaggi della Migrazione
-
-| Aspetto | Attuale | SiLA2-Native |
-|---------|---------|--------------|
-| Discovery | Hardcoded | Dinamica |
-| Errori | Custom | Standardizzati |
-| Streaming | No | Observable commands |
-| Monitoring | Polling | Subscriptions |
-| Interoperabilità | Limitata | Universale |
-| Documentazione | Manuale | Auto-generata da FDL |
-
----
-
-## 8. Risorse
-
-- [SiLA2 Standard](https://sila-standard.com/)
-- [SiLA2 Feature Definition Language](https://gitlab.com/SiLA2/sila_base)
-- [gRPC Python](https://grpc.io/docs/languages/python/)
+The discovery engine in `v1/src/discovery.py` listens for these records and registers matching servers automatically.

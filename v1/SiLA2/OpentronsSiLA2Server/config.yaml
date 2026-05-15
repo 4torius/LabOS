@@ -3,7 +3,7 @@
 
 server:
   host: "0.0.0.0"
-  port: 50057
+  port: 50302
   name: "Opentrons Flex"
   description: "SiLA2 Server for Opentrons Flex Robot"
   vendor: "ChemicalLab"

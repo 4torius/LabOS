@@ -13,7 +13,7 @@
         "./src/grpc",
         "./SiLA2/ManualStationSiLA2Server/src",
         "./SiLA2/OpentronsSiLA2Server/src",
-        "./SiLA2/TecanSiLA2Server/src",
+        "./SiLA2/TecanM200Bridge/src",
         "./SiLA2/MobileSiLA2Server/src",
         "./SiLA2/IncubatorSiLA2Server/src",
         "./SiLA2/Orchestrator/src"

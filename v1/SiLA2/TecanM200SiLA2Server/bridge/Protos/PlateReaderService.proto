@@ -1,0 +1,184 @@
+// PlateReaderService.proto
+// Definizione Protocol Buffers per il servizio SiLA2 PlateReader
+// Generato dal Feature Definition XML
+
+syntax = "proto3";
+
+package it.chemlab.platereader;
+
+option csharp_namespace = "TecanSiLA2Server.Features";
+
+import "google/protobuf/empty.proto";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SERVICE DEFINITION
+// ═══════════════════════════════════════════════════════════════════════════
+
+service PlateReaderService {
+    // ─── Properties ────────────────────────────────────────────────────────
+    
+    // IsConnected (Observable)
+    rpc GetIsConnected(GetIsConnectedRequest) returns (GetIsConnectedResponse);
+    rpc SubscribeIsConnected(SubscribeIsConnectedRequest) returns (stream GetIsConnectedResponse);
+    
+    // OperationalStatus (Observable)
+    rpc GetOperationalStatus(GetOperationalStatusRequest) returns (GetOperationalStatusResponse);
+    rpc SubscribeOperationalStatus(SubscribeOperationalStatusRequest) returns (stream GetOperationalStatusResponse);
+    
+    // CurrentTemperature (Observable)
+    rpc GetCurrentTemperature(GetCurrentTemperatureRequest) returns (GetCurrentTemperatureResponse);
+    rpc SubscribeCurrentTemperature(SubscribeCurrentTemperatureRequest) returns (stream GetCurrentTemperatureResponse);
+    
+    // InstrumentInfo (Non-Observable)
+    rpc GetInstrumentInfo(GetInstrumentInfoRequest) returns (GetInstrumentInfoResponse);
+
+    // ─── Commands ──────────────────────────────────────────────────────────
+    
+    // Connect
+    rpc Connect(ConnectRequest) returns (ConnectResponse);
+    
+    // Disconnect
+    rpc Disconnect(DisconnectRequest) returns (DisconnectResponse);
+    
+    // PlateIn
+    rpc PlateIn(PlateInRequest) returns (PlateInResponse);
+    
+    // PlateOut
+    rpc PlateOut(PlateOutRequest) returns (PlateOutResponse);
+    
+    // SetTemperature
+    rpc SetTemperature(SetTemperatureRequest) returns (SetTemperatureResponse);
+    
+    // TurnOffTemperature
+    rpc TurnOffTemperature(TurnOffTemperatureRequest) returns (TurnOffTemperatureResponse);
+    
+    // RunMeasurement (Observable/Streaming - Long Running)
+    rpc RunMeasurement(RunMeasurementRequest) returns (stream RunMeasurementResponse);
+    
+    // GetAnIMLResult
+    rpc GetAnIMLResult(GetAnIMLResultRequest) returns (GetAnIMLResultResponse);
+    
+    // ListProtocols
+    rpc ListProtocols(ListProtocolsRequest) returns (ListProtocolsResponse);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PROPERTY MESSAGES
+// ═══════════════════════════════════════════════════════════════════════════
+
+// IsConnected
+message GetIsConnectedRequest {}
+message GetIsConnectedResponse {
+    bool value = 1;
+}
+message SubscribeIsConnectedRequest {}
+
+// OperationalStatus
+message GetOperationalStatusRequest {}
+message GetOperationalStatusResponse {
+    string value = 1; // Enum: Idle, Busy, Error, Disconnected
+}
+message SubscribeOperationalStatusRequest {}
+
+// CurrentTemperature
+message GetCurrentTemperatureRequest {}
+message GetCurrentTemperatureResponse {
+    double value = 1;
+}
+message SubscribeCurrentTemperatureRequest {}
+
+// InstrumentInfo
+message GetInstrumentInfoRequest {}
+message GetInstrumentInfoResponse {
+    InstrumentInfoStructure value = 1;
+}
+
+message InstrumentInfoStructure {
+    string serial_number = 1;
+    string firmware_version = 2;
+    string product_name = 3;
+    bool is_simulated = 4;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMMAND MESSAGES
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Connect
+message ConnectRequest {
+    string connection_string = 1;
+}
+message ConnectResponse {
+    bool success = 1;
+}
+
+// Disconnect
+message DisconnectRequest {}
+message DisconnectResponse {
+    bool success = 1;
+}
+
+// PlateIn
+message PlateInRequest {}
+message PlateInResponse {
+    bool success = 1;
+}
+
+// PlateOut
+message PlateOutRequest {}
+message PlateOutResponse {
+    bool success = 1;
+}
+
+// SetTemperature
+message SetTemperatureRequest {
+    double target_temperature = 1;
+}
+message SetTemperatureResponse {
+    bool success = 1;
+}
+
+// TurnOffTemperature
+message TurnOffTemperatureRequest {}
+message TurnOffTemperatureResponse {
+    bool success = 1;
+}
+
+// RunMeasurement (Streaming Response)
+message RunMeasurementRequest {
+    string protocol_file = 1;
+    string plate_id = 2;
+    string sample_set_id = 3;
+    string plate_type = 4;  // iControl plate name (optional, e.g. GRE96ft_Corning360)
+}
+
+message RunMeasurementResponse {
+    // Intermediate responses (progress updates)
+    bool is_intermediate = 1;
+    int32 progress = 2;
+    string status_message = 3;
+    
+    // Final response (measurement result)
+    MeasurementResultStructure measurement_result = 4;
+}
+
+message MeasurementResultStructure {
+    bytes animl_document = 1;       // AnIML XML as binary
+    string animl_file_path = 2;
+    string excel_file_path = 3;
+    string measurement_type = 4;    // Absorbance, Fluorescence, Luminescence, Mixed
+}
+
+// GetAnIMLResult
+message GetAnIMLResultRequest {
+    string plate_id = 1;
+}
+message GetAnIMLResultResponse {
+    bytes animl_document = 1;
+}
+
+// ListProtocols
+message ListProtocolsRequest {}
+message ListProtocolsResponse {
+    repeated string protocols = 1;
+}

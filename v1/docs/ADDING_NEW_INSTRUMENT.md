@@ -1,6 +1,6 @@
-# Adding a New Instrument to BicoccaLab
+# LabOS — Adding a New Instrument
 
-This guide shows how to add a new scientific instrument to BicoccaLab v7.
+This guide shows how to integrate a new scientific instrument into LabOS.
 
 ## Quick Summary (3 Steps)
 
@@ -18,10 +18,10 @@ The system is **truly plug & play**:
 
 ```
 ┌─────────────────────────────────────────────────┐
-│         pnp_console.py / webapp                 │  <- User interfaces
+│         web interface / lab_core.py              │  <- User interfaces
 ├─────────────────────────────────────────────────┤
 │              PnP Discovery                      │  <- Auto-discovers servers
-│         (pnp_discovery.py)                      │      from SiLA2/ folder
+│         (src/discovery.py)                      │      via config/mDNS/scan
 ├─────────────────────────────────────────────────┤
 │           Your SiLA2 Server                     │  <- Your new server
 │     (features/*.sila.xml + servicer.py)         │
@@ -129,10 +129,12 @@ cd SiLA2/CentrifugeSiLA2Server
 python main.py
 ```
 
-In another terminal:
+In another terminal, start the orchestrator and check the dashboard at http://localhost:8000 — your server should appear as online in the instruments list.
+
+Or verify directly via the API:
 ```bash
-python pnp_console.py
-# Your server should appear in the list!
+curl http://localhost:8000/api/instruments | python -m json.tool
+# Your new server should appear in the response
 ```
 
 ---

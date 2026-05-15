@@ -1,0 +1,163 @@
+syntax = "proto3";
+
+import "SiLAFramework.proto";
+
+package sila2.org.labos.mobile.mobilerobot.v1;
+
+/* Control interface for the RB Kairos + ABB GoFa 15000 mobile manipulator. Provides navigation, arm control, gripper control, and labware transport operations via ROS1. Gracefully degrades when ROS is unavailable. */
+service MobileRobot {
+  /* Navigate the mobile base to a named station. Blocks until navigation completes or fails. */
+  rpc Navigate (sila2.org.labos.mobile.mobilerobot.v1.Navigate_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
+  /* Monitor the state of Navigate */
+  rpc Navigate_Info (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.ExecutionInfo) {}
+  /* Retrieve intermediate responses of Navigate */
+  rpc Navigate_Intermediate (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.labos.mobile.mobilerobot.v1.Navigate_IntermediateResponses) {}
+  /* Retrieve result of Navigate */
+  rpc Navigate_Result(sila2.org.silastandard.CommandExecutionUUID) returns (sila2.org.labos.mobile.mobilerobot.v1.Navigate_Responses) {}
+  /* Move the GoFa arm to a named position. Blocks until the arm reaches the target or fails. */
+  rpc MoveArm (sila2.org.labos.mobile.mobilerobot.v1.MoveArm_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
+  /* Monitor the state of MoveArm */
+  rpc MoveArm_Info (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.ExecutionInfo) {}
+  /* Retrieve intermediate responses of MoveArm */
+  rpc MoveArm_Intermediate (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.labos.mobile.mobilerobot.v1.MoveArm_IntermediateResponses) {}
+  /* Retrieve result of MoveArm */
+  rpc MoveArm_Result(sila2.org.silastandard.CommandExecutionUUID) returns (sila2.org.labos.mobile.mobilerobot.v1.MoveArm_Responses) {}
+  /* Open or close the gripper. When closing, applies the force and width for the specified labware type. */
+  rpc ControlGripper (sila2.org.labos.mobile.mobilerobot.v1.ControlGripper_Parameters) returns (sila2.org.labos.mobile.mobilerobot.v1.ControlGripper_Responses) {}
+  /* 
+            Full pick-and-place transport: navigate to source, pick up labware,
+            navigate to destination, and place labware. Reports each step via
+            intermediate responses.
+         */
+  rpc MoveLabware (sila2.org.labos.mobile.mobilerobot.v1.MoveLabware_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
+  /* Monitor the state of MoveLabware */
+  rpc MoveLabware_Info (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.ExecutionInfo) {}
+  /* Retrieve intermediate responses of MoveLabware */
+  rpc MoveLabware_Intermediate (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.labos.mobile.mobilerobot.v1.MoveLabware_IntermediateResponses) {}
+  /* Retrieve result of MoveLabware */
+  rpc MoveLabware_Result(sila2.org.silastandard.CommandExecutionUUID) returns (sila2.org.labos.mobile.mobilerobot.v1.MoveLabware_Responses) {}
+  /* Immediately stop all robot motion. Re-initialization required before resuming. */
+  rpc EmergencyStop (sila2.org.labos.mobile.mobilerobot.v1.EmergencyStop_Parameters) returns (sila2.org.labos.mobile.mobilerobot.v1.EmergencyStop_Responses) {}
+  /* Get the full current status of the robot as a JSON object including state, position, battery, and ROS connectivity. */
+  rpc GetStatus (sila2.org.labos.mobile.mobilerobot.v1.GetStatus_Parameters) returns (sila2.org.labos.mobile.mobilerobot.v1.GetStatus_Responses) {}
+  /* List all named stations configured for this robot. */
+  rpc GetStations (sila2.org.labos.mobile.mobilerobot.v1.GetStations_Parameters) returns (sila2.org.labos.mobile.mobilerobot.v1.GetStations_Responses) {}
+  /* Current operational status of the mobile robot (idle, navigating, moving_arm, transporting, error, disconnected). */
+  rpc Subscribe_RobotStatus (sila2.org.labos.mobile.mobilerobot.v1.Subscribe_RobotStatus_Parameters) returns (stream sila2.org.labos.mobile.mobilerobot.v1.Subscribe_RobotStatus_Responses) {}
+  /* Current base pose as a JSON object with x, y, and theta fields (meters and radians). */
+  rpc Subscribe_CurrentPosition (sila2.org.labos.mobile.mobilerobot.v1.Subscribe_CurrentPosition_Parameters) returns (stream sila2.org.labos.mobile.mobilerobot.v1.Subscribe_CurrentPosition_Responses) {}
+  /* Current battery charge level as a percentage (0.0 to 100.0). */
+  rpc Subscribe_BatteryLevel (sila2.org.labos.mobile.mobilerobot.v1.Subscribe_BatteryLevel_Parameters) returns (stream sila2.org.labos.mobile.mobilerobot.v1.Subscribe_BatteryLevel_Responses) {}
+}
+
+/* Parameters for Navigate */
+message Navigate_Parameters {
+  sila2.org.silastandard.String StationName = 1;  /* Name of the target station (e.g., Home, Opentrons, Tecan, Storage_A1, Storage_A2, Incubator). */
+}
+
+/* Responses of Navigate */
+message Navigate_Responses {
+  sila2.org.silastandard.String NavigationResult = 1;  /* Result message of the navigation operation. */
+}
+
+/* Intermediate responses of Navigate */
+message Navigate_IntermediateResponses {
+  sila2.org.silastandard.String NavigationStatus = 1;  /* Current navigation progress (navigating, arrived, failed). */
+}
+
+/* Parameters for MoveArm */
+message MoveArm_Parameters {
+  sila2.org.silastandard.String PositionName = 1;  /* Name of the target arm position (Home, Safe, Travel, Pickup, Place). */
+}
+
+/* Responses of MoveArm */
+message MoveArm_Responses {
+  sila2.org.silastandard.String ArmResult = 1;  /* Result message of the arm movement operation. */
+}
+
+/* Intermediate responses of MoveArm */
+message MoveArm_IntermediateResponses {
+  sila2.org.silastandard.String ArmStatus = 1;  /* Current arm movement status (moving, reached, failed). */
+}
+
+/* Parameters for ControlGripper */
+message ControlGripper_Parameters {
+  sila2.org.silastandard.String Action = 1;  /* Gripper action: open or close. */
+  sila2.org.silastandard.String LabwareType = 2;  /* Labware profile for gripper force/width (96_well_plate, 384_well_plate, reservoir, tube_rack). Empty string uses default. */
+}
+
+/* Responses of ControlGripper */
+message ControlGripper_Responses {
+  sila2.org.silastandard.String GripperResult = 1;  /* Result of the gripper operation. */
+}
+
+/* Parameters for MoveLabware */
+message MoveLabware_Parameters {
+  sila2.org.silastandard.String SourceStation = 1;  /* Name of the station where labware is picked up. */
+  sila2.org.silastandard.String DestinationStation = 2;  /* Name of the station where labware is placed. */
+  sila2.org.silastandard.String LabwareType = 3;  /* Type of labware being transported (96_well_plate, 384_well_plate, reservoir, tube_rack). */
+}
+
+/* Responses of MoveLabware */
+message MoveLabware_Responses {
+  sila2.org.silastandard.String TransportResult = 1;  /* Final result of the labware transport operation. */
+}
+
+/* Intermediate responses of MoveLabware */
+message MoveLabware_IntermediateResponses {
+  sila2.org.silastandard.String TransportStatus = 1;  /* Current step of the transport (navigating_to_source, picking_up, navigating_to_destination, placing, completed). */
+}
+
+/* Parameters for EmergencyStop */
+message EmergencyStop_Parameters {
+}
+
+/* Responses of EmergencyStop */
+message EmergencyStop_Responses {
+  sila2.org.silastandard.String StopResult = 1;  /* Confirmation that emergency stop was executed. */
+}
+
+/* Parameters for GetStatus */
+message GetStatus_Parameters {
+}
+
+/* Responses of GetStatus */
+message GetStatus_Responses {
+  sila2.org.silastandard.String StatusJson = 1;  /* JSON with fields: state, position (x/y/theta), battery_level, ros_connected, current_station. */
+}
+
+/* Parameters for GetStations */
+message GetStations_Parameters {
+}
+
+/* Responses of GetStations */
+message GetStations_Responses {
+  sila2.org.silastandard.String StationsJson = 1;  /* JSON array of station objects with name, type, x, y, height, description fields. */
+}
+
+/* Parameters for RobotStatus */
+message Subscribe_RobotStatus_Parameters {
+}
+
+/* Responses of RobotStatus */
+message Subscribe_RobotStatus_Responses {
+  sila2.org.silastandard.String RobotStatus = 1;  /* Current operational status of the mobile robot (idle, navigating, moving_arm, transporting, error, disconnected). */
+}
+
+/* Parameters for CurrentPosition */
+message Subscribe_CurrentPosition_Parameters {
+}
+
+/* Responses of CurrentPosition */
+message Subscribe_CurrentPosition_Responses {
+  sila2.org.silastandard.String CurrentPosition = 1;  /* Current base pose as a JSON object with x, y, and theta fields (meters and radians). */
+}
+
+/* Parameters for BatteryLevel */
+message Subscribe_BatteryLevel_Parameters {
+}
+
+/* Responses of BatteryLevel */
+message Subscribe_BatteryLevel_Responses {
+  sila2.org.silastandard.Real BatteryLevel = 1;  /* Current battery charge level as a percentage (0.0 to 100.0). */
+}

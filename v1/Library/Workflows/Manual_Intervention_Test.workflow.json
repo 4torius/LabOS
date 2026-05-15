@@ -9,8 +9,7 @@
       "Instrument": "Opentrons",
       "Action": "ExecuteRecipe",
       "Parameters": {
-        "Recipe": "test_case3_selfcontained_no_pipettes",
-        "UseHAL": true
+        "RecipeName": "test_case3_selfcontained_no_pipettes"
       },
       "Description": "Esegue ricetta Opentrons"
     },

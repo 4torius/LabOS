@@ -10,6 +10,13 @@ from typing import Callable, Dict, List, Optional
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
+try:
+    from src import database as _db
+    _DB_AVAILABLE = True
+except ImportError:
+    _db = None
+    _DB_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # Regex for ${variable_name} patterns in workflow parameters
@@ -44,14 +51,15 @@ def _resolve_variables(data, variables: dict):
     return data
 
 
-def _save_run_archive(BASE_DIR: Path, workflow_name: str, result, step_results: list):
+def _save_run_archive(BASE_DIR: Path, workflow_name: str, result, step_results: list, run_id: Optional[str] = None):
     """Persist experiment run metadata to Results/runs/."""
     try:
         runs_dir = BASE_DIR / "Results" / "runs"
         runs_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_name = re.sub(r'[^\w\-]', '_', workflow_name)
-        run_id = f"{timestamp}_{safe_name}"
+        if run_id is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_name = re.sub(r'[^\w\-]', '_', workflow_name)
+            run_id = f"{timestamp}_{safe_name}"
         run_data = {
             "run_id": run_id,
             "workflow_name": workflow_name,
@@ -67,6 +75,8 @@ def _save_run_archive(BASE_DIR: Path, workflow_name: str, result, step_results: 
         (runs_dir / f"{run_id}.json").write_text(
             json.dumps(run_data, indent=2, default=str), encoding='utf-8'
         )
+        if _DB_AVAILABLE:
+            _db.save_run(run_data)
         logger.info(f"Run archived: {run_id}")
         return run_id
     except Exception as e:
@@ -90,6 +100,8 @@ def create_workflows_router(
 ) -> APIRouter:
     router = APIRouter(tags=["workflows"])
     active_executor = None
+    # Prevents concurrent workflow execution (parallel_execution:false is the default).
+    _executor_lock = asyncio.Lock()
 
     # CRUD
 
@@ -217,6 +229,16 @@ def create_workflows_router(
     async def execute_workflow(request: Request):
         """Execute a workflow via PnPWorkflowExecutor (dependency graph + retry + intervention)."""
         nonlocal active_executor
+        if _executor_lock.locked():
+            return {"status": "busy", "error": "Another workflow is already running"}
+        await _executor_lock.acquire()
+        try:
+            return await _run_workflow(request)
+        finally:
+            _executor_lock.release()
+
+    async def _run_workflow(request: Request):
+        nonlocal active_executor
         data = await request.json()
         workflow_name = data.get("WorkflowName", "Unknown")
         # Optional variables dict provided by frontend (Settimana 8: dialog variabili)
@@ -256,8 +278,33 @@ def create_workflows_router(
             if hasattr(instr, '_server') and instr._server:
                 registry.register(instr.id, instr._server)
 
+        # Pre-flight: validate all instrument names before starting
+        _live_names = [i.name.lower() for i in _exec_core.list_instruments()]
+        _missing = []
+        for _step in data.get("Steps", []):
+            _instr = (_step.get("Instrument") or "").strip()
+            _instr_lower = _instr.lower()
+            if not _instr_lower or _instr_lower in ("manual", "delay", "refill"):
+                continue
+            if not any(_instr_lower in n or n in _instr_lower for n in _live_names):
+                _missing.append(_instr)
+        if _missing:
+            _available = [i.name for i in _exec_core.list_instruments()]
+            return {
+                "status": "error",
+                "error": f"Instrument(s) not found: {', '.join(set(_missing))}. "
+                         f"Available: {', '.join(_available) or 'none'}",
+            }
+
         executor = PnPWorkflowExecutor(registry)
-        shared_wf_ctx: dict = {"plate_id": None, "step_results": [], "workflow_name": workflow_name}
+        _wf_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        _wf_safe = re.sub(r'[^\w\-]', '_', workflow_name)
+        _run_id = f"{_wf_ts}_{_wf_safe}"
+        shared_wf_ctx: dict = {
+            "plate_id": None, "current_plate_id": None,
+            "step_results": [], "workflow_name": workflow_name,
+            "run_id": _run_id,
+        }
 
         async def web_execute_step(step, wf_context) -> "CommandResult":
             if wf_context and wf_context.plate_id and not shared_wf_ctx["plate_id"]:
@@ -267,7 +314,8 @@ def create_workflows_router(
                 step.instrument, step.action, step.parameters,
                 state, ws_manager, _exec_core, shared_wf_ctx,
                 plate_tracking, save_plate_tracking, plate_tracking_lock,
-                pending_operator_actions, pending_operator_actions_lock, WEBAPP_CONFIG
+                pending_operator_actions, pending_operator_actions_lock, WEBAPP_CONFIG,
+                base_dir=BASE_DIR,
             )
 
             if wf_context and shared_wf_ctx.get("plate_id") and not wf_context.plate_id:
@@ -384,7 +432,7 @@ def create_workflows_router(
             active_executor = None
 
         # Archive run (Settimana 8: archivio esperimenti)
-        run_id = _save_run_archive(BASE_DIR, workflow_name, result, shared_wf_ctx["step_results"])
+        run_id = _save_run_archive(BASE_DIR, workflow_name, result, shared_wf_ctx["step_results"], run_id=_run_id)
 
         if result.success:
             state.add_log(
@@ -457,6 +505,88 @@ def create_workflows_router(
         if not run_file.exists():
             raise HTTPException(404, f"Run {run_id} not found")
         return json.loads(run_file.read_text(encoding='utf-8'))
+
+    # Database-backed run history (SQLite)
+
+    @router.get("/api/db/runs")
+    async def db_list_runs(
+        limit: int = 50,
+        offset: int = 0,
+        status: Optional[str] = None,
+        workflow_name: Optional[str] = None,
+    ):
+        if not _DB_AVAILABLE:
+            raise HTTPException(503, "Database not available")
+        runs = _db.get_runs(limit=limit, offset=offset, status=status, workflow_name=workflow_name)
+        return {"runs": runs, "count": len(runs), "limit": limit, "offset": offset}
+
+    @router.get("/api/db/runs/{run_id}")
+    async def db_get_run(run_id: str):
+        if not _DB_AVAILABLE:
+            raise HTTPException(503, "Database not available")
+        run = _db.get_run(run_id)
+        if run is None:
+            raise HTTPException(404, f"Run {run_id} not found in database")
+        return run
+
+    @router.get("/api/db/stats")
+    async def db_stats():
+        if not _DB_AVAILABLE:
+            raise HTTPException(503, "Database not available")
+        return _db.get_stats()
+
+    @router.get("/api/db/plates")
+    async def db_list_plates(run_id: Optional[str] = None, limit: int = 50, offset: int = 0):
+        if not _DB_AVAILABLE:
+            raise HTTPException(503, "Database not available")
+        plates = _db.get_plates(run_id=run_id, limit=limit, offset=offset)
+        return {"plates": plates, "count": len(plates)}
+
+    @router.get("/api/db/plates/{plate_id}")
+    async def db_get_plate(plate_id: str):
+        if not _DB_AVAILABLE:
+            raise HTTPException(503, "Database not available")
+        plate = _db.get_plate(plate_id)
+        if plate is None:
+            raise HTTPException(404, f"Plate {plate_id} not found")
+        return plate
+
+    @router.get("/api/db/plates/{plate_id}/heatmap")
+    async def db_plate_heatmap(plate_id: str):
+        """Return well grid data suitable for heatmap rendering."""
+        if not _DB_AVAILABLE:
+            raise HTTPException(503, "Database not available")
+        plate = _db.get_plate(plate_id)
+        if plate is None:
+            raise HTTPException(404, f"Plate {plate_id} not found")
+        rows = plate.get("rows") or 8
+        cols = plate.get("columns") or 12
+        row_labels = [chr(65 + i) for i in range(rows)]
+        well_data: dict = {}
+        for w in plate.get("wells", []):
+            well_data[w["well_id"]] = {"reagent": w.get("reagent_name"), "volume_ul": w.get("volume_ul")}
+        for m in plate.get("measurements", []):
+            wid = m.get("well_id", "")
+            if wid:
+                well_data.setdefault(wid, {})["value"] = m.get("value")
+                well_data.setdefault(wid, {})["unit"] = m.get("unit")
+        grid = []
+        for r in row_labels:
+            row_cells = []
+            for c in range(1, cols + 1):
+                wid = f"{r}{c}"
+                cell = {"well_id": wid, **well_data.get(wid, {})}
+                row_cells.append(cell)
+            grid.append(row_cells)
+        values = [m.get("value") for m in plate.get("measurements", []) if m.get("value") is not None]
+        return {
+            "plate_id": plate_id,
+            "rows": rows, "columns": cols,
+            "row_labels": row_labels,
+            "grid": grid,
+            "value_min": min(values) if values else None,
+            "value_max": max(values) if values else None,
+        }
 
     # Experiment Templates (Settimana 9)
 
@@ -712,7 +842,8 @@ def create_workflows_router(
                         step.instrument, step.action, step.parameters,
                         state, ws_manager, _exec_core, _sc,
                         plate_tracking, save_plate_tracking, plate_tracking_lock,
-                        pending_operator_actions, pending_operator_actions_lock, WEBAPP_CONFIG
+                        pending_operator_actions, pending_operator_actions_lock, WEBAPP_CONFIG,
+                        base_dir=BASE_DIR,
                     )
                     if isinstance(r, dict):
                         success = r.get("status", "completed") not in ("error", "skipped")
@@ -811,6 +942,7 @@ async def _execute_step(
     pending_operator_actions: list,
     pending_operator_actions_lock: asyncio.Lock,
     WEBAPP_CONFIG: dict,
+    base_dir: Optional[Path] = None,
 ) -> dict:
     """Execute one workflow step: delay, manual, refill, or instrument command."""
 
@@ -862,6 +994,13 @@ async def _execute_step(
         state.devices[device_id].status = "busy"
         await ws_manager.broadcast({"type": "device_update", "device_id": device_id, "status": "busy"})
 
+    # Auto-inject PlateID/SampleSetID/PlateType for RunMeasurement from workflow context
+    if action.lower() == "runmeasurement" and not params.get("PlateID"):
+        params = dict(params)
+        params["PlateID"] = workflow_context.get("current_plate_id", "")
+        params.setdefault("SampleSetID", "")
+        params.setdefault("PlateType", "")
+
     try:
         result = await core.execute_command(device_id, action, params)
         logger.info(f"[WORKFLOW] {device_id}/{action} → success={result.success}, error={result.error}")
@@ -870,8 +1009,8 @@ async def _execute_step(
             state.add_log("info", f"{action} completed on {device_id}", "workflow")
 
             # Plate tracking (save_plate_tracking handles its own lock)
-            _wf_track_tecan(device_id, action, params, result, workflow_context, plate_tracking, state)
-            _wf_track_opentrons(device_id, action, params, result, workflow_context, plate_tracking, state)
+            _wf_track_tecan(device_id, action, params, result, workflow_context, plate_tracking, state, base_dir=base_dir)
+            _wf_track_opentrons(device_id, action, params, result, workflow_context, plate_tracking, state, base_dir=base_dir)
             await save_plate_tracking(plate_tracking)
 
             # Tip refill notification on warning message
@@ -1002,50 +1141,267 @@ async def _wait_refill(rack_type, state, ws_manager, pending_operator_actions, l
     return {"status": "completed", "action": "RefillTipRack", "rack_type": rack_type}
 
 
-def _wf_track_tecan(device_id, action, params, result, wf_ctx, plate_tracking, state):
+def _wf_track_tecan(device_id, action, params, result, wf_ctx, plate_tracking, state, base_dir: Optional[Path] = None):
     if "tecan" not in device_id.lower() or action not in ["RunMeasurement", "RunAnalysis"]:
         return
-    plate_id = params.get("plate_id") or params.get("plateId") or params.get("PlateId")
-    if not plate_id and wf_ctx:
-        plate_id = wf_ctx.get("plate_id")
-    if not plate_id:
-        return
-    if plate_id not in plate_tracking:
-        plate_tracking[plate_id] = {"created": datetime.now().isoformat(), "status": "analyzed", "analysis_results": []}
+    plate_id = (params.get("PlateID") or params.get("plate_id") or params.get("plateId")
+                or (wf_ctx.get("current_plate_id") if wf_ctx else None))
     result_data = result.data if isinstance(result.data, dict) else {}
-    plate_tracking[plate_id]["analysis_results"].append({
-        "timestamp": datetime.now().isoformat(),
-        "measurement_type": params.get("measurement_type", "spectroscopy"),
-        "protocol": params.get("protocol") or params.get("protocol_file", ""),
-        "result_file": result_data.get("animl_file_path", "") or result_data.get("excel_file_path", ""),
-        "command": action, "instrument": device_id, "workflow_context": True, "raw_result": result_data
-    })
-    plate_tracking[plate_id]["status"] = "analyzed"
-    state.add_log("info", f"Analysis result linked to plate {plate_id}", "plates")
+    animl_path = result_data.get("animl_file_path", "") or result_data.get("AnIMLFilePath", "")
+
+    if plate_id and plate_id not in plate_tracking:
+        plate_tracking[plate_id] = {"created": datetime.now().isoformat(), "status": "analyzed", "analysis_results": []}
+    if plate_id:
+        plate_tracking[plate_id]["analysis_results"] = plate_tracking[plate_id].get("analysis_results", [])
+        plate_tracking[plate_id]["analysis_results"].append({
+            "timestamp": datetime.now().isoformat(),
+            "measurement_type": params.get("measurement_type", "spectroscopy"),
+            "protocol": params.get("ProtocolFile") or params.get("protocol", ""),
+            "result_file": animl_path or result_data.get("excel_file_path", ""),
+            "command": action, "instrument": device_id, "workflow_context": True, "raw_result": result_data,
+        })
+        plate_tracking[plate_id]["status"] = "analyzed"
+        state.add_log("info", f"Analysis result linked to plate {plate_id}", "plates")
+
+    # DB: parse AnIML per-well and save with full measurement metadata
+    if _DB_AVAILABLE and animl_path and plate_id:
+        try:
+            from src.animl_parser import parse_animl
+            animl_result = parse_animl(Path(animl_path))
+            run_id = wf_ctx.get("run_id") if wf_ctx else None
+            measurement_id = _db.get_last_measurement_id(run_id) if run_id else None
+
+            protocol_name = params.get("ProtocolFile") or params.get("protocol", "")
+            protocol_id = None
+            if protocol_name:
+                # Build protocol metadata from the first experiment step that has it
+                proto_data: dict = {}
+                for exp_step in animl_result.get("experiment_steps", []):
+                    proto_data = {
+                        "measurement_type": exp_step.get("measurement_type"),
+                        "wavelength_nm": exp_step.get("wavelength_nm"),
+                        "excitation_nm": exp_step.get("excitation_nm"),
+                        "emission_nm": exp_step.get("emission_nm"),
+                        "parameters": exp_step.get("parameters"),
+                    }
+                    if any(v is not None for v in proto_data.values()):
+                        break
+                protocol_id = _db.get_or_create_protocol(protocol_name, proto_data)
+
+            well_values = []
+            for exp_step in animl_result.get("experiment_steps", []):
+                meas_type = exp_step.get("measurement_type")
+                wl_nm = exp_step.get("wavelength_nm")
+                ex_nm = exp_step.get("excitation_nm")
+                em_nm = exp_step.get("emission_nm")
+                for m in exp_step.get("measurements", []):
+                    well_values.append({
+                        "well": m.get("well"),
+                        "value": m.get("value"),
+                        "unit": m.get("unit"),
+                        "measurement_type": meas_type,
+                        "wavelength_nm": wl_nm,
+                        "excitation_nm": ex_nm,
+                        "emission_nm": em_nm,
+                        "cycle": 1,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    })
+            if well_values:
+                _db.save_well_measurements(plate_id, measurement_id, well_values, protocol_id=protocol_id)
+                _db.update_plate_status(plate_id, "measured")
+        except Exception as exc:
+            logger.warning(f"AnIML DB integration failed: {exc}")
 
 
-def _wf_track_opentrons(device_id, action, params, result, wf_ctx, plate_tracking, state):
+def _resolve_plate_metadata(recipe_name: str, base_dir: Path) -> dict:
+    """Read active HAL config, find the primary well-plate labware, return plate metadata."""
+    try:
+        active_file = base_dir / "Library" / "HardwareConfig" / ".active"
+        hal_name = active_file.read_text(encoding="utf-8").strip() if active_file.exists() else ""
+        if not hal_name:
+            return {}
+        hal_path = base_dir / "Library" / "HardwareConfig" / hal_name
+        if not hal_path.exists():
+            hal_path = base_dir / "Library" / "HardwareConfig" / f"{hal_name}.json"
+        if not hal_path.exists():
+            return {}
+        hal = json.loads(hal_path.read_text(encoding="utf-8"))
+        for logical, lw in hal.get("Labware", {}).items():
+            load_name = lw.get("LoadName", "")
+            if "wellplate" in load_name.lower():
+                slot = lw.get("Slot", "")
+                plate_json = base_dir / "Library" / "Labware" / "Plates" / f"{load_name}.plate.json"
+                if plate_json.exists():
+                    meta = json.loads(plate_json.read_text(encoding="utf-8"))
+                    return {
+                        "plate_type": load_name,
+                        "display_name": meta.get("display_name"),
+                        "rows": meta.get("rows"),
+                        "columns": meta.get("columns"),
+                        "total_wells": meta.get("total_wells"),
+                        "max_volume_ul": meta.get("max_volume_ul"),
+                        "working_volume_ul": meta.get("working_volume_ul"),
+                        "well_shape": meta.get("well_shape"),
+                        "well_depth_mm": meta.get("well_depth_mm"),
+                        "bottom_type": meta.get("bottom_type"),
+                        "brand": meta.get("brand"),
+                        "tecan_compatible": meta.get("tecan_compatible", True),
+                        "labware_slot": slot,
+                        "hal_config": hal_name.replace(".json", ""),
+                    }
+                return {"plate_type": load_name, "labware_slot": slot,
+                        "hal_config": hal_name.replace(".json", "")}
+    except Exception as exc:
+        logger.warning(f"HAL metadata resolution failed: {exc}")
+    return {}
+
+
+def _extract_wells_from_recipe(recipe_name: str, plate_id: str, base_dir: Path) -> list:
+    """
+    Parse recipe JSON to build per-well records with reagent, volume, liquid_class,
+    phase_name (from Comment steps used as group markers), and pipette_mount.
+
+    Supports: Transfer, TransferWithLiquidClass, Distribute, Aspirate→Dispense pairs.
+    """
+    try:
+        recipe_path = base_dir / "Library" / "Recipes" / f"{recipe_name}.json"
+        if not recipe_path.exists():
+            return []
+        recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
+        steps = recipe.get("Steps", [])
+        now = datetime.utcnow().isoformat()
+
+        # Build a well → cumulative record dict (last write wins per well+reagent combo)
+        well_records: dict = {}
+        current_phase = "default"
+        current_source = ""
+        current_volume = 0.0
+        current_liquid_class = ""
+        current_pipette = recipe.get("Pipettes", {}).get("left") and "left" or "left"
+
+        _transfer_cmds = {
+            "Transfer", "TransferWithLiquidClass", "Distribute",
+            "Aspirate", "Dispense",
+        }
+
+        for step in steps:
+            cmd = step.get("Command", "")
+
+            # Comment steps used as phase/group markers by the recipe generator
+            if cmd == "Comment":
+                msg = step.get("Message", step.get("Text", "")).strip()
+                if msg:
+                    current_phase = msg
+                continue
+
+            # Delay steps mark phase boundaries — reset phase label
+            if cmd == "Delay":
+                current_phase = "default"
+                continue
+
+            if cmd not in _transfer_cmds:
+                continue
+
+            pipette_mount = step.get("PipetteMount", current_pipette)
+            liquid_class = step.get("LiquidClass", current_liquid_class) or ""
+            source = step.get("Source", current_source)
+            volume = float(step.get("Volume", current_volume) or 0)
+
+            if cmd == "Aspirate":
+                # Remember source for the subsequent Dispense
+                current_source = source
+                current_volume = volume
+                current_liquid_class = liquid_class
+                continue
+
+            if cmd == "Dispense":
+                source = source or current_source
+                volume = volume or current_volume
+                liquid_class = liquid_class or current_liquid_class
+
+            destinations = step.get("Destinations") or step.get("Destination") or step.get("Dest") or []
+            if isinstance(destinations, str):
+                destinations = [destinations]
+
+            reagent_name = source.split(":")[0] if ":" in source else source
+
+            for dest in destinations:
+                if not dest or ":" not in dest:
+                    continue
+                labware, well_id = dest.split(":", 1)
+                well_id = well_id.strip()
+                if not well_id:
+                    continue
+                row_label = well_id[0].upper()
+                col_str = well_id[1:]
+                col_num = int(col_str) if col_str.isdigit() else 0
+
+                key = well_id
+                if key in well_records:
+                    # Accumulate volume if same reagent, otherwise keep last write
+                    if well_records[key]["reagent_name"] == reagent_name:
+                        well_records[key]["volume_ul"] = (
+                            well_records[key]["volume_ul"] + volume
+                        )
+                    else:
+                        well_records[key] = dict(well_records[key])
+                        well_records[key]["volume_ul"] = volume
+                        well_records[key]["reagent_name"] = reagent_name
+                else:
+                    well_records[key] = {
+                        "plate_id": plate_id,
+                        "well_id": well_id,
+                        "row_label": row_label,
+                        "col_number": col_num,
+                        "reagent_name": reagent_name,
+                        "volume_ul": volume,
+                        "liquid_class": liquid_class,
+                        "phase_name": current_phase,
+                        "source_well": source,
+                        "pipette_mount": pipette_mount,
+                        "pipetted_at": now,
+                    }
+
+        return list(well_records.values())
+    except Exception as exc:
+        logger.warning(f"Recipe well extraction failed: {exc}")
+        return []
+
+
+def _wf_track_opentrons(device_id, action, params, result, wf_ctx, plate_tracking, state, base_dir: Optional[Path] = None):
     if "opentrons" not in device_id.lower() or action not in ["ExecuteRecipe", "RunRecipe", "run_recipe"]:
         return
-    plate_id = params.get("plate_id") or params.get("PlateId")
-    recipe_name = params.get("recipe") or params.get("recipe_name") or params.get("RecipeName", "")
-    if not plate_id:
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        recipe_slug = recipe_name.replace('.json', '').replace(' ', '_') if recipe_name else 'unknown'
-        plate_id = f"PLATE_{ts}_{recipe_slug}"
+    recipe_name = params.get("RecipeName") or params.get("recipe_name") or params.get("recipe", "")
+    recipe_slug = re.sub(r'[^a-z0-9]', '', recipe_name.lower())[:12] if recipe_name else "unknown"
+    plate_id = f"PLT-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{recipe_slug}"
+
     if wf_ctx is not None:
         wf_ctx["plate_id"] = plate_id
-        state.add_log("info", f"Auto-generated plate_id: {plate_id}", "workflow")
-    if plate_id not in plate_tracking:
-        plate_tracking[plate_id] = {
-            "created": datetime.now().isoformat(), "status": "pipetted", "analysis_results": [],
-            "pipetting_info": {"timestamp": datetime.now().isoformat(), "recipe": recipe_name,
-                               "instrument": device_id, "command": action, "workflow_context": True}
-        }
-    else:
-        plate_tracking[plate_id]["status"] = "pipetted"
-        plate_tracking[plate_id]["pipetting_info"] = {
-            "timestamp": datetime.now().isoformat(), "recipe": recipe_name,
-            "instrument": device_id, "command": action, "workflow_context": True
-        }
+        wf_ctx["current_plate_id"] = plate_id
+        state.add_log("info", f"Plate ID: {plate_id}", "workflow")
+
+    plate_tracking[plate_id] = {
+        "created": datetime.now().isoformat(), "status": "pipetted", "analysis_results": [],
+        "pipetting_info": {"timestamp": datetime.now().isoformat(), "recipe": recipe_name,
+                           "instrument": device_id, "command": action, "workflow_context": True},
+    }
+
+    if _DB_AVAILABLE:
+        try:
+            plate_meta = _resolve_plate_metadata(recipe_name, base_dir) if base_dir else {}
+            wells = _extract_wells_from_recipe(recipe_name, plate_id, base_dir) if base_dir else []
+            run_id = wf_ctx.get("run_id") if wf_ctx else None
+            _db.save_plate({
+                "plate_id": plate_id,
+                "run_id": run_id,
+                "recipe_name": recipe_name,
+                "prepared_at": datetime.utcnow().isoformat(),
+                "status": "prepared",
+                **plate_meta,
+            })
+            if wells:
+                _db.save_wells(wells)
+        except Exception as exc:
+            logger.warning(f"Plate DB save failed: {exc}")
+
     state.add_log("info", f"Pipetting recorded for plate {plate_id}", "plates")

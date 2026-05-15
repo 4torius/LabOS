@@ -481,7 +481,7 @@ def create_instruments_router(
                 import grpc
                 from src.pnp_stubs import OpentronsService_pb2 as pb2
                 from src.pnp_stubs import OpentronsService_pb2_grpc as pb2_grpc
-                host, port = _load_server_endpoint(BASE_DIR, "opentrons", "localhost", 50057)
+                host, port = _load_server_endpoint(BASE_DIR, "opentrons", "localhost", 50302)
                 async with grpc.aio.insecure_channel(f'{host}:{port}') as channel:
                     stub = pb2_grpc.OpentronsServiceStub(channel)
                     req = pb2.RefillTipRackRequest(rack_id=rack_type)

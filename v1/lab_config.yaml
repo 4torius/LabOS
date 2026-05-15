@@ -22,20 +22,20 @@ servers:
     enabled: true
     host: localhost
     port: 50051
-    directory: SiLA2/TecanSiLA2Server
+    directory: SiLA2/TecanM200SiLA2Server
     command_windows:
-    - dotnet
-    - run
+    - python
+    - main.py
     command_unix:
-    - dotnet
-    - run
+    - python
+    - main.py
     startup_timeout: 30
-    check_file: Program.cs
+    check_file: main.py
   opentrons:
     name: Opentrons Flex
     enabled: true
     host: localhost
-    port: 50057
+    port: 50302
     directory: SiLA2/OpentronsSiLA2Server
     command_windows:
     - python
@@ -48,14 +48,14 @@ servers:
   mobile:
     name: Mobile Robot
     enabled: true
-    host: 192.168.11.22
-    port: 50053
-    directory: SiLA2/MobileSiLA2Server
+    host: 10.16.0.114      # Robot PC WiFi IP — update if different
+    port: 50053            # ext/MobileSiLA2Server (task-based, rpwc_msgs)
+    directory: ext/MobileSiLA2Server
     command_windows: []
     command_unix: []
     startup_timeout: 20
     check_file: ''
-    remote: true
+    remote: true           # Runs on external Linux PC, not started locally
     network:
       connection_timeout: 5
       retry_count: 3
@@ -65,7 +65,7 @@ servers:
     name: Manual Station
     enabled: true
     host: localhost
-    port: 50360
+    port: 50500
     directory: SiLA2/ManualStationSiLA2Server
     command_windows:
     - python
@@ -78,7 +78,7 @@ servers:
 discovery:
   enabled: true
   scan_interval: 30
-  service_type: _sila2._tcp.local.
+  service_type: _sila._tcp.local.
 workflow:
   parallel_execution: false
   default_timeout: 600

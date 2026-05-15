@@ -194,10 +194,10 @@ def stop_processes(stop_servers: bool = True, stop_webapp: bool = True):
 def get_servers_config() -> Dict:
     """Get server configurations from lab_config.yaml."""
     return CONFIG.get('servers', {
-        'tecan': {'name': 'Tecan M200 Pro', 'port': 50051, 'enabled': True},
-        'opentrons': {'name': 'Opentrons Flex', 'port': 50057, 'enabled': True},
-        'mobile': {'name': 'Mobile Robot', 'port': 50053, 'enabled': True},
-        'manual_station': {'name': 'Manual Station', 'port': 50360, 'enabled': True},
+        'tecan': {'name': 'Tecan M200 Pro', 'port': 50300, 'enabled': True},
+        'opentrons': {'name': 'Opentrons Flex', 'port': 50302, 'enabled': True},
+        'mobile': {'name': 'Mobile Robot', 'port': 50201, 'enabled': True},
+        'manual_station': {'name': 'Manual Station', 'port': 50500, 'enabled': True},
     })
 
 def print_status():
@@ -365,16 +365,16 @@ def start_webapp(restart: bool = True):
     
     print(f"\n{C.BOLD}🌐 Starting WebApp...{C.RESET}\n")
     
-    webapp_script = BASE_DIR / "start_webapp.py"
-    
+    webapp_script = BASE_DIR / "webapp" / "app.py"
+
     if not webapp_script.exists():
-        err("start_webapp.py not found")
+        err("webapp/app.py not found")
         return
-    
+
     try:
         if sys.platform == 'win32':
             subprocess.Popen(
-                f'start "LabOS WebApp" cmd /k "{PYTHON_EXE}" start_webapp.py --port 5000',
+                f'start "LabOS WebApp" cmd /k "{PYTHON_EXE}" webapp/app.py --port 5000',
                 cwd=BASE_DIR,
                 shell=True
             )

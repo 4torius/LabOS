@@ -8,7 +8,7 @@
       "Instrument": "Opentrons Flex",
       "Action": "ExecuteRecipe",
       "Parameters": {
-        "recipe": "test_case1_requirements"
+        "RecipeName": "test_case1_requirements"
       }
     },
     {

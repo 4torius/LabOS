@@ -1,0 +1,310 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Feature xmlns="http://www.sila-standard.org"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://www.sila-standard.org https://gitlab.com/SiLA2/sila_base/-/raw/master/schema/FeatureDefinition.xsd"
+         SiLA2Version="1.1"
+         FeatureVersion="1.0"
+         MaturityLevel="Draft"
+         Originator="org.labos"
+         Category="instruments.platereader">
+
+  <Identifier>PlateReaderService</Identifier>
+  <DisplayName>Plate Reader Service</DisplayName>
+  <Description>
+    SiLA2 Feature for controlling the Tecan Infinite M200 Pro plate reader.
+    Supports Absorbance, Fluorescence, and Luminescence measurements.
+    Results are returned in AnIML format for LIMS compatibility.
+    This Python SiLA2 server bridges to a C# COM layer via gRPC proxy.
+  </Description>
+
+  <!-- =================== PROPERTIES =================== -->
+
+  <Property>
+    <Identifier>IsConnected</Identifier>
+    <DisplayName>Is Connected</DisplayName>
+    <Description>Whether the instrument is currently connected.</Description>
+    <Observable>Yes</Observable>
+    <DataType><Basic>Boolean</Basic></DataType>
+  </Property>
+
+  <Property>
+    <Identifier>OperationalStatus</Identifier>
+    <DisplayName>Operational Status</DisplayName>
+    <Description>Current operational state of the instrument.</Description>
+    <Observable>Yes</Observable>
+    <DataType>
+      <Constrained>
+        <DataType><Basic>String</Basic></DataType>
+        <Constraints>
+          <Set>
+            <Value>Idle</Value>
+            <Value>Busy</Value>
+            <Value>Error</Value>
+            <Value>Disconnected</Value>
+          </Set>
+        </Constraints>
+      </Constrained>
+    </DataType>
+  </Property>
+
+  <Property>
+    <Identifier>CurrentTemperature</Identifier>
+    <DisplayName>Current Temperature</DisplayName>
+    <Description>Current plate temperature in degrees Celsius.</Description>
+    <Observable>Yes</Observable>
+    <DataType><Basic>Real</Basic></DataType>
+  </Property>
+
+  <Property>
+    <Identifier>InstrumentInfo</Identifier>
+    <DisplayName>Instrument Information</DisplayName>
+    <Description>JSON-encoded instrument details: serial number, product name, firmware version, simulated flag.</Description>
+    <Observable>No</Observable>
+    <DataType><Basic>String</Basic></DataType>
+  </Property>
+
+  <!-- =================== COMMANDS =================== -->
+
+  <Command>
+    <Identifier>Connect</Identifier>
+    <DisplayName>Connect</DisplayName>
+    <Description>Connect to the Tecan plate reader. Pass empty string for default USB connection.</Description>
+    <Observable>No</Observable>
+    <Parameter>
+      <Identifier>ConnectionString</Identifier>
+      <DisplayName>Connection String</DisplayName>
+      <Description>Connection string (e.g. "usb", "sim", "last"). Empty string uses USB default.</Description>
+      <DataType><Basic>String</Basic></DataType>
+    </Parameter>
+    <DefinedExecutionErrors>
+      <Identifier>ConnectionFailed</Identifier>
+    </DefinedExecutionErrors>
+  </Command>
+
+  <Command>
+    <Identifier>Disconnect</Identifier>
+    <DisplayName>Disconnect</DisplayName>
+    <Description>Disconnect from the plate reader.</Description>
+    <Observable>No</Observable>
+  </Command>
+
+  <Command>
+    <Identifier>PlateIn</Identifier>
+    <DisplayName>Plate In</DisplayName>
+    <Description>Move the plate carrier into the instrument.</Description>
+    <Observable>No</Observable>
+    <DefinedExecutionErrors>
+      <Identifier>NotConnected</Identifier>
+      <Identifier>MovementFailed</Identifier>
+    </DefinedExecutionErrors>
+  </Command>
+
+  <Command>
+    <Identifier>PlateOut</Identifier>
+    <DisplayName>Plate Out</DisplayName>
+    <Description>Eject the plate carrier from the instrument.</Description>
+    <Observable>No</Observable>
+    <DefinedExecutionErrors>
+      <Identifier>NotConnected</Identifier>
+      <Identifier>MovementFailed</Identifier>
+    </DefinedExecutionErrors>
+  </Command>
+
+  <Command>
+    <Identifier>SetTemperature</Identifier>
+    <DisplayName>Set Temperature</DisplayName>
+    <Description>Set the plate temperature target (4–45 °C).</Description>
+    <Observable>No</Observable>
+    <Parameter>
+      <Identifier>TargetTemperature</Identifier>
+      <DisplayName>Target Temperature</DisplayName>
+      <Description>Desired temperature in degrees Celsius.</Description>
+      <DataType>
+        <Constrained>
+          <DataType><Basic>Real</Basic></DataType>
+          <Constraints>
+            <MinimalInclusive>4.0</MinimalInclusive>
+            <MaximalInclusive>45.0</MaximalInclusive>
+          </Constraints>
+        </Constrained>
+      </DataType>
+    </Parameter>
+    <DefinedExecutionErrors>
+      <Identifier>NotConnected</Identifier>
+      <Identifier>TemperatureOutOfRange</Identifier>
+    </DefinedExecutionErrors>
+  </Command>
+
+  <Command>
+    <Identifier>TurnOffTemperature</Identifier>
+    <DisplayName>Turn Off Temperature</DisplayName>
+    <Description>Disable the temperature control system.</Description>
+    <Observable>No</Observable>
+    <DefinedExecutionErrors>
+      <Identifier>NotConnected</Identifier>
+    </DefinedExecutionErrors>
+  </Command>
+
+  <Command>
+    <Identifier>RunMeasurement</Identifier>
+    <DisplayName>Run Measurement</DisplayName>
+    <Description>
+      Execute a measurement using a .mdfx protocol file.
+      Observable command — reports progress while the measurement runs.
+    </Description>
+    <Observable>Yes</Observable>
+    <Parameter>
+      <Identifier>ProtocolFile</Identifier>
+      <DisplayName>Protocol File</DisplayName>
+      <Description>Name of the .mdfx protocol file (must exist in the Protocols directory).</Description>
+      <DataType><Basic>String</Basic></DataType>
+    </Parameter>
+    <Parameter>
+      <Identifier>PlateID</Identifier>
+      <DisplayName>Plate ID</DisplayName>
+      <Description>Unique plate identifier for traceability.</Description>
+      <DataType><Basic>String</Basic></DataType>
+    </Parameter>
+    <Parameter>
+      <Identifier>SampleSetID</Identifier>
+      <DisplayName>Sample Set ID</DisplayName>
+      <Description>Sample set identifier (used in AnIML output).</Description>
+      <DataType><Basic>String</Basic></DataType>
+    </Parameter>
+    <Parameter>
+      <Identifier>PlateType</Identifier>
+      <DisplayName>Plate Type</DisplayName>
+      <Description>iControl plate type name (e.g. GRE96ft_Corning360). Empty = use protocol default.</Description>
+      <DataType><Basic>String</Basic></DataType>
+    </Parameter>
+    <Response>
+      <Identifier>AnIMLFilePath</Identifier>
+      <DisplayName>AnIML File Path</DisplayName>
+      <Description>Path to the saved AnIML result file.</Description>
+      <DataType><Basic>String</Basic></DataType>
+    </Response>
+    <Response>
+      <Identifier>MeasurementType</Identifier>
+      <DisplayName>Measurement Type</DisplayName>
+      <Description>Type of measurement performed.</Description>
+      <DataType>
+        <Constrained>
+          <DataType><Basic>String</Basic></DataType>
+          <Constraints>
+            <Set>
+              <Value>Absorbance</Value>
+              <Value>Fluorescence</Value>
+              <Value>Luminescence</Value>
+              <Value>Mixed</Value>
+              <Value>Unknown</Value>
+            </Set>
+          </Constraints>
+        </Constrained>
+      </DataType>
+    </Response>
+    <IntermediateResponse>
+      <Identifier>Progress</Identifier>
+      <DisplayName>Progress</DisplayName>
+      <Description>Completion percentage (0–100).</Description>
+      <DataType><Basic>Integer</Basic></DataType>
+    </IntermediateResponse>
+    <IntermediateResponse>
+      <Identifier>StatusMessage</Identifier>
+      <DisplayName>Status Message</DisplayName>
+      <Description>Current status description.</Description>
+      <DataType><Basic>String</Basic></DataType>
+    </IntermediateResponse>
+    <DefinedExecutionErrors>
+      <Identifier>NotConnected</Identifier>
+      <Identifier>ProtocolNotFound</Identifier>
+      <Identifier>MeasurementFailed</Identifier>
+      <Identifier>InstrumentBusy</Identifier>
+    </DefinedExecutionErrors>
+  </Command>
+
+  <Command>
+    <Identifier>GetAnIMLResult</Identifier>
+    <DisplayName>Get AnIML Result</DisplayName>
+    <Description>Retrieve an AnIML result file path by plate ID.</Description>
+    <Observable>No</Observable>
+    <Parameter>
+      <Identifier>PlateID</Identifier>
+      <DisplayName>Plate ID</DisplayName>
+      <Description>Plate identifier to look up.</Description>
+      <DataType><Basic>String</Basic></DataType>
+    </Parameter>
+    <Response>
+      <Identifier>AnIMLFilePath</Identifier>
+      <DisplayName>AnIML File Path</DisplayName>
+      <Description>Path to the AnIML result file.</Description>
+      <DataType><Basic>String</Basic></DataType>
+    </Response>
+    <DefinedExecutionErrors>
+      <Identifier>ResultNotFound</Identifier>
+    </DefinedExecutionErrors>
+  </Command>
+
+  <Command>
+    <Identifier>ListProtocols</Identifier>
+    <DisplayName>List Protocols</DisplayName>
+    <Description>List all available .mdfx protocol names as a JSON array.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>ProtocolsJson</Identifier>
+      <DisplayName>Protocols JSON</DisplayName>
+      <Description>JSON array of protocol file names.</Description>
+      <DataType><Basic>String</Basic></DataType>
+    </Response>
+  </Command>
+
+  <!-- =================== DEFINED EXECUTION ERRORS =================== -->
+
+  <DefinedExecutionError>
+    <Identifier>ConnectionFailed</Identifier>
+    <DisplayName>Connection Failed</DisplayName>
+    <Description>Could not connect to the instrument.</Description>
+  </DefinedExecutionError>
+
+  <DefinedExecutionError>
+    <Identifier>NotConnected</Identifier>
+    <DisplayName>Not Connected</DisplayName>
+    <Description>Instrument is not connected. Call Connect() first.</Description>
+  </DefinedExecutionError>
+
+  <DefinedExecutionError>
+    <Identifier>MovementFailed</Identifier>
+    <DisplayName>Movement Failed</DisplayName>
+    <Description>Plate carrier movement failed.</Description>
+  </DefinedExecutionError>
+
+  <DefinedExecutionError>
+    <Identifier>TemperatureOutOfRange</Identifier>
+    <DisplayName>Temperature Out Of Range</DisplayName>
+    <Description>Requested temperature is outside the supported range (4–45 °C).</Description>
+  </DefinedExecutionError>
+
+  <DefinedExecutionError>
+    <Identifier>ProtocolNotFound</Identifier>
+    <DisplayName>Protocol Not Found</DisplayName>
+    <Description>The specified protocol file was not found.</Description>
+  </DefinedExecutionError>
+
+  <DefinedExecutionError>
+    <Identifier>MeasurementFailed</Identifier>
+    <DisplayName>Measurement Failed</DisplayName>
+    <Description>The measurement failed.</Description>
+  </DefinedExecutionError>
+
+  <DefinedExecutionError>
+    <Identifier>InstrumentBusy</Identifier>
+    <DisplayName>Instrument Busy</DisplayName>
+    <Description>The instrument is busy with another measurement.</Description>
+  </DefinedExecutionError>
+
+  <DefinedExecutionError>
+    <Identifier>ResultNotFound</Identifier>
+    <DisplayName>Result Not Found</DisplayName>
+    <Description>No result found for the requested plate ID.</Description>
+  </DefinedExecutionError>
+
+</Feature>

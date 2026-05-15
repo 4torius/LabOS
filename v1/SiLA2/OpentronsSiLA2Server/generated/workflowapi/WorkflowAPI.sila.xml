@@ -1,0 +1,306 @@
+<Feature xmlns="http://www.sila-standard.org" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Category="workflow" FeatureVersion="1.0" MaturityLevel="Draft" Originator="org.labos" SiLA2Version="1.1" xsi:schemaLocation="http://www.sila-standard.org https://gitlab.com/SiLA2/sila_base/raw/master/schema/FeatureDefinition.xsd">
+  <Identifier>WorkflowAPI</Identifier>
+  <DisplayName>Opentrons Workflow API</DisplayName>
+  <Description>Simplified workflow-level API for Opentrons Flex robot.
+        5 feature groups, 17 total commands.
+        Low-level commands (Transfer, Aspirate, etc.) are internal to recipes.</Description>
+  <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
+  <!--                    ROBOT CONTROL (4 commands)                       -->
+  <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
+  <Command>
+    <Identifier>Initialize</Identifier>
+    <DisplayName>Initialize Robot</DisplayName>
+    <Description>Initialize connection to the robot and verify it's ready.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>InitializeResult</Identifier>
+      <DisplayName>Initialize Result</DisplayName>
+      <Description>Status message with robot serial number.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>Home</Identifier>
+    <DisplayName>Home Robot</DisplayName>
+    <Description>Home all robot axes to their default positions.</Description>
+    <Observable>Yes</Observable>
+    <Response>
+      <Identifier>HomeResult</Identifier>
+      <DisplayName>Home Result</DisplayName>
+      <Description>Status after homing.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>EmergencyStop</Identifier>
+    <DisplayName>Emergency Stop</DisplayName>
+    <Description>Immediately stop all robot operations.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>StopResult</Identifier>
+      <DisplayName>Stop Result</DisplayName>
+      <Description>Confirmation of emergency stop.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>GetStatus</Identifier>
+    <DisplayName>Get Status</DisplayName>
+    <Description>Get current robot status including active run information.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>StatusResult</Identifier>
+      <DisplayName>Status</DisplayName>
+      <Description>Robot status as JSON.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
+  <!--                  HAL CONFIGURATION (3 commands)                     -->
+  <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
+  <Command>
+    <Identifier>ListHardwareConfigs</Identifier>
+    <DisplayName>List Configs</DisplayName>
+    <Description>List available HAL hardware configurations.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>ConfigList</Identifier>
+      <DisplayName>Config List</DisplayName>
+      <Description>JSON array of available configurations.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>LoadHardwareConfig</Identifier>
+    <DisplayName>Load HAL Config</DisplayName>
+    <Description>Load a hardware configuration (HAL) defining deck layout.</Description>
+    <Observable>No</Observable>
+    <Parameter>
+      <Identifier>ConfigName</Identifier>
+      <DisplayName>Config Name</DisplayName>
+      <Description>Name of the HAL config file (without .yaml extension).</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Parameter>
+    <Response>
+      <Identifier>LoadResult</Identifier>
+      <DisplayName>Load Result</DisplayName>
+      <Description>Loaded configuration details.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>GetCurrentConfig</Identifier>
+    <DisplayName>Current Config</DisplayName>
+    <Description>Get the currently loaded HAL configuration.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>CurrentConfig</Identifier>
+      <DisplayName>Current Config</DisplayName>
+      <Description>Currently loaded configuration as JSON.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
+  <!--                  RECIPE EXECUTION (5 commands)                      -->
+  <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
+  <Command>
+    <Identifier>ListRecipes</Identifier>
+    <DisplayName>List Recipes</DisplayName>
+    <Description>List available JSON recipe files.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>RecipeList</Identifier>
+      <DisplayName>Recipe List</DisplayName>
+      <Description>JSON array of recipe names.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>ExecuteRecipe</Identifier>
+    <DisplayName>Execute Recipe</DisplayName>
+    <Description>Execute a JSON recipe file on the robot.</Description>
+    <Observable>Yes</Observable>
+    <Parameter>
+      <Identifier>RecipeName</Identifier>
+      <DisplayName>Recipe Name</DisplayName>
+      <Description>Name of the recipe file (without .json extension).</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Parameter>
+    <Response>
+      <Identifier>RunId</Identifier>
+      <DisplayName>Run ID</DisplayName>
+      <Description>ID of the started run for tracking.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>PauseRun</Identifier>
+    <DisplayName>Pause Run</DisplayName>
+    <Description>Pause the currently executing recipe.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>PauseResult</Identifier>
+      <DisplayName>Pause Result</DisplayName>
+      <Description>Confirmation of pause.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>ResumeRun</Identifier>
+    <DisplayName>Resume Run</DisplayName>
+    <Description>Resume a paused recipe.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>ResumeResult</Identifier>
+      <DisplayName>Resume Result</DisplayName>
+      <Description>Confirmation of resume.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>AbortRun</Identifier>
+    <DisplayName>Abort Run</DisplayName>
+    <Description>Abort the current recipe execution.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>AbortResult</Identifier>
+      <DisplayName>Abort Result</DisplayName>
+      <Description>Confirmation of abort.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
+  <!--                   TIP MANAGEMENT (3 commands)                       -->
+  <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
+  <Command>
+    <Identifier>ListTipRacks</Identifier>
+    <DisplayName>List Tip Racks</DisplayName>
+    <Description>List all tip racks with current usage statistics.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>TipRackList</Identifier>
+      <DisplayName>Tip Rack List</DisplayName>
+      <Description>JSON array of tip rack info with usage counts.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>RefillTipRack</Identifier>
+    <DisplayName>Refill Tip Rack</DisplayName>
+    <Description>Mark a tip rack as refilled/replaced.</Description>
+    <Observable>No</Observable>
+    <Parameter>
+      <Identifier>RackSlot</Identifier>
+      <DisplayName>Rack Slot</DisplayName>
+      <Description>Slot where the tip rack is located (e.g., 'A1', 'B2').</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Parameter>
+    <Response>
+      <Identifier>RefillResult</Identifier>
+      <DisplayName>Refill Result</DisplayName>
+      <Description>Confirmation and new tip count.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>ResetTipTracking</Identifier>
+    <DisplayName>Reset Tip Tracking</DisplayName>
+    <Description>Reset all tip tracking counters to full.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>ResetResult</Identifier>
+      <DisplayName>Reset Result</DisplayName>
+      <Description>Confirmation of reset.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
+  <!--                     MONITORING (3 commands)                         -->
+  <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
+  <Command>
+    <Identifier>SetLights</Identifier>
+    <DisplayName>Set Lights</DisplayName>
+    <Description>Turn deck lights on or off.</Description>
+    <Observable>No</Observable>
+    <Parameter>
+      <Identifier>On</Identifier>
+      <DisplayName>On</DisplayName>
+      <Description>True to turn lights on, false to turn off.</Description>
+      <DataType>
+        <Basic>Boolean</Basic>
+      </DataType>
+    </Parameter>
+    <Response>
+      <Identifier>LightsResult</Identifier>
+      <DisplayName>Lights Result</DisplayName>
+      <Description>Current light state.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>GetRobotInfo</Identifier>
+    <DisplayName>Robot Info</DisplayName>
+    <Description>Get robot model, serial number, firmware version.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>RobotInfo</Identifier>
+      <DisplayName>Robot Info</DisplayName>
+      <Description>Robot details as JSON.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>GetModulesStatus</Identifier>
+    <DisplayName>Modules Status</DisplayName>
+    <Description>Get status of all attached modules (heater/shaker, thermocycler, etc.).</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>ModulesStatus</Identifier>
+      <DisplayName>Modules Status</DisplayName>
+      <Description>Modules status as JSON array.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+</Feature>
