@@ -12,7 +12,7 @@ This guide covers deploying LabOS on a new Windows computer from scratch.
 | Python 3.10 or 3.11 | 3.12 is not recommended (some grpcio wheels lag behind) |
 | Git | To clone the repository |
 | Tecan iControl software | Required for the Tecan C# bridge (Tecan SDK) |
-| TecanBridge.exe | Compile from `v1/SiLA2/TecanM200SiLA2Server/TecanBridge/` (see below) |
+| Opentrons App | Required for Opentrons Flex |
 
 ---
 
