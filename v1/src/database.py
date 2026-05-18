@@ -421,8 +421,8 @@ def search_runs(
         filters: list = []
         params: list = []
         if query:
-            filters.append("(run_id LIKE ? OR workflow_name LIKE ?)")
-            params += [f"%{query}%", f"%{query}%"]
+            filters.append("workflow_name LIKE ?")
+            params.append(f"%{query}%")
         if date_from:
             filters.append("started_at >= ?")
             params.append(date_from)
@@ -1044,6 +1044,131 @@ def export_run_json(run_id: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Failed to export run JSON {run_id}: {e}")
         return None
+
+
+def export_ai_context(status_filter: str = "completed") -> Dict[str, Any]:
+    """
+    Return a structured dict with ALL runs (default: completed only) suitable
+    for feeding to an LLM to generate new experiment recipes.
+
+    Structure:
+    {
+      "schema_version": "2.0",
+      "export_purpose": "AI recipe generation context",
+      "reagent_catalog": [...],   # all known reagents
+      "protocols": [...],         # all measurement protocols
+      "experiments": [            # one entry per run
+        {
+          "run_id": ...,
+          "workflow_name": ...,
+          "status": ...,
+          "duration_seconds": ...,
+          "started_at": ...,
+          "plates": [
+            {
+              "plate_id": ...,
+              "plate_type": ...,
+              "recipe_name": ...,
+              "wells": [...],         # reagent + volume per well
+              "measurements": [...]   # OD/fluorescence per well
+            }
+          ],
+          "errors": [...]
+        }
+      ]
+    }
+    """
+    try:
+        with _conn() as con:
+            where = "WHERE status = ?" if status_filter else ""
+            params_r: list = [status_filter] if status_filter else []
+            run_rows = con.execute(
+                f"SELECT * FROM run_results {where} ORDER BY started_at",
+                params_r,
+            ).fetchall()
+
+            reagents = [dict(r) for r in con.execute("SELECT * FROM reagent_catalog ORDER BY name").fetchall()]
+            protocols = [dict(r) for r in con.execute("SELECT * FROM protocols ORDER BY name").fetchall()]
+
+        experiments = []
+        for rrow in run_rows:
+            run_dict = dict(rrow)
+            result_json = run_dict.pop("result_json", None)
+            errors: list = []
+            if result_json:
+                try:
+                    errors = json.loads(result_json).get("errors", [])
+                except Exception:
+                    pass
+
+            with _conn() as con:
+                plate_rows = con.execute(
+                    "SELECT * FROM plates WHERE run_id = ?", (run_dict["run_id"],)
+                ).fetchall()
+
+            plates_out = []
+            for plate in plate_rows:
+                p = dict(plate)
+                with _conn() as con:
+                    wells = [
+                        dict(w) for w in con.execute(
+                            """SELECT w.well_id, w.row_label, w.col_number,
+                                      w.reagent_name, w.volume_ul, w.concentration_mm,
+                                      w.liquid_class, w.phase_name,
+                                      r.cas_number, r.molecular_formula,
+                                      r.display_name AS reagent_display
+                               FROM wells w
+                               LEFT JOIN reagent_catalog r ON r.id = w.reagent_catalog_id
+                               WHERE w.plate_id = ?
+                               ORDER BY w.col_number, w.row_label""",
+                            (p["plate_id"],),
+                        ).fetchall()
+                    ]
+                    measurements = [
+                        dict(m) for m in con.execute(
+                            """SELECT wm.well_id, wm.value, wm.unit, wm.measurement_type,
+                                      wm.wavelength_nm, wm.excitation_nm, wm.emission_nm,
+                                      wm.cycle, pr.name AS protocol_name
+                               FROM well_measurements wm
+                               LEFT JOIN protocols pr ON pr.id = wm.protocol_id
+                               WHERE wm.plate_id = ?
+                               ORDER BY wm.well_id, wm.cycle""",
+                            (p["plate_id"],),
+                        ).fetchall()
+                    ]
+
+                plates_out.append({
+                    "plate_id": p["plate_id"],
+                    "plate_type": p["plate_type"],
+                    "display_name": p["display_name"],
+                    "recipe_name": p["recipe_name"],
+                    "status": p["status"],
+                    "wells": wells,
+                    "measurements": measurements,
+                })
+
+            experiments.append({
+                "run_id": run_dict["run_id"],
+                "workflow_name": run_dict["workflow_name"],
+                "notes": run_dict.get("notes"),
+                "status": run_dict["status"],
+                "duration_seconds": run_dict["duration_seconds"],
+                "started_at": run_dict["started_at"],
+                "errors": errors,
+                "plates": plates_out,
+            })
+
+        return {
+            "schema_version": "2.0",
+            "export_purpose": "AI recipe generation context",
+            "total_experiments": len(experiments),
+            "reagent_catalog": reagents,
+            "protocols": protocols,
+            "experiments": experiments,
+        }
+    except Exception as e:
+        logger.error(f"Failed to export AI context: {e}")
+        return {}
 
 
 def get_well_heatmap(plate_id: str, measurement_type: Optional[str] = None) -> Dict[str, Any]:

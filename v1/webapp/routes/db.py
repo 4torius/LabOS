@@ -174,6 +174,18 @@ def create_db_router(db_module) -> APIRouter:
             raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
         return data
 
+    @router.get("/export/ai-context.json")
+    async def export_ai_context(status: str = "completed"):
+        """
+        Full context JSON for AI/LLM recipe generation: all experiments with
+        plate layouts, per-well reagents + volumes + measurements, reagent catalog,
+        protocols. Use status='' to include all runs including failed ones.
+        """
+        data = _db.export_ai_context(status_filter=status)
+        if not data:
+            raise HTTPException(status_code=500, detail="Export failed")
+        return data
+
     @router.get("/stats")
     async def get_db_stats():
         stats = _db.get_stats()
