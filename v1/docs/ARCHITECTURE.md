@@ -8,13 +8,13 @@ The system is organized as a four-layer stack:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  LAYER 4: USER INTERFACE                                 │
-│  FastAPI web app • Workflow designer • Real-time monitor │
+│  LAYER 4: USER INTERFACE                                │
+│  FastAPI web app • Workflow designer • Real-time monitor│
 └───────────────────────────┬─────────────────────────────┘
                             │ REST / WebSocket
 ┌───────────────────────────▼─────────────────────────────┐
-│  LAYER 3: ORCHESTRATION                                  │
-│  LabCore • PnP Registry • PnPWorkflowExecutor            │
+│  LAYER 3: ORCHESTRATION                                 │
+│  LabCore • PnP Registry • PnPWorkflowExecutor           │
 └──────────┬─────────────────┬───────────────┬────────────┘
            │ gRPC             │ gRPC          │ gRPC
            │ SiLA2Common      │ SiLA2Common   │ SiLA2Common
@@ -27,8 +27,8 @@ The system is organized as a four-layer stack:
 └──────────┬──────┘  └───────┬────────┘  └──┬─────────────┘
            │                  │              │
 ┌──────────▼──────┐  ┌───────▼────────┐  ┌──▼─────────────┐
-│ LAYER 1: HW     │  │ LAYER 1: HW    │  │ LAYER 1: HW   │
-│ Opentrons Flex  │  │ Tecan M200 Pro │  │ GoFaGo / Human│
+│ LAYER 1: HW     │  │ LAYER 1: HW    │  │ LAYER 1: HW    │
+│ Opentrons Flex  │  │ Tecan M200 Pro │  │ GoFaGo / Human │
 └─────────────────┘  └────────────────┘  └────────────────┘
 ```
 
