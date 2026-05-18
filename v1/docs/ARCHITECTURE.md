@@ -17,13 +17,13 @@ The system is organized as a four-layer stack:
 │  LabCore • PnP Registry • PnPWorkflowExecutor            │
 └──────────┬─────────────────┬───────────────┬────────────┘
            │ gRPC             │ gRPC          │ gRPC
-           │ SiLA2Common      │ SiLA2Common   │ SiLA2Common
+           │ sila2 SilaClient │ sila2         │ sila2
 ┌──────────▼──────┐  ┌───────▼────────┐  ┌──▼─────────────┐
 │ LAYER 2: SERVERS│  │ LAYER 2: ...   │  │ LAYER 2: ...   │
 │ Opentrons       │  │ Tecan          │  │ Mobile / Manual│
 │ WorkflowAPI     │  │ PlateReader    │  │ TaskMgmt/Manual│
 │ 18 commands     │  │ Service        │  │ 5 commands each│
-│ + SiLA2Common   │  │ 8 commands     │  │ + SiLA2Common  │
+│ sila2 library   │  │ 8 commands     │  │ sila2 library  │
 └──────────┬──────┘  └───────┬────────┘  └──┬─────────────┘
            │                  │              │
 ┌──────────▼──────┐  ┌───────▼────────┐  ┌──▼─────────────┐
@@ -47,29 +47,24 @@ The system is organized as a four-layer stack:
 
 ## Layer 2: SiLA2 Servers
 
-Each instrument is wrapped by a dedicated Python (or C#) SiLA2 server. All servers implement **two service layers simultaneously**:
+Each instrument is wrapped by a dedicated Python (or C#) SiLA2 server built with the **`sila2` Python library** (v0.14). Each server exposes its capabilities via a native SiLA2 feature defined in a Feature Definition Language (FDL) XML file.
 
-### Native Feature Interface (instrument-specific)
-Each server exposes an instrument-specific SiLA2 feature defined in a Feature Definition Language (FDL) XML file. This file declares commands with typed parameters, return types, and descriptions.
+| Server | Feature | Commands | Strategy |
+|--------|---------|----------|----------|
+| `OpentronsSiLA2Server` | `WorkflowAPI` | 18 (ExecuteRecipe, LoadProtocol, GetStatus, …) | **0** |
+| `TecanSiLA2Server` | `PlateReaderService` | 8 (RunMeasurement, SetTemperature, Shake, …) | **0** |
+| `MobileSiLA2Server` | `MobileRobot` | 5 (execute_task, list_tasks, navigate_to, …) | **0** |
+| `ManualStationSiLA2Server` | `ManualStation` | 5 (RequestOperatorTask, ConfirmCompletion, …) | **0** |
 
-| Server | Feature | Commands |
-|--------|---------|----------|
-| `OpentronsSiLA2Server` | `WorkflowAPI` | 18 (ExecuteRecipe, LoadProtocol, GetStatus, …) |
-| `TecanSiLA2Server` | `PlateReaderService` | 8 (RunMeasurement, SetTemperature, Shake, …) |
-| `MobileSiLA2Server` | `TaskManagement` | 5 (execute_task, list_tasks, navigate_to, …) |
-| `ManualStationSiLA2Server` | `ManualStation` | 5 (RequestOperatorTask, ConfirmCompletion, …) |
+The orchestrator (`src/client.py`) applies execution strategies in order of preference:
 
-### SiLA2Common Interface (universal)
-Every server also exposes `SiLA2Common`, a custom generic service with four operations:
+| Strategy | Protocol | Used by |
+|----------|----------|---------|
+| **0** | `sila2` library `SilaClient` — fetches descriptor at runtime, no stub coupling | All current servers |
+| **1** | Legacy `SiLA2Common.ExecuteCommand` — string-keyed commands over custom gRPC | Old/custom servers only |
+| **2** | Dynamic stub loading (`_pb2` files loaded at runtime) | Last-resort fallback |
 
-```
-GetServerInfo()          → name, type, version
-GetFeatures()            → list of features + FDL metadata
-ExecuteCommand(id, params) → execute any command by string ID
-GetProperty(id)          → read any property by string ID
-```
-
-The orchestrator uses **only** SiLA2Common. The native feature interface serves as documentation and drives UI generation (populating dropdowns in the visual designer).
+Strategy 0 is selected automatically for any server built with the `sila2` library. The FDL files serve as documentation and drive UI generation (populating command dropdowns in the visual designer).
 
 ---
 
@@ -127,8 +122,8 @@ Real-time events (step completions, device status changes) are broadcast via Web
 
 ## Key Design Decisions
 
-**Why SiLA2Common instead of native feature stubs?**  
-Native SiLA2 stubs require compile-time coupling: the orchestrator would need to import each instrument's generated stub. SiLA2Common breaks this — any SiLA2-compliant server can be commanded without recompiling the orchestrator.
+**Why the `sila2` library instead of SiLA2Common?**  
+The `sila2` library's `SilaClient` fetches the protobuf descriptor from the server at runtime, so the orchestrator never needs to import instrument-specific stubs. This solves the compile-time coupling problem more cleanly than the custom `SiLA2Common` service it replaced — and it uses the standard SiLA2 protocol rather than a custom extension. The legacy `SiLA2Common` stubs remain in `src/pnp_stubs/` as a Strategy 1 fallback for any old servers.
 
 **Why a Windows bridge for Tecan?**  
 The Tecan iControl SDK is Windows-only .NET. The C# bridge process wraps the SDK and exposes a local gRPC endpoint. The Python SiLA2 server connects to this bridge. The bridge runs as a background Windows service and is automatically restarted on failure.
@@ -146,14 +141,14 @@ v1/
 │   ├── lab_core.py         # Central orchestrator
 │   ├── discovery.py        # PnP discovery engine
 │   ├── workflow.py         # DAG workflow executor
-│   ├── client.py           # SiLA2Common gRPC client
+│   ├── client.py           # Generic SiLA2 client (Strategy 0/1/2)
 │   └── api/                # FastAPI routes and WebSocket
 ├── SiLA2/                  # Instrument servers
 │   ├── OpentronsSiLA2Server/
 │   ├── TecanSiLA2Server/
 │   ├── MobileSiLA2Server/
 │   ├── ManualStationSiLA2Server/
-│   └── SiLA2Common_pb2*.py # Shared SiLA2Common stubs
+│   └── SiLA2Common_pb2*.py # Legacy SiLA2Common stubs (Strategy 1 fallback)
 ├── Library/                # User-editable assets
 │   ├── Workflows/          # JSON workflow definitions
 │   ├── Recipes/            # Liquid handling recipes

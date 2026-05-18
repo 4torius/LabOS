@@ -1,0 +1,77 @@
+{
+  "format": 1,
+  "restore": {
+    "c:\\Users\\PC\\Desktop\\LabOS\\v1\\SiLA2\\TecanM200SiLA2Server\\bridge\\TecanClient\\TecanClient.csproj": {}
+  },
+  "projects": {
+    "c:\\Users\\PC\\Desktop\\LabOS\\v1\\SiLA2\\TecanM200SiLA2Server\\bridge\\TecanClient\\TecanClient.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "c:\\Users\\PC\\Desktop\\LabOS\\v1\\SiLA2\\TecanM200SiLA2Server\\bridge\\TecanClient\\TecanClient.csproj",
+        "projectName": "TecanClient",
+        "projectPath": "c:\\Users\\PC\\Desktop\\LabOS\\v1\\SiLA2\\TecanM200SiLA2Server\\bridge\\TecanClient\\TecanClient.csproj",
+        "packagesPath": "C:\\Users\\PC\\.nuget\\packages\\",
+        "outputPath": "c:\\Users\\PC\\Desktop\\LabOS\\v1\\SiLA2\\TecanM200SiLA2Server\\bridge\\TecanClient\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\PC\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net48"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net48": {
+            "targetAlias": "net48",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.200"
+      },
+      "frameworks": {
+        "net48": {
+          "targetAlias": "net48",
+          "dependencies": {
+            "Google.Protobuf": {
+              "target": "Package",
+              "version": "[3.25.2, )"
+            },
+            "Grpc.Core": {
+              "target": "Package",
+              "version": "[2.46.6, )"
+            },
+            "Grpc.Tools": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.60.0, )"
+            },
+            "Microsoft.NETFramework.ReferenceAssemblies": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.3, )",
+              "autoReferenced": true
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.203\\RuntimeIdentifierGraph.json"
+        }
+      },
+      "runtimes": {
+        "win-x86": {
+          "#import": []
+        }
+      }
+    }
+  }
+}

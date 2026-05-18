@@ -12,7 +12,8 @@ This guide covers deploying LabOS on a new Windows computer from scratch.
 | Python 3.10 or 3.11 | 3.12 is not recommended (some grpcio wheels lag behind) |
 | Git | To clone the repository |
 | Tecan iControl software | Required for the Tecan C# bridge (Tecan SDK) |
-| TecanBridge.exe | Compile from `v1/SiLA2/TecanM200SiLA2Server/TecanBridge/` (see below) |
+| Opentrons App | Required for Opentrons Flex |
+
 
 ---
 
@@ -207,3 +208,9 @@ The mobile server on the Linux PC is not running. Start it manually or set `enab
 
 **Web interface blank or 404**
 The launcher is still starting up (takes ~10 seconds for all servers). Refresh after a moment. If it persists, check the launcher terminal for startup errors.
+
+**Server shows as online but commands fail with "Feature not found"**
+The orchestrator uses Strategy 0 (sila2 SilaClient) for all current servers. If a server was recently rebuilt, the cached SilaClient may be stale. Restart the orchestrator to invalidate the client cache.
+
+**"Strategy 0 failed, trying Strategy 1" in logs**
+This means the sila2 library could not connect to the server. Check that the server is a modern `sila2`-library server (has `generated/` directory with codegen output). If it is a legacy custom server, Strategy 1 (SiLA2Common fallback) will be used instead — this is expected behaviour for old servers.

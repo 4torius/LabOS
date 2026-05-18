@@ -1,0 +1,8 @@
+is_global = true
+build_property.RootNamespace = TecanClient
+build_property.ProjectDir = c:\Users\PC\Desktop\LabOS\v1\SiLA2\TecanM200SiLA2Server\bridge\TecanClient\
+build_property.EnableComHosting = 
+build_property.EnableGeneratedComInterfaceComImportInterop = 
+build_property.CsWinRTUseWindowsUIXamlProjections = false
+build_property.EffectiveAnalysisLevelStyle = 
+build_property.EnableCodeStyleSeverity = 

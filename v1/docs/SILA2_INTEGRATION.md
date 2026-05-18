@@ -96,135 +96,140 @@ Each SiLA2 server declares its capabilities in a `.sila.xml` file stored in `SiL
 
 ---
 
-## SiLA2Common — The Generic Execution Protocol
+## Execution Strategies
 
-LabOS extends SiLA2 with a custom `SiLA2Common` service that every server implements alongside its native feature. This is the interface the orchestrator uses exclusively.
+The orchestrator (`src/client.py`) selects the communication strategy automatically, trying them in order:
 
-### Proto Definition (`SiLA2Common.proto`)
+### Strategy 0 — `sila2` Library `SilaClient` (Preferred)
+
+All current LabOS servers are built with the **`sila2` Python library** (v0.14). The library generates and registers protobuf descriptors automatically via `sila2-codegen`, and publishes them over the standard `SiLAService` feature. The orchestrator's `SilaClient` fetches these descriptors at runtime and invokes commands without any compile-time stub coupling:
+
+```python
+from sila2.client import SilaClient
+
+client = SilaClient("localhost", 50052, insecure=True)
+# Feature and command names come from the live descriptor:
+result = client.WorkflowAPI.ExecuteRecipe(
+    recipe="my_recipe.json",
+    hal_config="deck_config_A.json"
+)
+```
+
+**Why this is preferred over SiLA2Common**: it uses the standard SiLA2 protocol (no custom extension), descriptors are typed and versioned, and any SiLA2-compliant client (not just LabOS) can interact with the server.
+
+### Strategy 1 — `SiLA2Common` (Legacy Fallback)
+
+For older custom servers that pre-date the `sila2` library migration, a custom `SiLA2Common` gRPC service is available as a fallback. It accepts string-keyed commands with JSON parameters:
 
 ```protobuf
-syntax = "proto3";
-package sila2common;
-
 service SiLA2CommonService {
-  rpc GetServerInfo  (Empty)         returns (ServerInfo);
-  rpc GetFeatures    (Empty)         returns (FeatureList);
-  rpc ExecuteCommand (CommandRequest) returns (CommandResponse);
+  rpc ExecuteCommand (CommandRequest) returns (stream CommandResponse);
+  rpc GetServerInfo  (Empty)          returns (ServerInfo);
+  rpc GetFeatures    (Empty)          returns (FeatureList);
   rpc GetProperty    (PropertyRequest) returns (PropertyResponse);
-}
-
-message ServerInfo {
-  string server_name    = 1;
-  string server_type    = 2;
-  string server_version = 3;
-  string status         = 4;
-}
-
-message CommandRequest {
-  string command_id  = 1;
-  string params_json = 2;   // JSON-encoded key-value map
-}
-
-message CommandResponse {
-  bool   success      = 1;
-  string result_json  = 2;
-  string error_detail = 3;
 }
 ```
 
-### Why SiLA2Common?
+The stubs are kept in `src/pnp_stubs/SiLA2Common_pb2*.py`. New servers should **not** implement this service.
 
-Without it, the orchestrator would need to import each instrument's generated Python stub at compile time — tightly coupling the orchestration layer to every instrument integration. SiLA2Common breaks this coupling: the orchestrator dispatches commands as JSON strings over a single generic interface, and instrument-specific logic lives entirely in the server process.
+### Strategy 2 — Dynamic Stub Loading (Last Resort)
 
-**Adding a new instrument** means deploying a new SiLA2Common-compliant server. The orchestrator discovers and commands it with zero code changes.
+Statically generated `_pb2` / `_pb2_grpc` files placed in `src/pnp_stubs/` are loaded at runtime for any server that supports neither Strategy 0 nor Strategy 1.
 
 ---
 
 ## Implementing a SiLA2 Server
 
-Every server in `v1/SiLA2/` follows the same pattern:
+Every server in `v1/SiLA2/` follows the same pattern using the **`sila2` library**:
 
 ### File Structure
 ```
 SiLA2/YourInstrumentSiLA2Server/
 ├── config.yaml              # Port, hardware connection, server name
-├── main.py                  # Entry point — starts gRPC server
+├── main.py                  # Entry point — SilaServer + feature registration
 ├── features/
 │   └── YourInstrument.sila.xml  # FDL capability description
+├── generated/
+│   └── yourinstrument/      # sila2-codegen output (do not edit)
 └── src/
     ├── __init__.py
-    ├── servicer.py          # Implements native feature + SiLA2Common
-    ├── YourInstrument_pb2.py      # Generated (do not edit)
-    └── YourInstrument_pb2_grpc.py # Generated (do not edit)
+    └── your_instrument_impl.py  # FeatureImplementationBase subclass
 ```
 
-### Servicer Template
+### Implementation Template
 
 ```python
-# src/servicer.py
-import json
-from SiLA2Common_pb2 import ServerInfo, CommandResponse
-from SiLA2Common_pb2_grpc import SiLA2CommonServiceServicer
+# src/your_instrument_impl.py
+from generated.yourinstrument.yourinstrument_base import YourInstrumentBase
 
-class YourInstrumentServicer(SiLA2CommonServiceServicer):
+class YourInstrumentImpl(YourInstrumentBase):
 
-    def GetServerInfo(self, request, context):
-        return ServerInfo(
-            server_name="your_instrument",
-            server_type="YourInstrument",
-            server_version="1.0.0",
-            status="idle"
-        )
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        # Initialize hardware connection here
 
-    def GetFeatures(self, request, context):
-        # Return FDL metadata parsed from .sila.xml
-        ...
+    def YourCommand(self, *, Param1: str, Param2: int):
+        # Instrument interaction
+        return self.YourCommandResponses(Result="done")
+```
 
-    def ExecuteCommand(self, request, context):
-        params = json.loads(request.params_json)
-        try:
-            result = self._dispatch(request.command_id, params)
-            return CommandResponse(success=True, result_json=json.dumps(result))
-        except Exception as e:
-            return CommandResponse(success=False, error_detail=str(e))
+```python
+# main.py
+from sila2.server import SilaServer
+from src.your_instrument_impl import YourInstrumentImpl
 
-    def _dispatch(self, command_id, params):
-        if command_id == "YourCommand":
-            return self._your_command(params)
-        raise ValueError(f"Unknown command: {command_id}")
+config = yaml.safe_load(open("config.yaml"))
+feature = YourInstrumentImpl(config)
+server = SilaServer(
+    name=config["sila2"]["server_name"],
+    features=[feature],
+    port=config["server"]["port"],
+    insecure=True
+)
+server.run()
+```
 
-    def _your_command(self, params):
-        # Instrument interaction here
-        return {"status": "done"}
+Regenerate `generated/` after editing the FDL:
+
+```bash
+sila2-codegen features/YourInstrument.sila.xml --output-dir generated/
 ```
 
 ---
 
 ## Regenerating Protobuf Stubs
 
-If you modify a `.proto` file:
+After editing a `.sila.xml` FDL file, regenerate the stubs:
 
 ```bash
-python -m grpc_tools.protoc \
-  -I. \
-  --python_out=. \
-  --grpc_python_out=. \
-  SiLA2Common.proto
+cd SiLA2/YourInstrumentSiLA2Server
+sila2-codegen features/YourInstrument.sila.xml --output-dir generated/
 ```
 
-This regenerates `SiLA2Common_pb2.py` and `SiLA2Common_pb2_grpc.py`. Do not edit generated files manually.
+This regenerates the `generated/yourinstrument/` directory. Do not edit generated files manually.
+
+For the legacy `SiLA2Common` proto (Strategy 1 fallback only):
+
+```bash
+cd v1
+python regen_stubs.py
+```
+
+This regenerates `src/pnp_stubs/SiLA2Common_pb2*.py`.
 
 ---
 
 ## Port Assignments
 
-| Server | Default Port |
-|--------|-------------|
-| Opentrons SiLA2 Server | 50052 |
-| Tecan SiLA2 Server | 50051 |
-| Mobile SiLA2 Server | 50053 |
-| Manual Station SiLA2 Server | 50054 |
-| New instruments | 50055–50099 |
+| Server | Default Port | Protocol | Strategy |
+|--------|-------------|----------|----------|
+| Opentrons SiLA2 Server | 50052 | `sila2` library | **0** |
+| Tecan SiLA2 Server | 50051 | `sila2` library | **0** |
+| Mobile SiLA2 Server | 50053 | `sila2` library | **0** |
+| Manual Station SiLA2 Server | 50500 | `sila2` library | **0** |
+| Tecan C# bridge (internal) | 50055 | custom gRPC | — (not a SiLA2 server) |
+| New instruments | 50056–50099 | `sila2` library | **0** |
 
 Ports are configured in each server's `config.yaml`.
 
@@ -232,15 +237,15 @@ Ports are configured in each server's `config.yaml`.
 
 ## Discovery Over mDNS
 
-To enable automatic mDNS discovery, a server can broadcast a `_sila2._tcp.local.` service record:
+To enable automatic mDNS discovery, a server can broadcast a `_sila._tcp.local.` service record:
 
 ```python
 from zeroconf import ServiceInfo, Zeroconf
 import socket
 
 info = ServiceInfo(
-    "_sila2._tcp.local.",
-    "opentrons._sila2._tcp.local.",
+    "_sila._tcp.local.",
+    "opentrons._sila._tcp.local.",
     addresses=[socket.inet_aton("127.0.0.1")],
     port=50052,
     properties={"server-name": "opentrons", "server-type": "WorkflowAPI"}

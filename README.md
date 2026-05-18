@@ -43,7 +43,7 @@ All documentation lives in [v1/docs/](v1/docs/):
 
 **Plug-and-Play**: The orchestrator discovers instruments at runtime through a PnP registry. Adding a new instrument means deploying a new SiLA2 server — no orchestration code changes.
 
-**SiLA2Common**: A generic execution protocol (`GetServerInfo`, `GetFeatures`, `ExecuteCommand`, `GetProperty`) implemented by every server. The orchestrator uses only this interface.
+**sila2 Library**: All current servers are built with the `sila2` Python library. The orchestrator's generic `SilaClient` (Strategy 0) discovers and invokes any command at runtime from the live protobuf descriptor — no compile-time coupling. A legacy `SiLA2Common` fallback (Strategy 1) remains for older servers but is not used by any current instrument.
 
 **HAL**: The Hardware Abstraction Layer separates liquid-handling recipes (what to do) from deck configurations (where things are). The same recipe runs on any compatible deck layout.
 
