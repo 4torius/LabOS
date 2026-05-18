@@ -45,7 +45,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "discovery": {
         "enabled": True,
         "scan_interval": 30,
-        "service_type": "_sila2._tcp.local.",
+        "service_type": "_sila._tcp.local.",
     },
     "workflow": {
         "parallel_execution": True,

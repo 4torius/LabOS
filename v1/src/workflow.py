@@ -165,7 +165,7 @@ class WorkflowStep:
     action: str
     parameters: Dict[str, Any] = field(default_factory=dict)
     depends_on: List[int] = field(default_factory=list)
-    retry_count: int = 0
+    retry_count: Optional[int] = None  # None = use error_handling.max_retries from config
     timeout_seconds: Optional[float] = None
     on_failure: str = "stop"  # stop, continue, skip
     
@@ -208,7 +208,7 @@ class Workflow:
                 action=step_data.get("Action", ""),
                 parameters=step_data.get("Parameters", {}),
                 depends_on=step_data.get("DependsOn", []),
-                retry_count=step_data.get("RetryCount", 0),
+                retry_count=step_data.get("RetryCount", None),
                 timeout_seconds=step_data.get("TimeoutSeconds"),
                 on_failure=step_data.get("OnFailure", "stop")
             )
@@ -373,6 +373,17 @@ def _load_error_handling_config() -> Dict[str, Any]:
         return defaults
 
 
+def _load_default_step_timeout() -> float:
+    """Load default step timeout from lab_config.yaml (workflow.default_timeout)."""
+    from src.config_schema import load_lab_config
+    config_path = Path(__file__).parent.parent / "lab_config.yaml"
+    try:
+        config, _ = load_lab_config(config_path, apply_defaults=False, strict=False)
+        return float(config.get("workflow", {}).get("default_timeout", 300.0))
+    except Exception:
+        return 300.0
+
+
 class PnPWorkflowExecutor:
     """
     Generic workflow executor using PnP architecture.
@@ -397,6 +408,7 @@ class PnPWorkflowExecutor:
 
         # Load error handling config
         self._error_config = _load_error_handling_config()
+        self._default_step_timeout = _load_default_step_timeout()
 
     def set_step_executor(self, fn: Callable):
         """Override step execution. fn must be: async (step: WorkflowStep, context: WorkflowContext) -> CommandResult."""
@@ -944,57 +956,117 @@ class PnPWorkflowExecutor:
         while pending and not self._abort_requested:
             # Find steps that can run (all dependencies satisfied)
             runnable = []
+            elapsed = (datetime.now() - workflow.start_time).total_seconds() if workflow.start_time else 0.0
             for step in workflow.steps:
                 if step.step_number not in pending:
                     continue
-                
+
                 deps_satisfied = all(d in completed_steps for d in step.depends_on)
                 deps_failed = any(d in failed_steps for d in step.depends_on)
-                
+
                 if deps_failed and step.on_failure == "stop":
                     # Skip this step due to failed dependency
                     step.status = StepStatus.SKIPPED
                     pending.discard(step.step_number)
                     skipped += 1
+                    err = f"Step {step.step_number} skipped: dependency failed"
+                    errors.append(err)
+                    self._notify_progress(WorkflowProgress(
+                        workflow_name=workflow.name,
+                        current_step=step.step_number,
+                        total_steps=len(workflow.steps),
+                        step_instrument=step.instrument,
+                        step_action=step.action,
+                        step_status=StepStatus.SKIPPED,
+                        elapsed_seconds=elapsed,
+                        message=err
+                    ))
                 elif deps_satisfied:
                     runnable.append(step)
-            
+
             if not runnable:
                 # No steps can run - deadlock or all done
                 break
-            
+
+            # Notify RUNNING for all steps about to start in parallel
+            elapsed = (datetime.now() - workflow.start_time).total_seconds() if workflow.start_time else 0.0
+            for step in runnable:
+                self._notify_progress(WorkflowProgress(
+                    workflow_name=workflow.name,
+                    current_step=step.step_number,
+                    total_steps=len(workflow.steps),
+                    step_instrument=step.instrument,
+                    step_action=step.action,
+                    step_status=StepStatus.RUNNING,
+                    elapsed_seconds=elapsed,
+                    message=f"Starting {step.action} on {step.instrument}"
+                ))
+
             # Run all runnable steps in parallel
             tasks = [self._execute_step_with_retry(step, workflow.name, context) for step in runnable]
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
+            elapsed = (datetime.now() - workflow.start_time).total_seconds() if workflow.start_time else 0.0
             for step, result in zip(runnable, results):
                 pending.discard(step.step_number)
-                
+
                 if isinstance(result, Exception):
                     result = CommandResult(success=False, error=str(result))
-                
+
                 step_results[step.step_number] = result
-                
+
                 if result.success:
                     completed += 1
                     completed_steps.add(step.step_number)
                     step.status = StepStatus.SUCCESS
+                    self._notify_progress(WorkflowProgress(
+                        workflow_name=workflow.name,
+                        current_step=step.step_number,
+                        total_steps=len(workflow.steps),
+                        step_instrument=step.instrument,
+                        step_action=step.action,
+                        step_status=StepStatus.SUCCESS,
+                        elapsed_seconds=elapsed,
+                        message=f"Completed {step.action} on {step.instrument}"
+                    ))
                 else:
                     failed_steps.add(step.step_number)
                     step.status = StepStatus.FAILED
-                    errors.append(f"Step {step.step_number}: {result.error}")
-                    
+                    err = f"Step {step.step_number}: {result.error}"
+                    errors.append(err)
+                    self._notify_progress(WorkflowProgress(
+                        workflow_name=workflow.name,
+                        current_step=step.step_number,
+                        total_steps=len(workflow.steps),
+                        step_instrument=step.instrument,
+                        step_action=step.action,
+                        step_status=StepStatus.FAILED,
+                        elapsed_seconds=elapsed,
+                        message=f"Failed {step.action} on {step.instrument}: {result.error or 'unknown error'}"
+                    ))
+
                     if step.on_failure == "skip":
                         skipped += 1
                     else:
                         failed += 1
-        
+
         # Mark remaining as skipped
+        elapsed = (datetime.now() - workflow.start_time).total_seconds() if workflow.start_time else 0.0
         for step_num in pending:
             step = next(s for s in workflow.steps if s.step_number == step_num)
             step.status = StepStatus.SKIPPED
             skipped += 1
-        
+            self._notify_progress(WorkflowProgress(
+                workflow_name=workflow.name,
+                current_step=step.step_number,
+                total_steps=len(workflow.steps),
+                step_instrument=step.instrument,
+                step_action=step.action,
+                step_status=StepStatus.SKIPPED,
+                elapsed_seconds=elapsed,
+                message=f"Skipped {step.action} on {step.instrument}"
+            ))
+
         return completed, failed, skipped, step_results, errors
     
     async def _execute_step_with_retry(
@@ -1017,7 +1089,9 @@ class PnPWorkflowExecutor:
 
         last_result = None
         last_error: Optional[CategorizedError] = None
-        max_attempts = step.retry_count + 1
+        retry_count = step.retry_count if step.retry_count is not None else self._error_config.get("max_retries", 3)
+        max_attempts = retry_count + 1
+        step_timeout = step.timeout_seconds or self._default_step_timeout
         context = f"{step.action} on {step.instrument}"
 
         for attempt in range(max_attempts):
@@ -1031,7 +1105,7 @@ class PnPWorkflowExecutor:
                         step.instrument,
                         step.action,
                         step.parameters,
-                        timeout=step.timeout_seconds or 300.0
+                        timeout=step_timeout
                     )
                 
                 if result.success:
@@ -1104,12 +1178,15 @@ class PnPWorkflowExecutor:
                 if action == InterventionAction.RETRY:
                     # User wants to retry after fixing the issue
                     step.status = StepStatus.RUNNING
-                    result = await self.registry.execute(
-                        step.instrument,
-                        step.action,
-                        step.parameters,
-                        timeout=step.timeout_seconds or 300.0
-                    )
+                    if self._step_executor_fn:
+                        result = await self._step_executor_fn(step, wf_context)
+                    else:
+                        result = await self.registry.execute(
+                            step.instrument,
+                            step.action,
+                            step.parameters,
+                            timeout=step_timeout
+                        )
                     if result.success:
                         step.end_time = datetime.now()
                         step.result = result

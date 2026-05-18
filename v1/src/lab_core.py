@@ -211,8 +211,8 @@ class LabCore:
 
         # Discovery cache: avoid re-running gRPC discovery on every API call
         self._last_discovery_time: float = 0.0
-        self._discovery_cache_ttl: float = 30.0  # seconds
-        
+        self._discovery_cache_ttl: float = 30.0  # overwritten by _load_config()
+
         # Load config
         self._load_config()
     
@@ -226,6 +226,9 @@ class LabCore:
         try:
             config, _ = load_lab_config(config_path, apply_defaults=False, strict=False)
             self._ui_dropdowns = config.get("ui_dropdowns", {})
+            self._discovery_cache_ttl = float(
+                config.get("discovery", {}).get("scan_interval", 30)
+            )
         except Exception as e:
             logger.warning(f"Error loading config: {e}")
     
@@ -674,7 +677,7 @@ class LabCore:
         self._log("info", f"Executing {command_id} on {instrument.name}...")
         
         try:
-            # Use PnPClient for command execution (works via SiLA2Common.ExecuteCommand)
+            # Use PnPClient for command execution (Strategy 0: SilaClient, Strategy 1: SiLA2Common fallback)
             if self._client is None:
                 self._client = PnPClient()
             
@@ -830,11 +833,12 @@ class LabCore:
     #                           WORKFLOW EXECUTION
     
     async def execute_workflow(
-        self, 
+        self,
         workflow_name: str,
         on_step_start: Optional[Callable] = None,
         on_step_complete: Optional[Callable] = None,
-        on_intervention_needed: Optional[Callable] = None
+        on_intervention_needed: Optional[Callable] = None,
+        parallel: Optional[bool] = None,
     ) -> ExecutionResult:
         """
         Execute a workflow using PnPWorkflowExecutor with retry and intervention support.
@@ -900,8 +904,17 @@ class LabCore:
 
         self._workflow_executor.add_progress_callback(on_step_progress)
 
+        # Determine parallel flag: caller overrides config; config overrides default False
+        if parallel is None:
+            try:
+                from src.config_schema import load_lab_config
+                _cfg, _ = load_lab_config(self.base_dir / "lab_config.yaml", apply_defaults=False, strict=False)
+                parallel = bool(_cfg.get("workflow", {}).get("parallel_execution", False))
+            except Exception:
+                parallel = False
+
         try:
-            result = await self._workflow_executor.execute(workflow_obj, validate=False)
+            result = await self._workflow_executor.execute(workflow_obj, validate=False, parallel=parallel)
 
             self._workflow_executor.remove_progress_callback(on_step_progress)
 

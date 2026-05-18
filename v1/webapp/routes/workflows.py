@@ -777,6 +777,7 @@ def create_workflows_router(
     @router.post("/api/workflows/batch-execute")
     async def batch_execute(request: Request):
         """Run the same workflow N times with different variable sets (one per sample)."""
+        nonlocal active_executor
         data = await request.json()
         workflow_def = data.get("workflow")
         samples = data.get("samples", [])  # [{sample_id, variables: {var: value, ...}}, ...]
@@ -786,8 +787,20 @@ def create_workflows_router(
         if not samples:
             raise HTTPException(400, "Missing 'samples' list")
 
+        if _executor_lock.locked():
+            raise HTTPException(409, "A workflow is already running")
+
         batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         workflow_name = workflow_def.get("WorkflowName", "Batch")
+
+        # Read parallel_execution from lab_config (same logic as regular run)
+        _parallel = False
+        try:
+            from src.config_schema import load_lab_config
+            _cfg, _ = load_lab_config(BASE_DIR / "lab_config.yaml", apply_defaults=False, strict=False)
+            _parallel = bool(_cfg.get("workflow", {}).get("parallel_execution", False))
+        except Exception:
+            pass
 
         state.add_log("info", f"Batch started: {batch_id} ({len(samples)} samples)", "workflow")
         await ws_manager.broadcast({
@@ -800,114 +813,163 @@ def create_workflows_router(
         run_ids = []
         errors = []
 
-        for idx, sample in enumerate(samples):
-            sample_id = sample.get("sample_id", f"sample_{idx + 1}")
-            variables = sample.get("variables", {})
-            variables["sample_id"] = sample_id
-            variables["sample_index"] = str(idx + 1)
+        await _executor_lock.acquire()
+        try:
+            for idx, sample in enumerate(samples):
+                sample_id = sample.get("sample_id", f"sample_{idx + 1}")
+                variables = sample.get("variables", {})
+                variables["sample_id"] = sample_id
+                variables["sample_index"] = str(idx + 1)
 
-            steps = _resolve_variables(workflow_def.get("Steps", []), variables)
-            sample_wf = {**workflow_def, "Steps": steps, "WorkflowName": f"{workflow_name}_{sample_id}"}
-
-            await ws_manager.broadcast({
-                "type": "batch_sample_start",
-                "batch_id": batch_id,
-                "sample_id": sample_id,
-                "sample_index": idx + 1,
-                "total_samples": len(samples),
-            })
-
-            try:
-                from src.workflow import Workflow, PnPWorkflowExecutor
-                from src.client import PnPRegistry
-                wf_obj = Workflow.from_dict(sample_wf)
-                _exec_core = lab_core
-                if not _exec_core:
-                    from src.lab_core import get_lab_core
-                    _exec_core = get_lab_core(BASE_DIR)
-                if not _exec_core:
-                    raise Exception("LabCore not initialized")
-
-                await _exec_core.discover()
-                registry = PnPRegistry(BASE_DIR)
-                for instr in _exec_core.list_instruments():
-                    if hasattr(instr, '_server') and instr._server:
-                        registry.register(instr.id, instr._server)
-
-                executor = PnPWorkflowExecutor(registry)
-                shared_ctx: dict = {"plate_id": None, "step_results": [], "workflow_name": sample_wf["WorkflowName"]}
-
-                async def _sample_step(step, wf_context, _sc=shared_ctx):
-                    r = await _execute_step(
-                        step.instrument, step.action, step.parameters,
-                        state, ws_manager, _exec_core, _sc,
-                        plate_tracking, save_plate_tracking, plate_tracking_lock,
-                        pending_operator_actions, pending_operator_actions_lock, WEBAPP_CONFIG,
-                        base_dir=BASE_DIR,
-                    )
-                    if isinstance(r, dict):
-                        success = r.get("status", "completed") not in ("error", "skipped")
-                        error = r.get("error") if not success else None
-                    else:
-                        success, error = True, None
-                    from src.client import CommandResult
-                    _sc["step_results"].append({
-                        "step": getattr(step, 'step_number', None),
-                        "instrument": step.instrument, "action": step.action,
-                        "status": "completed" if success else "error", "error": error,
-                        "timestamp": datetime.now().isoformat(),
-                    })
-                    return CommandResult(success=success, data=r, error=error)
-
-                executor.set_step_executor(_sample_step)
-                result = await executor.execute(wf_obj, validate=False)
-                run_id = _save_run_archive(BASE_DIR, sample_wf["WorkflowName"], result, shared_ctx["step_results"])
-                if run_id:
-                    # Tag run with batch metadata
-                    runs_dir = BASE_DIR / "Results" / "runs"
-                    run_file = runs_dir / f"{run_id}.json"
-                    if run_file.exists():
-                        run_data = json.loads(run_file.read_text(encoding='utf-8'))
-                        run_data["batch_id"] = batch_id
-                        run_data["sample_id"] = sample_id
-                        run_file.write_text(json.dumps(run_data, indent=2, default=str), encoding='utf-8')
-                    run_ids.append(run_id)
+                steps = _resolve_variables(workflow_def.get("Steps", []), variables)
+                sample_wf = {**workflow_def, "Steps": steps, "WorkflowName": f"{workflow_name}_{sample_id}"}
 
                 await ws_manager.broadcast({
-                    "type": "batch_sample_complete",
+                    "type": "batch_sample_start",
                     "batch_id": batch_id,
                     "sample_id": sample_id,
                     "sample_index": idx + 1,
-                    "run_id": run_id,
-                    "success": result.success,
+                    "total_samples": len(samples),
                 })
 
-            except Exception as e:
-                errors.append({"sample_id": sample_id, "error": str(e)})
-                state.add_log("error", f"Batch sample {sample_id} failed: {e}", "workflow")
-                await ws_manager.broadcast({
-                    "type": "batch_sample_failed",
-                    "batch_id": batch_id,
-                    "sample_id": sample_id,
-                    "error": str(e),
-                })
+                try:
+                    from src.workflow import Workflow, PnPWorkflowExecutor, WorkflowProgress
+                    from src.client import PnPRegistry
+                    wf_obj = Workflow.from_dict(sample_wf)
+                    _exec_core = lab_core
+                    if not _exec_core:
+                        from src.lab_core import get_lab_core
+                        _exec_core = get_lab_core(BASE_DIR)
+                    if not _exec_core:
+                        raise Exception("LabCore not initialized")
 
-        await ws_manager.broadcast({
-            "type": "batch_complete",
-            "batch_id": batch_id,
-            "run_ids": run_ids,
-            "errors_count": len(errors),
-            "success_count": len(run_ids),
-        })
-        state.add_log("info", f"Batch complete: {batch_id} — {len(run_ids)} OK, {len(errors)} failed", "workflow")
+                    await _exec_core.discover()
+                    registry = PnPRegistry(BASE_DIR)
+                    for instr in _exec_core.list_instruments():
+                        if hasattr(instr, '_server') and instr._server:
+                            registry.register(instr.id, instr._server)
 
-        return {
-            "batch_id": batch_id,
-            "run_ids": run_ids,
-            "success_count": len(run_ids),
-            "errors_count": len(errors),
-            "errors": errors,
-        }
+                    executor = PnPWorkflowExecutor(registry)
+                    active_executor = executor
+                    shared_ctx: dict = {"plate_id": None, "step_results": [], "workflow_name": sample_wf["WorkflowName"]}
+
+                    async def _sample_step(step, wf_context, _sc=shared_ctx):
+                        r = await _execute_step(
+                            step.instrument, step.action, step.parameters,
+                            state, ws_manager, _exec_core, _sc,
+                            plate_tracking, save_plate_tracking, plate_tracking_lock,
+                            pending_operator_actions, pending_operator_actions_lock, WEBAPP_CONFIG,
+                            base_dir=BASE_DIR,
+                        )
+                        if isinstance(r, dict):
+                            success = r.get("status", "completed") not in ("error", "skipped")
+                            error = r.get("error") if not success else None
+                        else:
+                            success, error = True, None
+                        from src.client import CommandResult
+                        _sc["step_results"].append({
+                            "step": getattr(step, 'step_number', None),
+                            "instrument": step.instrument, "action": step.action,
+                            "status": "completed" if success else "error", "error": error,
+                            "timestamp": datetime.now().isoformat(),
+                        })
+                        return CommandResult(success=success, data=r, error=error)
+
+                    def on_batch_progress(p: "WorkflowProgress", _sid=sample_id):
+                        asyncio.create_task(ws_manager.broadcast({
+                            "type": "workflow_progress",
+                            "workflow_name": p.workflow_name,
+                            "step": p.current_step,
+                            "total": p.total_steps,
+                            "instrument": p.step_instrument,
+                            "action": p.step_action,
+                            "status": p.step_status.value,
+                            "message": p.message,
+                            "percent": round((p.current_step / p.total_steps * 100) if p.total_steps else 0),
+                            "sample_id": _sid,
+                            "batch_id": batch_id,
+                        }))
+
+                    async def on_batch_intervention(req) -> "InterventionAction":
+                        from src.lab_core import InterventionAction
+                        iid = f"batch_{batch_id}_step_{req.step_number}_{int(datetime.now().timestamp())}"
+                        future: asyncio.Future = asyncio.get_event_loop().create_future()
+                        pending_interventions[iid] = future
+                        total_steps = len(wf_obj.steps)
+                        await ws_manager.broadcast({
+                            "type": "intervention_required",
+                            "intervention_id": iid,
+                            "step": req.step_number,
+                            "instrument": req.instrument,
+                            "action": req.action,
+                            "error": req.error.message,
+                            "category": req.error.category.value,
+                            "workflow_name": req.workflow_name,
+                            "sample_id": sample_id,
+                            "batch_id": batch_id,
+                        })
+                        try:
+                            timeout = float(WEBAPP_CONFIG.get("intervention_timeout", 3600))
+                            return await asyncio.wait_for(future, timeout=timeout)
+                        except asyncio.TimeoutError:
+                            pending_interventions.pop(iid, None)
+                            return InterventionAction.SKIP
+
+                    executor.set_step_executor(_sample_step)
+                    executor.add_progress_callback(on_batch_progress)
+                    executor.set_intervention_callback(on_batch_intervention)
+                    result = await executor.execute(wf_obj, validate=False, parallel=_parallel)
+                    run_id = _save_run_archive(BASE_DIR, sample_wf["WorkflowName"], result, shared_ctx["step_results"])
+                    if run_id:
+                        # Tag run with batch metadata
+                        runs_dir = BASE_DIR / "Results" / "runs"
+                        run_file = runs_dir / f"{run_id}.json"
+                        if run_file.exists():
+                            run_data = json.loads(run_file.read_text(encoding='utf-8'))
+                            run_data["batch_id"] = batch_id
+                            run_data["sample_id"] = sample_id
+                            run_file.write_text(json.dumps(run_data, indent=2, default=str), encoding='utf-8')
+                        run_ids.append(run_id)
+
+                    await ws_manager.broadcast({
+                        "type": "batch_sample_complete",
+                        "batch_id": batch_id,
+                        "sample_id": sample_id,
+                        "sample_index": idx + 1,
+                        "run_id": run_id,
+                        "success": result.success,
+                    })
+
+                except Exception as e:
+                    errors.append({"sample_id": sample_id, "error": str(e)})
+                    state.add_log("error", f"Batch sample {sample_id} failed: {e}", "workflow")
+                    await ws_manager.broadcast({
+                        "type": "batch_sample_failed",
+                        "batch_id": batch_id,
+                        "sample_id": sample_id,
+                        "error": str(e),
+                    })
+                finally:
+                    active_executor = None
+
+            await ws_manager.broadcast({
+                "type": "batch_complete",
+                "batch_id": batch_id,
+                "run_ids": run_ids,
+                "errors_count": len(errors),
+                "success_count": len(run_ids),
+            })
+            state.add_log("info", f"Batch complete: {batch_id} — {len(run_ids)} OK, {len(errors)} failed", "workflow")
+
+            return {
+                "batch_id": batch_id,
+                "run_ids": run_ids,
+                "success_count": len(run_ids),
+                "errors_count": len(errors),
+                "errors": errors,
+            }
+        finally:
+            _executor_lock.release()
 
     return router
 
