@@ -493,8 +493,10 @@ function changePage(dir) {
 
 function updateExportBar() {
     const n = document.querySelectorAll('.run-select:checked').length;
-    document.getElementById('selCount').textContent = n;
-    document.getElementById('exportBar').style.display = n > 0 ? '' : 'none';
+    const selCount = document.getElementById('selCount');
+    const exportBar = document.getElementById('exportBar');
+    if (selCount) selCount.textContent = n;
+    if (exportBar) exportBar.style.display = n > 0 ? '' : 'none';
 }
 
 function toggleSelectAll(cb) {
