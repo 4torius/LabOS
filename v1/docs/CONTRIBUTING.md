@@ -67,11 +67,20 @@ Run the validation workflows from the web interface:
 
 ## Adding New SiLA2 Commands
 
+**For servers using the `sila2` library (all current servers):**
+
+1. Add the `<Command>` block to the FDL XML file in `features/`
+2. Regenerate stubs: `sila2-codegen features/YourInstrument.sila.xml --output-dir generated/`
+3. Add the corresponding method to your `FeatureImplementationBase` subclass in `src/`
+4. Restart the server — no orchestrator changes needed
+5. The visual designer's dropdown will show the new command after the next browser refresh
+
+**For legacy servers using `SiLA2Common` (if any):**
+
 1. Add the `<Command>` block to the FDL XML file in `features/`
 2. Add a handler in `servicer.py`'s `_dispatch()` method
-3. Add the parameter to `ExecuteCommand`'s params_json schema in `GetFeatures()` response
-4. No changes needed in the orchestrator — SiLA2Common introspection picks it up automatically
-5. The visual designer's dropdown will show the new command after the next browser refresh
+3. Update `GetFeatures()` to return the new command metadata
+4. Restart the server
 
 ## Modifying the Orchestrator
 

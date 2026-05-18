@@ -281,48 +281,56 @@ Sent when an instrument changes status (idle/busy/error/offline):
 
 ---
 
-## gRPC (SiLA2Common)
+## gRPC (SiLA2)
 
-Each server exposes gRPC on its configured port. The proto file is at `v1/SiLA2/SiLA2Common.proto`.
+Each server exposes a standard SiLA2 gRPC endpoint on its configured port.
 
-### Connecting (Python)
+### Connecting via `sila2` library (Strategy 0 — preferred)
+
+```python
+from sila2.client import SilaClient
+
+client = SilaClient("localhost", 50052, insecure=True)
+
+# Access features by name (from FDL Identifier)
+result = client.WorkflowAPI.ExecuteRecipe(
+    recipe="my_recipe.json",
+    hal_config="deck_config_A.json"
+)
+print(result)
+
+# Read a property
+status = client.WorkflowAPI.RobotStatus.get()
+print(status)
+
+client.close()
+```
+
+### Connecting via legacy SiLA2Common stubs (Strategy 1 — fallback only)
+
+Only needed for old servers that do not use the `sila2` library:
 
 ```python
 import grpc
-import SiLA2Common_pb2 as pb2
-import SiLA2Common_pb2_grpc as pb2_grpc
 import json
+from src.pnp_stubs import SiLA2Common_pb2 as pb2
+from src.pnp_stubs import SiLA2Common_pb2_grpc as pb2_grpc
 
 channel = grpc.insecure_channel("localhost:50052")
-stub = pb2_grpc.SiLA2CommonServiceStub(channel)
+stub = pb2_grpc.SiLA2ServerInfoStub(channel)
 
-# Get server info
-info = stub.GetServerInfo(pb2.Empty())
-print(info.server_name)  # "opentrons"
-
-# Execute a command
-response = stub.ExecuteCommand(pb2.CommandRequest(
-    command_id="ExecuteRecipe",
-    params_json=json.dumps({
-        "recipe": "my_recipe.json",
-        "hal_config": "deck_config_A.json"
-    })
+response_stream = stub.ExecuteCommand(pb2.ExecuteCommandRequest(
+    feature="WorkflowAPI",
+    command="ExecuteRecipe",
+    parameters={"recipe": "my_recipe.json", "hal_config": "deck_config_A.json"}
 ))
-print(response.success, response.result_json)
+for response in response_stream:
+    if not response.is_intermediate:
+        print(response.success, dict(response.result))
+        break
 ```
 
 ### Error Handling
 
-`ExecuteCommand` always returns a `CommandResponse`. On failure:
-- `success = false`
-- `error_detail` contains a human-readable description
-- No gRPC exception is raised for instrument-level errors (only for network failures)
-
-Network/transport errors raise standard gRPC exceptions (`grpc.RpcError`). Handle them with:
-
-```python
-try:
-    response = stub.ExecuteCommand(request)
-except grpc.RpcError as e:
-    print(e.code(), e.details())
-```
+- **Strategy 0**: instrument-level errors raise `DefinedExecutionError`; network errors raise `grpc.RpcError`
+- **Strategy 1**: final `CommandResponse` carries `success=False` and `error` string for instrument errors; `grpc.RpcError` for transport errors

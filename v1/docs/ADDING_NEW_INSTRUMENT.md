@@ -20,15 +20,22 @@ The system is **truly plug & play**:
 ┌─────────────────────────────────────────────────┐
 │         web interface / lab_core.py              │  <- User interfaces
 ├─────────────────────────────────────────────────┤
-│              PnP Discovery                      │  <- Auto-discovers servers
-│         (src/discovery.py)                      │      via config/mDNS/scan
+│              PnP Discovery (src/discovery.py)   │  <- Auto-discovers servers
+│         mDNS, port scan, config file            │      via multiple methods
+├─────────────────────────────────────────────────┤
+│    Execution Client (src/client.py)             │  <- Tries strategies in order
+│    Strategy 0: sila2 SilaClient (preferred)     │      new sila2 servers
+│    Strategy 1: SiLA2Common fallback (legacy)    │      old custom servers
+│    Strategy 2: Dynamic stub fallback            │      last resort
 ├─────────────────────────────────────────────────┤
 │           Your SiLA2 Server                     │  <- Your new server
-│     (features/*.sila.xml + servicer.py)         │
+│     (FeatureImplementationBase + .sila.xml)     │      built with sila2 library
 ├─────────────────────────────────────────────────┤
 │              Physical Hardware                  │
 └─────────────────────────────────────────────────┘
 ```
+
+For new servers, the orchestrator automatically selects **Strategy 0** (sila2 SilaClient).
 
 ---
 
@@ -98,28 +105,49 @@ Edit `features/YourInstrument.sila.xml`:
 
 ### Step 4: Implement the Commands
 
-Edit `src/servicer.py`:
+First generate the base classes from your FDL:
+```bash
+cd SiLA2/CentrifugeSiLA2Server
+sila2-codegen features/Centrifuge.sila.xml --output-dir generated/
+```
+
+Then edit `src/centrifuge_impl.py`:
 
 ```python
-class InstrumentServicer:
+import serial
+from generated.centrifuge.centrifuge_base import CentrifugeBase
+
+class CentrifugeImpl(CentrifugeBase):
     def __init__(self, config):
-        self.config = config
-        # Initialize your hardware connection
+        super().__init__()
         self.serial = serial.Serial(
             config['hardware']['serial_port'],
             config['hardware']['baud_rate']
         )
-    
-    async def Spin(self, rpm: int, duration: int):
-        """Run centrifuge."""
-        self.serial.write(f"SPIN {rpm} {duration}\n".encode())
-        response = self.serial.readline()
-        return {"status": "running"}
-    
-    async def Stop(self):
-        """Emergency stop."""
+
+    def Spin(self, *, RPM: int, Duration: int):
+        self.serial.write(f"SPIN {RPM} {Duration}\n".encode())
+        self.serial.readline()
+        return self.SpinResponses(status="running")
+
+    def Stop(self):
         self.serial.write(b"STOP\n")
-        return {"stopped": True}
+        return self.StopResponses(stopped=True)
+```
+
+And update `main.py`:
+```python
+from sila2.server import SilaServer
+from src.centrifuge_impl import CentrifugeImpl
+
+config = yaml.safe_load(open("config.yaml"))
+server = SilaServer(
+    name=config["sila2"]["server_name"],
+    features=[CentrifugeImpl(config)],
+    port=config["server"]["port"],
+    insecure=True,
+)
+server.run()
 ```
 
 ### Step 5: Test Your Server
