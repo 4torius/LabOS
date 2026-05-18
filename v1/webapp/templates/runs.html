@@ -79,7 +79,7 @@
     </div>
 
     <!-- Search bar -->
-    <div class="row g-2 mb-3">
+    <div class="row g-2 mb-2">
         <div class="col-md-5">
             <input type="text" id="searchQuery" class="form-control form-control-sm"
                    placeholder="Search by run ID or workflow name..."
@@ -98,6 +98,11 @@
                 <i class="bi bi-x-lg"></i>
             </button>
         </div>
+    </div>
+    <div id="activeFilterBadge" class="mb-3" style="display:none">
+        <span class="badge bg-primary me-1"><i class="bi bi-funnel-fill"></i> Active filter:</span>
+        <span id="activeFilterText" class="text-muted small"></span>
+        <button class="btn btn-link btn-sm py-0 text-danger" onclick="clearSearch()">clear</button>
     </div>
 
     <!-- Run table -->
@@ -214,12 +219,34 @@ async function loadStats() {
     } catch(e) { console.warn('stats error', e); }
 }
 
+function updateFilterBadge(search, dateFrom, dateTo, status) {
+    const badge = document.getElementById('activeFilterBadge');
+    const text  = document.getElementById('activeFilterText');
+    const sq    = document.getElementById('searchQuery');
+    const parts = [];
+    if (search)   parts.push(`"${search}"`);
+    if (dateFrom) parts.push(`from ${dateFrom}`);
+    if (dateTo)   parts.push(`to ${dateTo}`);
+    if (status)   parts.push(`status=${status}`);
+    if (parts.length) {
+        badge.style.display = '';
+        text.textContent = parts.join(', ');
+        sq.classList.add('border-primary');
+    } else {
+        badge.style.display = 'none';
+        text.textContent = '';
+        sq.classList.remove('border-primary');
+    }
+}
+
 async function loadRuns() {
     const status   = document.getElementById('filterStatus').value;
     const search   = document.getElementById('searchQuery').value.trim();
     const dateFrom = document.getElementById('dateFrom').value;
     const dateTo   = document.getElementById('dateTo').value;
     const offset   = currentPage * PAGE_SIZE;
+
+    updateFilterBadge(search, dateFrom, dateTo, status);
 
     let url = `/api/db/runs?limit=${PAGE_SIZE}&offset=${offset}`;
     if (status)   url += `&status=${encodeURIComponent(status)}`;
