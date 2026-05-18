@@ -89,6 +89,9 @@ def main() -> int:
     )
     for handler in logging.root.handlers:
         handler.addFilter(_SuppressSubscriptionManagerLogs())
+    logging.getLogger("SiLAService").setLevel(logging.WARNING)
+    logging.getLogger("sila2").setLevel(logging.WARNING)
+    logging.getLogger("grpc").setLevel(logging.WARNING)
 
     os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs"), exist_ok=True)
 

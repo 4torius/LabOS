@@ -87,6 +87,9 @@ def main() -> int:
     )
     for handler in logging.root.handlers:
         handler.addFilter(_SuppressSubscriptionManagerLogs())
+    logging.getLogger("SiLAService").setLevel(logging.WARNING)
+    logging.getLogger("sila2").setLevel(logging.WARNING)
+    logging.getLogger("grpc").setLevel(logging.WARNING)
 
     bridge_cfg = config.get("bridge", {})
     bridge_host = bridge_cfg.get("host", "127.0.0.1")

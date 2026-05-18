@@ -91,6 +91,9 @@ def main() -> int:
     )
     for handler in logging.root.handlers:
         handler.addFilter(_SuppressSubscriptionManagerLogs())
+    logging.getLogger("SiLAService").setLevel(logging.WARNING)
+    logging.getLogger("sila2").setLevel(logging.WARNING)
+    logging.getLogger("grpc").setLevel(logging.WARNING)
 
     # ── Build the SiLA2 standard server ──────────────────────────────────────
     sila_server = SilaServer(
