@@ -355,33 +355,37 @@ ProgressCallback = Callable[[WorkflowProgress], None]
 #                           WORKFLOW EXECUTOR
 # =============================================================================
 
-def _load_error_handling_config() -> Dict[str, Any]:
-    """Load error handling configuration from lab_config.yaml."""
+def _load_executor_config() -> tuple:
+    """Load error handling + default timeout from lab_config.yaml in a single read.
+
+    Returns:
+        (error_config dict, default_step_timeout float)
+    """
     from src.config_schema import load_lab_config
     config_path = Path(__file__).parent.parent / "lab_config.yaml"
-    defaults = {
+    _error_defaults = {
         "retry_strategy": "exponential",
         "base_delay_seconds": 1.0,
         "max_delay_seconds": 60.0,
         "max_retries": 3,
-        "enable_human_intervention": True
+        "enable_human_intervention": True,
     }
     try:
         config, _ = load_lab_config(config_path, apply_defaults=False, strict=False)
-        return config.get("error_handling", defaults)
+        error_cfg = config.get("error_handling", _error_defaults)
+        timeout = float(config.get("workflow", {}).get("default_timeout", 300.0))
+        return error_cfg, timeout
     except Exception:
-        return defaults
+        return _error_defaults, 300.0
+
+
+# Legacy aliases kept for backwards compatibility with any external code that imports them.
+def _load_error_handling_config() -> Dict[str, Any]:
+    return _load_executor_config()[0]
 
 
 def _load_default_step_timeout() -> float:
-    """Load default step timeout from lab_config.yaml (workflow.default_timeout)."""
-    from src.config_schema import load_lab_config
-    config_path = Path(__file__).parent.parent / "lab_config.yaml"
-    try:
-        config, _ = load_lab_config(config_path, apply_defaults=False, strict=False)
-        return float(config.get("workflow", {}).get("default_timeout", 300.0))
-    except Exception:
-        return 300.0
+    return _load_executor_config()[1]
 
 
 class PnPWorkflowExecutor:
@@ -406,9 +410,8 @@ class PnPWorkflowExecutor:
         self._resume_event: Optional[asyncio.Event] = None
         self._step_executor_fn: Optional[Callable] = None  # async fn(step, context) -> CommandResult
 
-        # Load error handling config
-        self._error_config = _load_error_handling_config()
-        self._default_step_timeout = _load_default_step_timeout()
+        # Load error handling config + default timeout in a single file read
+        self._error_config, self._default_step_timeout = _load_executor_config()
 
     def set_step_executor(self, fn: Callable):
         """Override step execution. fn must be: async (step: WorkflowStep, context: WorkflowContext) -> CommandResult."""

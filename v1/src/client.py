@@ -392,7 +392,7 @@ class PnPClient:
                             )
                         if on_progress and result.progress is not None:
                             on_progress(int(result.progress), str(result.status or ""))
-                        _time.sleep(0.2)
+                        _time.sleep(0.05)
 
                     try:
                         responses = result.get_responses()
@@ -433,7 +433,7 @@ class PnPClient:
                 return None
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             return await loop.run_in_executor(None, _run_sync)
         except Exception as exc:
             logger.warning("sila2 client executor error: %s", exc, exc_info=True)

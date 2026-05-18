@@ -271,7 +271,11 @@ def create_workflows_router(
         if not _exec_core:
             return {"status": "error", "error": "LabCore not initialized"}
 
-        await _exec_core.discover()
+        # Only run discovery when no instruments are cached yet (startup path).
+        # Once instruments are cached, repeated calls return the same data and
+        # the discover() overhead (mDNS wait + port scan) is wasted on every run.
+        if not _exec_core.list_instruments():
+            await _exec_core.discover()
 
         registry = PnPRegistry(BASE_DIR)
         for instr in _exec_core.list_instruments():
@@ -843,7 +847,8 @@ def create_workflows_router(
                     if not _exec_core:
                         raise Exception("LabCore not initialized")
 
-                    await _exec_core.discover()
+                    if not _exec_core.list_instruments():
+                        await _exec_core.discover()
                     registry = PnPRegistry(BASE_DIR)
                     for instr in _exec_core.list_instruments():
                         if hasattr(instr, '_server') and instr._server:

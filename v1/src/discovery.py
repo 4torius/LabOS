@@ -551,12 +551,20 @@ class PnPDiscovery:
                 # Check if this is a remote server (not localhost)
                 is_remote = host != "localhost" and host != "127.0.0.1"
 
-                # For remote servers, verify via gRPC (not just TCP) — double timeout for WiFi
+                # For remote servers, verify via gRPC — run blocking socket/gRPC calls in
+                # a thread so we never stall the event loop waiting for an offline host.
                 if is_remote and port > 0:
-                    tcp_ok = self._is_port_open(host, port, timeout=timeout * 2)
-                    is_online = tcp_ok and self._is_grpc_server(host, port, timeout=timeout)
+                    loop = asyncio.get_running_loop()
+                    tcp_ok = await loop.run_in_executor(
+                        None, self._is_port_open, host, port, timeout * 2
+                    )
+                    if tcp_ok:
+                        is_online = await loop.run_in_executor(
+                            None, self._is_grpc_server, host, port, timeout
+                        )
+                    else:
+                        is_online = False
 
-                    # Week 3: no local XML loading — features come from GetFeatures gRPC
                     server_dir = srv_config.get("directory", "")
                     server = PnPServer(
                         name=name,
@@ -569,7 +577,7 @@ class PnPDiscovery:
                         hardware_online=is_online,
                         hardware_status="idle" if is_online else "offline"
                     )
-                    
+
                     self.servers[server_key] = server
                     status = "ONLINE" if is_online else "OFFLINE"
                     logger.info(f"Config server: {name} ({host}:{port}) - {status}")
@@ -923,18 +931,27 @@ class PnPDiscovery:
         additional_ports = {50054, 50056}  # Potential new servers (50055 is reserved for Tecan internal bridge)
         ports_to_check = known_ports | additional_ports
         
-        # Check ports sequentially with gRPC verification
-        # Use _is_grpc_server for accurate detection (not just port open)
-        grpc_ports = []
-        for port in ports_to_check:
-            # First quick check if port is open at all
-            if self._is_port_open("localhost", port, timeout=0.1):
-                # Then verify it's actually a gRPC server
-                if self._is_grpc_server("localhost", port, timeout=0.5):
-                    grpc_ports.append(port)
-                    logger.debug(f"Port {port}: gRPC server confirmed")
-                else:
-                    logger.debug(f"Port {port}: open but not gRPC")
+        # Check all ports in parallel — run blocking socket calls in thread executor
+        # so the event loop is never stalled waiting for closed ports.
+        loop = asyncio.get_running_loop()
+
+        async def _check_port(port: int) -> int | None:
+            tcp_ok = await loop.run_in_executor(
+                None, self._is_port_open, "localhost", port, 0.1
+            )
+            if not tcp_ok:
+                return None
+            grpc_ok = await loop.run_in_executor(
+                None, self._is_grpc_server, "localhost", port, 0.5
+            )
+            if grpc_ok:
+                logger.debug(f"Port {port}: gRPC server confirmed")
+                return port
+            logger.debug(f"Port {port}: open but not gRPC")
+            return None
+
+        results = await asyncio.gather(*[_check_port(p) for p in ports_to_check])
+        grpc_ports = [p for p in results if p is not None]
         
         logger.info(f"Found {len(grpc_ports)} gRPC servers (checked {len(ports_to_check)} ports)")
         
