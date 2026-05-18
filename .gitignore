@@ -24,6 +24,10 @@ v1/logs/
 *.db-shm
 *.db-wal
 
+# C# build artifacts (TecanBridge)
+v1/SiLA2/TecanM200SiLA2Server/bridge/**/obj/
+v1/SiLA2/TecanM200SiLA2Server/bridge/**/bin/
+
 # LaTeX build artifacts
 *.aux
 *.bbl
