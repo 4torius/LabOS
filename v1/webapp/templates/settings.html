@@ -376,22 +376,46 @@
                         <div class="card-body">
                             <div class="setting-row">
                                 <div class="setting-label">
-                                    <span>Retry on Failure</span>
-                                    <small>Automatically retry failed commands</small>
+                                    <span>Retry Strategy</span>
+                                    <small>Backoff algorithm for failed commands</small>
                                 </div>
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="setting-retry-failure" onchange="updateSetting('workflow.retry_on_failure', this.checked)">
-                                </div>
+                                <select class="form-select setting-input" style="width: 160px;" id="setting-retry-strategy" onchange="updateSetting('error_handling.retry_strategy', this.value)">
+                                    <option value="exponential">Exponential</option>
+                                    <option value="linear">Linear</option>
+                                    <option value="constant">Constant</option>
+                                </select>
                             </div>
-                            
+
                             <div class="setting-row">
                                 <div class="setting-label">
                                     <span>Max Retries</span>
                                     <small>Maximum retry attempts per command</small>
                                 </div>
-                                <input type="number" class="setting-input number-input" id="setting-max-retries" min="0" max="10" onchange="updateSetting('workflow.max_retries', parseInt(this.value))">
+                                <input type="number" class="setting-input number-input" id="setting-max-retries" min="0" max="10" onchange="updateSetting('error_handling.max_retries', parseInt(this.value))">
                             </div>
-                            
+
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Base Delay</span>
+                                    <small>Initial wait between retries</small>
+                                </div>
+                                <div class="input-group" style="width: 140px;">
+                                    <input type="number" class="setting-input number-input" id="setting-base-delay" min="0.1" max="30" step="0.1" onchange="updateSetting('error_handling.base_delay_seconds', parseFloat(this.value))">
+                                    <span class="input-group-text bg-dark border-secondary text-muted">s</span>
+                                </div>
+                            </div>
+
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Max Delay</span>
+                                    <small>Cap on exponential backoff wait</small>
+                                </div>
+                                <div class="input-group" style="width: 140px;">
+                                    <input type="number" class="setting-input number-input" id="setting-max-delay" min="1" max="300" onchange="updateSetting('error_handling.max_delay_seconds', parseFloat(this.value))">
+                                    <span class="input-group-text bg-dark border-secondary text-muted">s</span>
+                                </div>
+                            </div>
+
                             <div class="setting-row">
                                 <div class="setting-label">
                                     <span>Human Intervention</span>
@@ -436,6 +460,32 @@
                                     <input type="number" class="setting-input number-input" id="setting-toast-duration" min="2" max="30" onchange="updateSetting('webapp.ui.toast_duration', parseInt(this.value))">
                                     <span class="input-group-text bg-dark border-secondary text-muted">s</span>
                                 </div>
+                            </div>
+
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Workflow Status Auto-hide</span>
+                                    <small>Seconds before workflow banner auto-hides (0 = never)</small>
+                                </div>
+                                <div class="input-group" style="width: 140px;">
+                                    <input type="number" class="setting-input number-input" id="setting-workflow-autohide" min="0" max="300" onchange="updateSetting('webapp.ui.workflow_status_auto_hide', parseInt(this.value))">
+                                    <span class="input-group-text bg-dark border-secondary text-muted">s</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card settings-card">
+                        <div class="card-header">
+                            <i class="bi bi-box-arrow-up-right me-2"></i> Integrations
+                        </div>
+                        <div class="card-body">
+                            <div class="setting-row">
+                                <div class="setting-label">
+                                    <span>Node-RED URL</span>
+                                    <small>Address of the Node-RED visual editor</small>
+                                </div>
+                                <input type="text" class="setting-input" style="width: 220px;" id="setting-nodered-url" placeholder="http://localhost:1880" onchange="updateSetting('webapp.nodered_url', this.value)">
                             </div>
                         </div>
                     </div>
@@ -833,22 +883,34 @@ function populateAllSettings(config) {
     var defaultTimeout = document.getElementById('setting-default-timeout');
     if (defaultTimeout) defaultTimeout.value = getNestedValue(config, 'workflow.default_timeout') || 600;
     
-    var retryFailure = document.getElementById('setting-retry-failure');
-    if (retryFailure) retryFailure.checked = getNestedValue(config, 'workflow.retry_on_failure') === true;
-    
+    // Error Handling (all bound to error_handling.* — that's what the executor reads)
+    var retryStrategy = document.getElementById('setting-retry-strategy');
+    if (retryStrategy) retryStrategy.value = getNestedValue(config, 'error_handling.retry_strategy') || 'exponential';
+
     var maxRetries = document.getElementById('setting-max-retries');
-    if (maxRetries) maxRetries.value = getNestedValue(config, 'workflow.max_retries') || 3;
-    
-    // Error Handling
+    if (maxRetries) maxRetries.value = getNestedValue(config, 'error_handling.max_retries') || 3;
+
+    var baseDelay = document.getElementById('setting-base-delay');
+    if (baseDelay) baseDelay.value = getNestedValue(config, 'error_handling.base_delay_seconds') || 1.0;
+
+    var maxDelay = document.getElementById('setting-max-delay');
+    if (maxDelay) maxDelay.value = getNestedValue(config, 'error_handling.max_delay_seconds') || 60.0;
+
     var humanIntervention = document.getElementById('setting-human-intervention');
     if (humanIntervention) humanIntervention.checked = getNestedValue(config, 'error_handling.enable_human_intervention') !== false;
-    
+
     // UI Settings
     var refreshInterval = document.getElementById('setting-refresh-interval');
     if (refreshInterval) refreshInterval.value = getNestedValue(config, 'webapp.ui.auto_refresh_interval') || 3;
-    
+
     var toastDuration = document.getElementById('setting-toast-duration');
     if (toastDuration) toastDuration.value = getNestedValue(config, 'webapp.ui.toast_duration') || 5;
+
+    var wfAutoHide = document.getElementById('setting-workflow-autohide');
+    if (wfAutoHide) wfAutoHide.value = getNestedValue(config, 'webapp.ui.workflow_status_auto_hide') || 10;
+
+    var noderedUrl = document.getElementById('setting-nodered-url');
+    if (noderedUrl) noderedUrl.value = getNestedValue(config, 'webapp.nodered_url') || 'http://localhost:1880';
     
     // Timeouts
     var interventionTimeout = document.getElementById('setting-intervention-timeout');
