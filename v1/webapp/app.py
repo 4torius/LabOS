@@ -327,7 +327,7 @@ def create_app() -> "FastAPI":
 
     @app.get("/plates", response_class=HTMLResponse)
     async def plates_page(request: Request):
-        return templates.TemplateResponse("plates.html", {"request": request, "title": "Plates Tracking"})
+        return templates.TemplateResponse("plates.html", {"request": request, "title": "Plates"})
 
     @app.get("/history", response_class=HTMLResponse)
     async def history_page(request: Request):
@@ -336,10 +336,6 @@ def create_app() -> "FastAPI":
     @app.get("/runs", response_class=HTMLResponse)
     async def runs_page(request: Request):
         return templates.TemplateResponse("runs.html", {"request": request, "title": "Run History"})
-
-    @app.get("/plates", response_class=HTMLResponse)
-    async def plates_page(request: Request):
-        return templates.TemplateResponse("plates.html", {"request": request, "title": "Plates"})
 
     # --------------------------------------------------------------------------
     # Settings API
