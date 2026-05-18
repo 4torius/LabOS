@@ -8,6 +8,7 @@ import json
 import logging
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime as _dt
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -1046,7 +1047,10 @@ def export_run_json(run_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def export_ai_context(status_filter: str = "completed") -> Dict[str, Any]:
+def export_ai_context(
+    status_filter: str = "completed",
+    run_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
     Return a structured dict with ALL runs (default: completed only) suitable
     for feeding to an LLM to generate new experiment recipes.
@@ -1080,8 +1084,15 @@ def export_ai_context(status_filter: str = "completed") -> Dict[str, Any]:
     """
     try:
         with _conn() as con:
-            where = "WHERE status = ?" if status_filter else ""
-            params_r: list = [status_filter] if status_filter else []
+            if run_ids:
+                placeholders = ",".join("?" * len(run_ids))
+                where = f"WHERE run_id IN ({placeholders})"
+                params_r: list = list(run_ids)
+            elif status_filter:
+                where = "WHERE status = ?"
+                params_r = [status_filter]
+            else:
+                where, params_r = "", []
             run_rows = con.execute(
                 f"SELECT * FROM run_results {where} ORDER BY started_at",
                 params_r,
@@ -1095,11 +1106,36 @@ def export_ai_context(status_filter: str = "completed") -> Dict[str, Any]:
             run_dict = dict(rrow)
             result_json = run_dict.pop("result_json", None)
             errors: list = []
+            step_results_raw: list = []
             if result_json:
                 try:
-                    errors = json.loads(result_json).get("errors", [])
+                    _parsed = json.loads(result_json)
+                    errors = _parsed.get("errors", [])
+                    step_results_raw = _parsed.get("step_results", [])
                 except Exception:
                     pass
+
+            enriched_steps = []
+            for _i, _step in enumerate(step_results_raw):
+                _s = dict(_step)
+                if _step.get("timestamp") and _i + 1 < len(step_results_raw):
+                    _next_ts = step_results_raw[_i + 1].get("timestamp")
+                    if _next_ts:
+                        try:
+                            _t1 = _dt.fromisoformat(_step["timestamp"].replace("Z", "+00:00"))
+                            _t2 = _dt.fromisoformat(_next_ts.replace("Z", "+00:00"))
+                            _s["time_to_next_step_seconds"] = round((_t2 - _t1).total_seconds(), 1)
+                        except Exception:
+                            pass
+                enriched_steps.append(_s)
+
+            operator_waits = [
+                {"step": _s.get("step"), "action": _s.get("action", _s.get("command")),
+                 "wait_seconds": _s["time_to_next_step_seconds"]}
+                for _s in enriched_steps
+                if "Manual" in _s.get("instrument", "")
+                   and _s.get("time_to_next_step_seconds") is not None
+            ]
 
             with _conn() as con:
                 plate_rows = con.execute(
@@ -1155,6 +1191,10 @@ def export_ai_context(status_filter: str = "completed") -> Dict[str, Any]:
                 "duration_seconds": run_dict["duration_seconds"],
                 "started_at": run_dict["started_at"],
                 "errors": errors,
+                "step_results": enriched_steps,
+                "operator_wait_times": operator_waits,
+                "total_operator_wait_seconds": round(sum(w["wait_seconds"] for w in operator_waits), 1),
+                "failed_steps": [_s for _s in enriched_steps if _s.get("status") == "failed"],
                 "plates": plates_out,
             })
 

@@ -8,6 +8,8 @@ tracking dict (in-memory) is used only as a fallback source for plate IDs.
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
@@ -175,16 +177,23 @@ def create_db_router(db_module) -> APIRouter:
         return data
 
     @router.get("/export/ai-context.json")
-    async def export_ai_context(status: str = "completed"):
+    async def export_ai_context(status: str = "completed", run_ids: str = ""):
         """
-        Full context JSON for AI/LLM recipe generation: all experiments with
-        plate layouts, per-well reagents + volumes + measurements, reagent catalog,
-        protocols. Use status='' to include all runs including failed ones.
+        Full context JSON for AI/LLM recipe generation.
+        - status=completed (default) exports all completed runs
+        - run_ids=id1,id2,... exports only those specific runs (overrides status)
+        Includes step timing, operator wait times, errors per step.
         """
-        data = _db.export_ai_context(status_filter=status)
+        ids = [r.strip() for r in run_ids.split(",") if r.strip()] if run_ids else None
+        data = _db.export_ai_context(status_filter=status if not ids else None, run_ids=ids)
         if not data:
             raise HTTPException(status_code=500, detail="Export failed")
-        return data
+        fname = f"ai_context_{'_'.join(ids[:3])}.json" if ids else "ai_context_all.json"
+        return Response(
+            content=json.dumps(data, indent=2, default=str),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
 
     @router.get("/stats")
     async def get_db_stats():

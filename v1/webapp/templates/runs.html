@@ -19,12 +19,12 @@
 
 {% block content %}
 <div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2><i class="bi bi-database"></i> Run History</h2>
-        <div class="d-flex gap-2">
-            <a class="btn btn-sm btn-outline-info" href="/api/db/export/ai-context.json" download="labos_ai_context.json"
-               title="Export all completed runs as structured JSON for AI/LLM recipe generation">
-                <i class="bi bi-robot"></i> AI Context
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <h2 class="mb-0"><i class="bi bi-database"></i> Run History</h2>
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+            <a class="btn btn-sm btn-outline-info" href="/api/db/export/ai-context.json"
+               title="Export all completed runs as AI context JSON">
+                <i class="bi bi-robot"></i> All AI Context
             </a>
             <select class="form-select form-select-sm" id="filterStatus" style="width:140px" onchange="loadRuns()">
                 <option value="">All status</option>
@@ -32,7 +32,7 @@
                 <option value="failed">Failed</option>
                 <option value="cancelled">Cancelled</option>
             </select>
-            <button class="btn btn-sm btn-outline-secondary" onclick="loadRuns()">
+            <button class="btn btn-sm btn-outline-secondary" onclick="loadRuns()" title="Refresh">
                 <i class="bi bi-arrow-clockwise"></i>
             </button>
         </div>
@@ -120,7 +120,10 @@
                 <table class="table table-hover mb-0">
                     <thead>
                         <tr>
-                            <th style="width:30px"></th>
+                            <th style="width:30px">
+                                <input type="checkbox" id="selectAll" class="form-check-input"
+                                       onchange="toggleSelectAll(this)" title="Select all">
+                            </th>
                             <th>Workflow</th>
                             <th>Started</th>
                             <th>Status</th>
@@ -143,6 +146,21 @@
             <small class="text-muted" id="pageInfo">Page 1</small>
             <button class="btn btn-sm btn-outline-secondary" id="btnNext" onclick="changePage(1)">
                 Next <i class="bi bi-chevron-right"></i>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Floating selection export bar -->
+<div id="exportBar" style="display:none;position:fixed;bottom:24px;right:24px;z-index:1050">
+    <div class="card shadow-lg border-info">
+        <div class="card-body py-2 px-3 d-flex align-items-center gap-3">
+            <span class="text-muted small"><span id="selCount">0</span> run(s) selected</span>
+            <button class="btn btn-sm btn-info" onclick="exportSelected()" title="Download AI context for selected runs">
+                <i class="bi bi-robot"></i> AI Context
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="clearSelection()" title="Clear selection">
+                <i class="bi bi-x-lg"></i>
             </button>
         </div>
     </div>
@@ -258,6 +276,7 @@ async function loadRuns() {
     if (dateFrom) url += `&date_from=${encodeURIComponent(dateFrom)}`;
     if (dateTo)   url += `&date_to=${encodeURIComponent(dateTo)}`;
 
+    clearSelection();
     const tbody = document.getElementById('runsTable');
     tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div></td></tr>';
 
@@ -273,23 +292,29 @@ async function loadRuns() {
         document.getElementById('btnNext').disabled = (offset + PAGE_SIZE) >= totalCount;
 
         if (!d.runs || d.runs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No runs found</td></tr>';
+            const emptyMsg = search
+                ? `No runs match "<strong>${search}</strong>"`
+                : 'No runs found';
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted py-4">${emptyMsg}</td></tr>`;
             return;
         }
 
         tbody.innerHTML = d.runs.map(run => {
-            const steps = run.steps_completed + (run.steps_failed||0);
             const total = run.steps_total || '?';
             const failTxt = run.steps_failed ? ` <span class="text-danger">(${run.steps_failed} failed)</span>` : '';
             const escapedId = run.run_id.replace(/'/g, "\\'");
+            const escapedIdAttr = run.run_id.replace(/"/g, '&quot;');
             return `<tr class="run-row" onclick="showDetail('${escapedId}')">
-                <td><i class="bi bi-chevron-right text-muted small"></i></td>
+                <td onclick="event.stopPropagation()">
+                    <input type="checkbox" class="form-check-input run-select"
+                           value="${escapedIdAttr}" onchange="updateExportBar()">
+                </td>
                 <td><strong>${run.workflow_name||'—'}</strong>${run.notes ? `<br><small class="text-muted">${run.notes}</small>` : ''}</td>
                 <td class="text-nowrap">${fmtDate(run.started_at)}</td>
                 <td>${statusBadge(run.status)}</td>
                 <td>${fmtDuration(run.duration_seconds)}</td>
                 <td>${run.steps_completed||0}/${total}${failTxt}</td>
-                <td class="text-muted small" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                <td class="text-muted small" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
                     title="${run.run_id}">${run.run_id}</td>
                 <td onclick="event.stopPropagation()">
                     <button class="btn btn-sm btn-outline-danger py-0 px-1"
@@ -464,6 +489,31 @@ async function saveRunEdit(runId) {
 function changePage(dir) {
     currentPage = Math.max(0, currentPage + dir);
     loadRuns();
+}
+
+function updateExportBar() {
+    const n = document.querySelectorAll('.run-select:checked').length;
+    document.getElementById('selCount').textContent = n;
+    document.getElementById('exportBar').style.display = n > 0 ? '' : 'none';
+}
+
+function toggleSelectAll(cb) {
+    document.querySelectorAll('.run-select').forEach(el => { el.checked = cb.checked; });
+    updateExportBar();
+}
+
+function clearSelection() {
+    document.querySelectorAll('.run-select').forEach(el => { el.checked = false; });
+    const sa = document.getElementById('selectAll');
+    if (sa) sa.checked = false;
+    updateExportBar();
+}
+
+function exportSelected() {
+    const ids = [...document.querySelectorAll('.run-select:checked')].map(cb => cb.value);
+    if (!ids.length) return;
+    const url = `/api/db/export/ai-context.json?run_ids=${ids.map(encodeURIComponent).join(',')}`;
+    window.open(url, '_blank');
 }
 
 window.handleWebSocketMessage = window.handleWebSocketMessage || function(){};
