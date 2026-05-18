@@ -218,6 +218,7 @@ _MIGRATIONS = [
     "ALTER TABLE well_measurements ADD COLUMN measurement_type TEXT",
     "ALTER TABLE well_measurements ADD COLUMN excitation_nm REAL",
     "ALTER TABLE well_measurements ADD COLUMN emission_nm REAL",
+    "ALTER TABLE run_results ADD COLUMN notes TEXT",
 ]
 
 
@@ -344,7 +345,7 @@ def get_runs(
                 f"""
                 SELECT run_id, workflow_name, started_at, completed_at, status,
                        duration_seconds, steps_total, steps_completed, steps_failed,
-                       steps_skipped, created_at
+                       steps_skipped, notes, created_at
                 FROM run_results
                 {where}
                 ORDER BY created_at DESC
@@ -405,6 +406,110 @@ def get_stats() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Failed to get stats: {e}")
         return {}
+
+
+def search_runs(
+    query: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    """Full-text + date-range search over run_results."""
+    try:
+        filters: list = []
+        params: list = []
+        if query:
+            filters.append("(run_id LIKE ? OR workflow_name LIKE ?)")
+            params += [f"%{query}%", f"%{query}%"]
+        if date_from:
+            filters.append("started_at >= ?")
+            params.append(date_from)
+        if date_to:
+            filters.append("started_at <= ?")
+            params.append(date_to + "T23:59:59")
+        if status:
+            filters.append("status = ?")
+            params.append(status)
+        where = ("WHERE " + " AND ".join(filters)) if filters else ""
+        params += [limit, offset]
+        with _conn() as con:
+            rows = con.execute(
+                f"""
+                SELECT run_id, workflow_name, started_at, completed_at, status,
+                       duration_seconds, steps_total, steps_completed, steps_failed,
+                       steps_skipped, notes, created_at
+                FROM run_results
+                {where}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to search runs: {e}")
+        return []
+
+
+def rename_run(run_id: str, new_name: Optional[str], notes: Optional[str]) -> bool:
+    """Update workflow_name and/or notes for a run. Returns True if found."""
+    try:
+        with _conn() as con:
+            cur = con.execute(
+                """UPDATE run_results
+                   SET workflow_name = COALESCE(?, workflow_name),
+                       notes = ?
+                   WHERE run_id = ?""",
+                (new_name, notes, run_id),
+            )
+            return cur.rowcount > 0
+    except Exception as e:
+        logger.error(f"Failed to rename run '{run_id}': {e}")
+        return False
+
+
+def delete_run(run_id: str) -> bool:
+    """Delete a run and its instrument_measurements. Plates are preserved."""
+    try:
+        with _conn() as con:
+            con.execute("DELETE FROM instrument_measurements WHERE run_id = ?", (run_id,))
+            cur = con.execute("DELETE FROM run_results WHERE run_id = ?", (run_id,))
+            return cur.rowcount > 0
+    except Exception as e:
+        logger.error(f"Failed to delete run '{run_id}': {e}")
+        return False
+
+
+def update_plate(plate_id: str, display_name: Optional[str], notes: Optional[str]) -> bool:
+    """Update display_name and/or notes for a plate. Returns True if found."""
+    try:
+        with _conn() as con:
+            cur = con.execute(
+                """UPDATE plates
+                   SET display_name = COALESCE(?, display_name),
+                       notes = ?
+                   WHERE plate_id = ?""",
+                (display_name, notes, plate_id),
+            )
+            return cur.rowcount > 0
+    except Exception as e:
+        logger.error(f"Failed to update plate '{plate_id}': {e}")
+        return False
+
+
+def delete_plate(plate_id: str) -> bool:
+    """Delete a plate and all its wells and well_measurements."""
+    try:
+        with _conn() as con:
+            con.execute("DELETE FROM well_measurements WHERE plate_id = ?", (plate_id,))
+            con.execute("DELETE FROM wells WHERE plate_id = ?", (plate_id,))
+            cur = con.execute("DELETE FROM plates WHERE plate_id = ?", (plate_id,))
+            return cur.rowcount > 0
+    except Exception as e:
+        logger.error(f"Failed to delete plate '{plate_id}': {e}")
+        return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────

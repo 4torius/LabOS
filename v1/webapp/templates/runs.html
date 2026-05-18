@@ -13,6 +13,7 @@
 .step-fail { color: #dc3545; }
 .step-skip { color: #6c757d; }
 .detail-panel { display: none; background: var(--bs-body-bg); }
+.edit-section { background: rgba(102,126,234,0.06); border-radius: 6px; padding: 12px; }
 </style>
 {% endblock %}
 
@@ -77,6 +78,28 @@
         </div>
     </div>
 
+    <!-- Search bar -->
+    <div class="row g-2 mb-3">
+        <div class="col-md-5">
+            <input type="text" id="searchQuery" class="form-control form-control-sm"
+                   placeholder="Search by run ID or workflow name..."
+                   oninput="debouncedSearch()">
+        </div>
+        <div class="col-md-3">
+            <input type="date" id="dateFrom" class="form-control form-control-sm"
+                   title="From date" onchange="loadRuns()">
+        </div>
+        <div class="col-md-3">
+            <input type="date" id="dateTo" class="form-control form-control-sm"
+                   title="To date" onchange="loadRuns()">
+        </div>
+        <div class="col-md-1">
+            <button class="btn btn-sm btn-outline-secondary w-100" onclick="clearSearch()" title="Clear filters">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+    </div>
+
     <!-- Run table -->
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
@@ -95,10 +118,11 @@
                             <th>Duration</th>
                             <th>Steps</th>
                             <th>Run ID</th>
+                            <th style="width:60px"></th>
                         </tr>
                     </thead>
                     <tbody id="runsTable">
-                        <tr><td colspan="7" class="text-center text-muted py-4">Loading...</td></tr>
+                        <tr><td colspan="8" class="text-center text-muted py-4">Loading...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -121,6 +145,14 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="detailTitle">Run details</h5>
+                <div class="ms-auto d-flex gap-2 me-2">
+                    <button class="btn btn-sm btn-outline-primary" id="btnExportJson" onclick="exportRunJson()" title="Export full JSON for AI">
+                        <i class="bi bi-download"></i> JSON
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" id="btnDeleteRun" onclick="confirmDeleteFromModal()" title="Delete this run">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body" id="detailBody">
@@ -134,6 +166,8 @@
 const PAGE_SIZE = 25;
 let currentPage = 0;
 let totalCount = 0;
+let _currentRunId = null;
+let _searchTimer = null;
 
 function fmtDuration(s) {
     if (s == null) return '—';
@@ -154,6 +188,19 @@ function statusBadge(s) {
     return `<span class="badge ${cls[s]||'bg-secondary'}">${s||'—'}</span>`;
 }
 
+function debouncedSearch() {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => { currentPage = 0; loadRuns(); }, 400);
+}
+
+function clearSearch() {
+    document.getElementById('searchQuery').value = '';
+    document.getElementById('dateFrom').value = '';
+    document.getElementById('dateTo').value = '';
+    currentPage = 0;
+    loadRuns();
+}
+
 async function loadStats() {
     try {
         const r = await fetch('/api/db/stats');
@@ -169,12 +216,19 @@ async function loadStats() {
 
 async function loadRuns() {
     const status   = document.getElementById('filterStatus').value;
+    const search   = document.getElementById('searchQuery').value.trim();
+    const dateFrom = document.getElementById('dateFrom').value;
+    const dateTo   = document.getElementById('dateTo').value;
     const offset   = currentPage * PAGE_SIZE;
+
     let url = `/api/db/runs?limit=${PAGE_SIZE}&offset=${offset}`;
-    if (status) url += `&status=${encodeURIComponent(status)}`;
+    if (status)   url += `&status=${encodeURIComponent(status)}`;
+    if (search)   url += `&search=${encodeURIComponent(search)}`;
+    if (dateFrom) url += `&date_from=${encodeURIComponent(dateFrom)}`;
+    if (dateTo)   url += `&date_to=${encodeURIComponent(dateTo)}`;
 
     const tbody = document.getElementById('runsTable');
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div></td></tr>';
 
     try {
         const r = await fetch(url);
@@ -188,7 +242,7 @@ async function loadRuns() {
         document.getElementById('btnNext').disabled = (offset + PAGE_SIZE) >= totalCount;
 
         if (!d.runs || d.runs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No runs found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No runs found</td></tr>';
             return;
         }
 
@@ -196,23 +250,31 @@ async function loadRuns() {
             const steps = run.steps_completed + (run.steps_failed||0);
             const total = run.steps_total || '?';
             const failTxt = run.steps_failed ? ` <span class="text-danger">(${run.steps_failed} failed)</span>` : '';
-            return `<tr class="run-row" onclick="showDetail('${run.run_id}')">
+            const escapedId = run.run_id.replace(/'/g, "\\'");
+            return `<tr class="run-row" onclick="showDetail('${escapedId}')">
                 <td><i class="bi bi-chevron-right text-muted small"></i></td>
-                <td><strong>${run.workflow_name||'—'}</strong></td>
+                <td><strong>${run.workflow_name||'—'}</strong>${run.notes ? `<br><small class="text-muted">${run.notes}</small>` : ''}</td>
                 <td class="text-nowrap">${fmtDate(run.started_at)}</td>
                 <td>${statusBadge(run.status)}</td>
                 <td>${fmtDuration(run.duration_seconds)}</td>
                 <td>${run.steps_completed||0}/${total}${failTxt}</td>
                 <td class="text-muted small" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
                     title="${run.run_id}">${run.run_id}</td>
+                <td onclick="event.stopPropagation()">
+                    <button class="btn btn-sm btn-outline-danger py-0 px-1"
+                            onclick="confirmDelete('${escapedId}')" title="Delete run">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
             </tr>`;
         }).join('');
     } catch(e) {
-        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-4">${e.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-4">${e.message}</td></tr>`;
     }
 }
 
 async function showDetail(runId) {
+    _currentRunId = runId;
     const modal = new bootstrap.Modal(document.getElementById('detailModal'));
     document.getElementById('detailTitle').textContent = 'Run: ' + runId;
     document.getElementById('detailBody').innerHTML = '<div class="text-center py-4"><div class="spinner-border"></div></div>';
@@ -225,6 +287,7 @@ async function showDetail(runId) {
         const result = d.result || {};
         const stepResults = result.step_results || [];
         const measurements = d.measurements || [];
+        const plates = d.plates || [];
 
         let html = `
         <div class="row g-3 mb-3">
@@ -232,6 +295,29 @@ async function showDetail(runId) {
             <div class="col-6 col-md-3"><div class="text-muted small">Duration</div>${fmtDuration(d.duration_seconds)}</div>
             <div class="col-6 col-md-3"><div class="text-muted small">Steps</div>${d.steps_completed||0}/${d.steps_total||'?'}</div>
             <div class="col-6 col-md-3"><div class="text-muted small">Started</div>${fmtDate(d.started_at)}</div>
+        </div>`;
+
+        // Edit form
+        html += `
+        <div class="edit-section mb-3">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-5">
+                    <label class="form-label small text-muted mb-1">Workflow name</label>
+                    <input type="text" id="editRunName" class="form-control form-control-sm"
+                           value="${(d.workflow_name||'').replace(/"/g,'&quot;')}">
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label small text-muted mb-1">Notes</label>
+                    <input type="text" id="editRunNotes" class="form-control form-control-sm"
+                           value="${(d.notes||'').replace(/"/g,'&quot;')}"
+                           placeholder="Optional notes...">
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-sm btn-primary w-100" onclick="saveRunEdit('${runId.replace(/'/g,"\\'")}')">
+                        <i class="bi bi-check-lg"></i> Save
+                    </button>
+                </div>
+            </div>
         </div>`;
 
         if (stepResults.length > 0) {
@@ -264,6 +350,25 @@ async function showDetail(runId) {
             }).join('') + `</tbody></table></div>`;
         }
 
+        if (plates.length > 0) {
+            html += `<h6 class="mt-3">Plates</h6><div class="d-flex flex-wrap gap-2">` +
+                plates.map(p => `
+                <div class="card" style="min-width:200px">
+                    <div class="card-body py-2 px-3">
+                        <div class="fw-bold small">${p.display_name||p.plate_id}</div>
+                        <div class="text-muted x-small">${p.plate_type||'—'}</div>
+                        <div class="d-flex gap-1 mt-1">
+                            <span class="badge bg-secondary">${p.status||'prepared'}</span>
+                            <a href="/api/db/export/plate/${encodeURIComponent(p.plate_id)}.csv"
+                               class="btn btn-xs btn-outline-secondary py-0 px-1 btn-sm"
+                               title="Export plate CSV" download>
+                                <i class="bi bi-filetype-csv"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>`).join('') + `</div>`;
+        }
+
         if (result.errors && result.errors.length > 0) {
             html += `<h6 class="mt-3 text-danger">Errors</h6><ul class="list-unstyled">` +
                 result.errors.map(e => `<li><i class="bi bi-exclamation-triangle text-danger"></i> ${e}</li>`).join('') + `</ul>`;
@@ -272,6 +377,56 @@ async function showDetail(runId) {
         document.getElementById('detailBody').innerHTML = html;
     } catch(e) {
         document.getElementById('detailBody').innerHTML = `<div class="text-danger text-center py-4">${e.message}</div>`;
+    }
+}
+
+function exportRunJson() {
+    if (!_currentRunId) return;
+    window.open(`/api/db/export/run/${encodeURIComponent(_currentRunId)}.json`, '_blank');
+}
+
+async function confirmDelete(runId) {
+    if (!confirm(`Delete run "${runId}"?\n\nThis will also remove all instrument measurements linked to this run. Plate data is preserved.\n\nThis cannot be undone.`)) return;
+    try {
+        const r = await fetch(`/api/db/runs/${encodeURIComponent(runId)}`, {method: 'DELETE'});
+        if (r.ok) {
+            loadRuns();
+            loadStats();
+        } else {
+            const err = await r.json().catch(() => ({detail: r.statusText}));
+            alert('Delete failed: ' + (err.detail || r.statusText));
+        }
+    } catch(e) {
+        alert('Delete failed: ' + e.message);
+    }
+}
+
+async function confirmDeleteFromModal() {
+    if (!_currentRunId) return;
+    const modalEl = document.getElementById('detailModal');
+    const modal = bootstrap.Modal.getInstance(modalEl);
+    if (modal) modal.hide();
+    await confirmDelete(_currentRunId);
+}
+
+async function saveRunEdit(runId) {
+    const name  = document.getElementById('editRunName').value.trim();
+    const notes = document.getElementById('editRunNotes').value.trim();
+    try {
+        const r = await fetch(`/api/db/runs/${encodeURIComponent(runId)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({workflow_name: name || null, notes: notes || null}),
+        });
+        if (r.ok) {
+            document.getElementById('detailTitle').textContent = 'Run: ' + runId;
+            loadRuns();
+        } else {
+            const err = await r.json().catch(() => ({detail: r.statusText}));
+            alert('Update failed: ' + (err.detail || r.statusText));
+        }
+    } catch(e) {
+        alert('Update failed: ' + e.message);
     }
 }
 

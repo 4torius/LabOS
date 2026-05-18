@@ -47,6 +47,21 @@ def create_db_router(db_module) -> APIRouter:
         _db.update_plate_status(plate_id, status)
         return {"plate_id": plate_id, "status": status}
 
+    @router.patch("/plates/{plate_id}")
+    async def patch_plate(plate_id: str, request: Request):
+        data = await request.json()
+        ok = _db.update_plate(plate_id, data.get("display_name"), data.get("notes"))
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"Plate '{plate_id}' not found")
+        return {"plate_id": plate_id, "updated": True}
+
+    @router.delete("/plates/{plate_id}")
+    async def delete_plate(plate_id: str):
+        ok = _db.delete_plate(plate_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"Plate '{plate_id}' not found")
+        return {"plate_id": plate_id, "deleted": True}
+
     # ── Protocols ─────────────────────────────────────────────────────────────
 
     @router.get("/protocols")
@@ -82,13 +97,31 @@ def create_db_router(db_module) -> APIRouter:
     # ── Runs ──────────────────────────────────────────────────────────────────
 
     @router.get("/runs")
-    async def list_runs(limit: int = 50, offset: int = 0,
-                        status: str = "", workflow_name: str = ""):
-        runs = _db.get_runs(
-            limit=limit, offset=offset,
-            status=status or None,
-            workflow_name=workflow_name or None,
-        )
+    async def list_runs(
+        limit: int = 50,
+        offset: int = 0,
+        status: str = "",
+        workflow_name: str = "",
+        search: str = "",
+        date_from: str = "",
+        date_to: str = "",
+    ):
+        if search or date_from or date_to:
+            runs = _db.search_runs(
+                query=search,
+                date_from=date_from,
+                date_to=date_to,
+                status=status or None,
+                limit=limit,
+                offset=offset,
+            )
+        else:
+            runs = _db.get_runs(
+                limit=limit,
+                offset=offset,
+                status=status or None,
+                workflow_name=workflow_name or None,
+            )
         return {"runs": runs, "count": len(runs)}
 
     @router.get("/runs/{run_id}")
@@ -97,6 +130,21 @@ def create_db_router(db_module) -> APIRouter:
         if run is None:
             raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
         return run
+
+    @router.patch("/runs/{run_id}")
+    async def patch_run(run_id: str, request: Request):
+        data = await request.json()
+        ok = _db.rename_run(run_id, data.get("workflow_name"), data.get("notes"))
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+        return {"run_id": run_id, "updated": True}
+
+    @router.delete("/runs/{run_id}")
+    async def delete_run(run_id: str):
+        ok = _db.delete_run(run_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+        return {"run_id": run_id, "deleted": True}
 
     # ── AI exports ────────────────────────────────────────────────────────────
 
