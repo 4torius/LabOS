@@ -125,6 +125,102 @@ For custom servers that cannot use the `sila2` library, statically generated `_p
 
 ---
 
+## Generating Stubs for Custom Servers (Strategy 1)
+
+Use this path when you have a non-sila2 server with its own `.proto` file.
+
+### Prerequisites
+
+```bash
+pip install grpcio-tools
+```
+
+### Step 1 — Write your proto file
+
+```protobuf
+// SiLA2/MyCustomServer/MyCustomService.proto
+syntax = "proto3";
+package mycustom;
+
+service MyCustomService {
+  rpc DoSomething (DoSomethingRequest) returns (DoSomethingResponse);
+}
+
+message DoSomethingRequest {
+  string param1 = 1;
+  int32  param2 = 2;
+}
+
+message DoSomethingResponse {
+  string result = 1;
+}
+```
+
+### Step 2 — Generate the stubs
+
+```bash
+cd v1
+python -m grpc_tools.protoc \
+  -I SiLA2/MyCustomServer \
+  --python_out=src/pnp_stubs \
+  --grpc_python_out=src/pnp_stubs \
+  SiLA2/MyCustomServer/MyCustomService.proto
+```
+
+This produces `src/pnp_stubs/MyCustomService_pb2.py` and `src/pnp_stubs/MyCustomService_pb2_grpc.py`.
+
+### Step 3 — Fix the import in the generated `_grpc` file
+
+The generated `_grpc` file uses an absolute import that breaks inside the package. Open `src/pnp_stubs/MyCustomService_pb2_grpc.py` and change:
+
+```python
+# Generated (broken inside a package):
+import MyCustomService_pb2 as MyCustomService__pb2
+```
+to:
+```python
+from . import MyCustomService_pb2 as MyCustomService__pb2
+```
+
+### Step 4 — Register in `regen_stubs.py`
+
+Add an entry so future `python regen_stubs.py` re-generates it automatically:
+
+```python
+# In v1/regen_stubs.py — PROTOS list
+{
+    "file": BASE_DIR / "SiLA2" / "MyCustomServer" / "MyCustomService.proto",
+    "include": BASE_DIR / "SiLA2" / "MyCustomServer",
+},
+```
+
+### Step 5 — Export from `pnp_stubs/__init__.py`
+
+```python
+# In v1/src/pnp_stubs/__init__.py
+from . import MyCustomService_pb2
+from . import MyCustomService_pb2_grpc
+
+__all__ = [
+    ...
+    'MyCustomService_pb2',
+    'MyCustomService_pb2_grpc',
+]
+```
+
+That's all — the orchestrator will automatically try to load `MyCustomService_pb2_grpc` when it discovers a server whose name matches `MyCustomService` (case-insensitive, with flexible prefix/suffix matching). No changes to `client.py` or `discovery.py` needed.
+
+### Regenerating existing stubs
+
+```bash
+cd v1
+python regen_stubs.py
+```
+
+This regenerates all registered protos (`SiLA2Common`, `TecanLegacyBridge`, and any custom entries you added).
+
+---
+
 ## Implementing a SiLA2 Server
 
 Every server in `v1/SiLA2/` follows the same pattern using the **`sila2` library**:
