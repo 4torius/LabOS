@@ -20,7 +20,7 @@ This guide covers deploying LabOS on a new Windows computer from scratch.
 ## 1 — Copy the project
 
 ```
-git clone <repo-url> C:\LabOS
+git clone https://github.com/4torius/LabOS.git C:\LabOS
 ```
 
 Or copy the folder directly. The working directory for all commands below is `C:\LabOS\v1`.
