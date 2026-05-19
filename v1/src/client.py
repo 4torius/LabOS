@@ -134,7 +134,11 @@ def _normalize_params_for_command(
                 del remaining[pid]
                 break
 
-    return out
+    # Convert None values to "" so sila2 String validators don't raise TypeError.
+    # Non-string params with None values will still fail in sila2, but Fix B in
+    # _execute_via_sila2_client will surface the error properly instead of
+    # cascading to the "Server needs sila2 library" fallback.
+    return {k: ("" if v is None else v) for k, v in out.items()}
 
 
 #                           DATA STRUCTURES
@@ -405,8 +409,14 @@ class PnPClient:
                             "sila2 observable get_responses (%s.%s) failed: %s",
                             feature_name, command_name, exc, exc_info=True,
                         )
-                        self._invalidate_sila_client(server.host, server.port)
-                        return None
+                        # Return a proper error instead of None + invalidation.
+                        # The SilaClient connection is still valid; only the response
+                        # processing failed.  Invalidating then recreating the client
+                        # causes proto descriptor pool conflicts on retry.
+                        return CommandResult(
+                            success=False,
+                            error=f"Observable command response failed: {exc}",
+                        )
 
                     if hasattr(responses, "_asdict"):
                         data = responses._asdict()
@@ -429,8 +439,13 @@ class PnPClient:
                 logger.warning(
                     "sila2 client (%s.%s) failed: %s", feature_name, command_name, exc, exc_info=True
                 )
-                self._invalidate_sila_client(server.host, server.port)
-                return None
+                # Only invalidate on gRPC connection errors; data validation errors
+                # (TypeError/ValueError from bad parameter types) don't break the
+                # channel and invalidating causes proto descriptor pool conflicts on retry.
+                if isinstance(exc, grpc.RpcError):
+                    self._invalidate_sila_client(server.host, server.port)
+                    return None
+                return CommandResult(success=False, error=str(exc))
 
         try:
             loop = asyncio.get_running_loop()
@@ -1100,7 +1115,8 @@ class PnPRegistry:
         server = self.discovery.get_server(server_name)
         if not server:
             return CommandResult(success=False, error=f"Server not found: {server_name}")
-        
+
+        await self.client.connect(server)
         return await self.client.execute(server, command, parameters, timeout=timeout)
     
     async def disconnect_all(self):

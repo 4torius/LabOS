@@ -271,11 +271,10 @@ def create_workflows_router(
         if not _exec_core:
             return {"status": "error", "error": "LabCore not initialized"}
 
-        # Only run discovery when no instruments are cached yet (startup path).
-        # Once instruments are cached, repeated calls return the same data and
-        # the discover() overhead (mDNS wait + port scan) is wasted on every run.
-        if not _exec_core.list_instruments():
-            await _exec_core.discover()
+        # Always run discover() — the 30 s TTL cache in lab_core makes this a
+        # no-op when instruments are fresh, but it ensures the sila2 SilaClient
+        # is alive for every workflow run (mirrors what the dashboard does).
+        await _exec_core.discover()
 
         registry = PnPRegistry(BASE_DIR)
         for instr in _exec_core.list_instruments():
@@ -766,8 +765,7 @@ def create_workflows_router(
                     if not _exec_core:
                         raise Exception("LabCore not initialized")
 
-                    if not _exec_core.list_instruments():
-                        await _exec_core.discover()
+                    await _exec_core.discover()
                     registry = PnPRegistry(BASE_DIR)
                     for instr in _exec_core.list_instruments():
                         if hasattr(instr, '_server') and instr._server:

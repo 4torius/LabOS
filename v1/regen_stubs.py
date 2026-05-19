@@ -26,11 +26,6 @@ PROTOS = [
         "include": BASE_DIR / "SiLA2" / "TecanM200SiLA2Server" / "src",
         "extra_out": BASE_DIR / "SiLA2" / "TecanM200SiLA2Server" / "src",
     },
-    # PlateReaderService — kept in pnp_stubs as Strategy 2 fallback for direct C# server access
-    {
-        "file": BASE_DIR / "SiLA2" / "TecanM200Bridge" / "Protos" / "PlateReaderService.proto",
-        "include": BASE_DIR / "SiLA2" / "TecanM200Bridge" / "Protos",
-    },
 ]
 
 

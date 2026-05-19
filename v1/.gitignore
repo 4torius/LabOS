@@ -79,6 +79,12 @@ Results/AnIML/*
 !Results/AnIML/.gitkeep
 Results/opentrons/*
 !Results/opentrons/.gitkeep
+Results/runs/*
+!Results/runs/.gitkeep
+
+# Runtime database and tracking state (machine-specific)
+Results/labos.db
+Results/plate_tracking.json
 
 # ───────────────────────────────────────────────────────────────────
 #                     C# BUILD ARTIFACTS (TECAN)

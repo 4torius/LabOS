@@ -1,8 +1,6 @@
 ﻿"""Instrument, device, and file API routes."""
-import glob as glob_module
 import json
 import logging
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
@@ -476,18 +474,6 @@ def create_instruments_router(
 
             await ws_manager.broadcast({"type": "tip_refill_complete", "rack_type": rack_type,
                                         "message": message, "tips_restored": tips_restored})
-
-            try:
-                import grpc
-                from src.pnp_stubs import OpentronsService_pb2 as pb2
-                from src.pnp_stubs import OpentronsService_pb2_grpc as pb2_grpc
-                host, port = _load_server_endpoint(BASE_DIR, "opentrons", "localhost", 50302)
-                async with grpc.aio.insecure_channel(f'{host}:{port}') as channel:
-                    stub = pb2_grpc.OpentronsServiceStub(channel)
-                    req = pb2.RefillTipRackRequest(rack_id=rack_type)
-                    await asyncio.wait_for(stub.RefillTipRack(req), timeout=2.0)
-            except Exception:
-                pass
 
             return {"success": True, "message": message, "tips_restored": tips_restored}
         except Exception as e:

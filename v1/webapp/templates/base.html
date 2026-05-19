@@ -114,9 +114,6 @@
             <a class="nav-link {% if title == 'Run History' %}active{% endif %}" href="/runs">
                 <i class="bi bi-database"></i> Runs DB
             </a>
-            <a class="nav-link {% if title == 'Plates' %}active{% endif %}" href="/plates">
-                <i class="bi bi-grid-3x3-gap"></i> Plates
-            </a>
             <a class="nav-link {% if title == 'Hardware' %}active{% endif %}" href="/hardware">
                 <i class="bi bi-cpu"></i> Hardware
             </a>
@@ -547,10 +544,14 @@
         function showToast(type, title, message) {
             const toast = document.createElement('div');
             toast.className = 'toast show position-fixed';
-            toast.style.cssText = 'top: 70px; right: 20px; z-index: 9999;';
-            const bgClass = type === 'success' ? 'bg-success' : type === 'error' ? 'bg-danger' : 'bg-info';
+            toast.style.cssText = 'top: 70px; right: 20px; z-index: 9999; min-width: 270px;';
+            const bgClass = type === 'success' ? 'bg-success'
+                          : (type === 'error' || type === 'danger') ? 'bg-danger'
+                          : type === 'warning' ? 'bg-warning text-dark'
+                          : 'bg-info';
+            const textClass = type === 'warning' ? '' : 'text-white';
             toast.innerHTML = `
-                <div class="toast-header ${bgClass} text-white">
+                <div class="toast-header ${bgClass} ${textClass}">
                     <strong class="me-auto">${title}</strong>
                     <button type="button" class="btn-close btn-close-white" onclick="this.closest('.toast').remove()"></button>
                 </div>

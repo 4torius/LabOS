@@ -25,7 +25,6 @@ class AppState:
         self.workflow_progress: int = 0
         self.logs: List[Dict[str, Any]] = []
         self.command_history: List[Dict[str, Any]] = []
-        self.pnp_discovery = None
 
     def add_log(self, level: str, message: str, source: str = "system"):
         self.logs.append({

@@ -672,19 +672,23 @@ class PnPDiscovery:
             return True  # Already running
         
         service_type = self._discovery_config.get("service_type", "_sila2._tcp.local.")
-        
+        loop = asyncio.get_event_loop()
+
         class ContinuousListener(ServiceListener):
             def __init__(self, parent: "PnPDiscovery"):
                 self.parent = parent
-            
+
             def add_service(self, zc: Zeroconf, service_type: str, name: str):
-                asyncio.create_task(self.parent._handle_mdns_service_added(zc, service_type, name))
-            
+                asyncio.run_coroutine_threadsafe(
+                    self.parent._handle_mdns_service_added(zc, service_type, name), loop)
+
             def remove_service(self, zc: Zeroconf, service_type: str, name: str):
-                asyncio.create_task(self.parent._handle_mdns_service_removed(name))
-            
+                asyncio.run_coroutine_threadsafe(
+                    self.parent._handle_mdns_service_removed(name), loop)
+
             def update_service(self, zc: Zeroconf, service_type: str, name: str):
-                asyncio.create_task(self.parent._handle_mdns_service_added(zc, service_type, name))
+                asyncio.run_coroutine_threadsafe(
+                    self.parent._handle_mdns_service_added(zc, service_type, name), loop)
         
         try:
             self._zeroconf = Zeroconf()

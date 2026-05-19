@@ -662,23 +662,6 @@ function clearHistory() {
     renderHistory();
 }
 
-// ── Toast helper ───────────────────────────────────────────────────────────
-function showToast(type, title, message) {
-    const t = document.createElement('div');
-    t.className = 'toast show position-fixed';
-    t.style.cssText = 'top:70px; right:20px; z-index:9999; min-width:270px;';
-    const bg = type === 'success' ? 'bg-success' : type === 'danger' ? 'bg-danger' :
-               type === 'warning' ? 'bg-warning text-dark' : 'bg-info';
-    t.innerHTML = `
-        <div class="toast-header ${bg} text-white">
-            <strong class="me-auto">${title}</strong>
-            <button type="button" class="btn-close btn-close-white" onclick="this.closest('.toast').remove()"></button>
-        </div>
-        <div class="toast-body">${message}</div>`;
-    document.body.appendChild(t);
-    setTimeout(() => t.remove(), 5000);
-}
-
 // ── Tip Rack ───────────────────────────────────────────────────────────────
 function refillTipRack() {
     const modal = new bootstrap.Modal(document.getElementById('refillTipRackModal'));
