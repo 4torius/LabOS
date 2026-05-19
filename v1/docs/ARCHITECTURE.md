@@ -8,27 +8,27 @@ The system is organized as a four-layer stack:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  LAYER 4: USER INTERFACE                                 │
-│  FastAPI web app • Workflow designer • Real-time monitor │
+│  LAYER 4: USER INTERFACE                                │
+│  FastAPI web app • Workflow designer • Real-time monitor│
 └───────────────────────────┬─────────────────────────────┘
                             │ REST / WebSocket
 ┌───────────────────────────▼─────────────────────────────┐
-│  LAYER 3: ORCHESTRATION                                  │
-│  LabCore • PnP Registry • PnPWorkflowExecutor            │
-└──────────┬─────────────────┬───────────────┬────────────┘
-           │ gRPC             │ gRPC          │ gRPC
-           │ sila2 SilaClient │ sila2         │ sila2
-┌──────────▼──────┐  ┌───────▼────────┐  ┌──▼─────────────┐
+│  LAYER 3: ORCHESTRATION                                 │
+│  LabCore • PnP Registry • PnPWorkflowExecutor           │
+└──────────┬──────────────────┬─────────────┬─────────────┘
+           │ gRPC             │ gRPC        │ gRPC
+           │ sila2 SilaClient │ sila2       │ sila2
+┌──────────▼──────┐  ┌────────▼───────┐  ┌──▼─────────────┐
 │ LAYER 2: SERVERS│  │ LAYER 2: ...   │  │ LAYER 2: ...   │
 │ Opentrons       │  │ Tecan          │  │ Mobile / Manual│
 │ WorkflowAPI     │  │ PlateReader    │  │ TaskMgmt/Manual│
 │ 18 commands     │  │ Service        │  │ 5 commands each│
 │ sila2 library   │  │ 8 commands     │  │ sila2 library  │
 └──────────┬──────┘  └───────┬────────┘  └──┬─────────────┘
-           │                  │              │
+           │                 │              │
 ┌──────────▼──────┐  ┌───────▼────────┐  ┌──▼─────────────┐
-│ LAYER 1: HW     │  │ LAYER 1: HW    │  │ LAYER 1: HW   │
-│ Opentrons Flex  │  │ Tecan M200 Pro │  │ GoFaGo / Human│
+│ LAYER 1: HW     │  │ LAYER 1: HW    │  │ LAYER 1: HW    │
+│ Opentrons Flex  │  │ Tecan M200 Pro │  │ GoFaGo / Human │
 └─────────────────┘  └────────────────┘  └────────────────┘
 ```
 
@@ -61,8 +61,7 @@ The orchestrator (`src/client.py`) applies execution strategies in order of pref
 | Strategy | Protocol | Used by |
 |----------|----------|---------|
 | **0** | `sila2` library `SilaClient` — fetches descriptor at runtime, no stub coupling | All current servers |
-| **1** | Legacy `SiLA2Common.ExecuteCommand` — string-keyed commands over custom gRPC | Old/custom servers only |
-| **2** | Dynamic stub loading (`_pb2` files loaded at runtime) | Last-resort fallback |
+| **1** | Dynamic stub loading (`_pb2` files in `src/pnp_stubs/`) | Custom / non-sila2 servers |
 
 Strategy 0 is selected automatically for any server built with the `sila2` library. The FDL files serve as documentation and drive UI generation (populating command dropdowns in the visual designer).
 
@@ -74,19 +73,19 @@ All orchestration code lives in `v1/src/`.
 
 ### PnP Registry (`discovery.py`)
 
-The registry discovers servers through four parallel methods:
+The registry uses a SiLA2-native two-phase strategy:
 
-1. **Config file** — `v1/SiLA2/servers_config.yaml` lists known servers (host, port, name)
-2. **Directory scan** — scans `v1/SiLA2/` for running server processes
-3. **mDNS/Zeroconf** — detects servers broadcasting SiLA2 service records on the LAN
-4. **TCP port sweep** — probes a configurable IP/port range for SiLA2Common endpoints
+**Phase 1 — Bootstrap (startup):** `lab_config.yaml` provides `(host, port, name)` seeds for servers that may not yet have mDNS announcements at startup (e.g., instruments on remote network segments). All capability metadata is fetched from the live server via `SiLAService` — no hardcoded command knowledge.
 
-Discovered servers are stored in a thread-safe registry dict:
+**Phase 2 — Runtime (continuous):** mDNS/DNS-SD (`_sila._tcp.local.`) discovers every SiLA2-compliant server on the network segment automatically. A background listener detects new servers without operator intervention.
+
+In both phases server self-description via `SiLAService` (`ServerName`, `ImplementedFeatures`, `GetFeatureDefinition`) is the only source of truth for features, commands, and metadata. Discovered servers are stored in a thread-safe registry dict:
+
 ```
-{ server_name → { channel, stub, features_metadata } }
+{ server_name → PnPServer(address, features_metadata, online_status) }
 ```
 
-A background health-check thread sends periodic `GetServerInfo()` calls. Servers that stop responding are marked offline. Reconnection triggers automatic re-registration.
+A periodic health check detects disconnections; reconnection triggers automatic re-registration via the mDNS callback.
 
 ### LabCore (`lab_core.py`)
 
@@ -123,7 +122,7 @@ Real-time events (step completions, device status changes) are broadcast via Web
 ## Key Design Decisions
 
 **Why the `sila2` library instead of SiLA2Common?**  
-The `sila2` library's `SilaClient` fetches the protobuf descriptor from the server at runtime, so the orchestrator never needs to import instrument-specific stubs. This solves the compile-time coupling problem more cleanly than the custom `SiLA2Common` service it replaced — and it uses the standard SiLA2 protocol rather than a custom extension. The legacy `SiLA2Common` stubs remain in `src/pnp_stubs/` as a Strategy 1 fallback for any old servers.
+The `sila2` library's `SilaClient` fetches the protobuf descriptor from the server at runtime, so the orchestrator never needs to import instrument-specific stubs. This solves the compile-time coupling problem more cleanly than the custom `SiLA2Common` service it replaced — and it uses the standard SiLA2 protocol rather than a proprietary extension. The `SiLA2Common` execution strategy has been fully removed; `SiLA2Common_pb2` stubs are retained in `pnp_stubs/` only for server health checks (`GetStatus`).
 
 **Why a Windows bridge for Tecan?**  
 The Tecan iControl SDK is Windows-only .NET. The C# bridge process wraps the SDK and exposes a local gRPC endpoint. The Python SiLA2 server connects to this bridge. The bridge runs as a background Windows service and is automatically restarted on failure.
@@ -141,14 +140,14 @@ v1/
 │   ├── lab_core.py         # Central orchestrator
 │   ├── discovery.py        # PnP discovery engine
 │   ├── workflow.py         # DAG workflow executor
-│   ├── client.py           # Generic SiLA2 client (Strategy 0/1/2)
+│   ├── client.py           # Generic SiLA2 client (Strategy 0/1)
 │   └── api/                # FastAPI routes and WebSocket
 ├── SiLA2/                  # Instrument servers
 │   ├── OpentronsSiLA2Server/
 │   ├── TecanSiLA2Server/
 │   ├── MobileSiLA2Server/
 │   ├── ManualStationSiLA2Server/
-│   └── SiLA2Common_pb2*.py # Legacy SiLA2Common stubs (Strategy 1 fallback)
+│   └── SiLA2Common_pb2*.py # SiLA2Common stubs (health checks only; not an execution strategy)
 ├── Library/                # User-editable assets
 │   ├── Workflows/          # JSON workflow definitions
 │   ├── Recipes/            # Liquid handling recipes

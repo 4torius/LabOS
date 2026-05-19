@@ -708,7 +708,7 @@ class LabCore:
         self._log("info", f"Executing {command_id} on {instrument.name}...")
         
         try:
-            # Use PnPClient for command execution (Strategy 0: SilaClient, Strategy 1: SiLA2Common fallback)
+            # Use PnPClient for command execution (Strategy 0: SilaClient, Strategy 1: dynamic stubs)
             if self._client is None:
                 self._client = PnPClient()
             
@@ -736,7 +736,7 @@ class LabCore:
                     error=f"Command '{command_id}' not found on {instrument.name}"
                 )
             
-            # Execute via PnPClient (uses SiLA2Common.ExecuteCommand)
+            # Execute via PnPClient (Strategy 0: sila2 SilaClient)
             result = await self._client.execute(
                 server, 
                 command_id, 

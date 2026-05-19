@@ -117,24 +117,11 @@ result = client.WorkflowAPI.ExecuteRecipe(
 
 **Why this is preferred over SiLA2Common**: it uses the standard SiLA2 protocol (no custom extension), descriptors are typed and versioned, and any SiLA2-compliant client (not just LabOS) can interact with the server.
 
-### Strategy 1 — `SiLA2Common` (Legacy Fallback)
+### Strategy 1 — Dynamic Stub Loading (Custom / Non-sila2 Servers)
 
-For older custom servers that pre-date the `sila2` library migration, a custom `SiLA2Common` gRPC service is available as a fallback. It accepts string-keyed commands with JSON parameters:
+For custom servers that cannot use the `sila2` library, statically generated `_pb2` / `_pb2_grpc` stubs placed in `src/pnp_stubs/` are loaded at runtime. Add the stubs for any non-sila2 server there and the orchestrator picks them up automatically with no code changes.
 
-```protobuf
-service SiLA2CommonService {
-  rpc ExecuteCommand (CommandRequest) returns (stream CommandResponse);
-  rpc GetServerInfo  (Empty)          returns (ServerInfo);
-  rpc GetFeatures    (Empty)          returns (FeatureList);
-  rpc GetProperty    (PropertyRequest) returns (PropertyResponse);
-}
-```
-
-The stubs are kept in `src/pnp_stubs/SiLA2Common_pb2*.py`. New servers should **not** implement this service.
-
-### Strategy 2 — Dynamic Stub Loading (Last Resort)
-
-Statically generated `_pb2` / `_pb2_grpc` files placed in `src/pnp_stubs/` are loaded at runtime for any server that supports neither Strategy 0 nor Strategy 1.
+> **Note:** The `SiLA2Common_pb2` stubs in `pnp_stubs/` are retained only for server health checks (`GetStatus`). The `SiLA2Common.ExecuteCommand` execution path has been removed — it required implementing a proprietary LabOS extension that no third-party server supports.
 
 ---
 
@@ -208,15 +195,6 @@ sila2-codegen features/YourInstrument.sila.xml --output-dir generated/
 ```
 
 This regenerates the `generated/yourinstrument/` directory. Do not edit generated files manually.
-
-For the legacy `SiLA2Common` proto (Strategy 1 fallback only):
-
-```bash
-cd v1
-python regen_stubs.py
-```
-
-This regenerates `src/pnp_stubs/SiLA2Common_pb2*.py`.
 
 ---
 

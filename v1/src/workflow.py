@@ -506,7 +506,7 @@ class PnPWorkflowExecutor:
                         normalized["RecipeName"] = normalized[key]
                         break
 
-        # Tecan RunMeasurement accepts aliases in SiLA2Common service.
+        # Tecan RunMeasurement: normalize parameter name aliases.
         if action == "runmeasurement":
             if "ProtocolFile" not in normalized:
                 for key in ("protocol", "Protocol", "protocol_file", "ProtocolPath", "ProtocolName", "analysis"):

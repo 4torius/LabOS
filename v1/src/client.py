@@ -7,9 +7,8 @@ A GENERIC gRPC client that can execute commands on ANY SiLA2 server.
 NO HARDCODED COMMAND MAPPINGS - commands are executed based on server metadata.
 
 Execution strategies:
-0. sila2 library SilaClient - standard SiLA2 protocol (preferred for new servers)
-1. SiLA2Common.ExecuteCommand - legacy custom protocol (old servers)
-2. Dynamic stub loading - load generated stubs at runtime (legacy)
+0. sila2 library SilaClient - standard SiLA2 protocol (all sila2-compliant servers)
+1. Dynamic stub loading - load generated stubs at runtime (custom/non-sila2 servers)
 
 To add a new instrument:
 - Create a SiLA2 server with the sila2 library (sila2-codegen + FeatureImplementationBase)
@@ -164,10 +163,9 @@ class PnPClient:
     
     Executes commands based on server metadata, not hardcoded mappings.
     Uses multiple strategies to maximize compatibility:
-    
-    1. SiLA2Common.ExecuteCommand - truly generic, works with any compliant server
-    2. Dynamic stub loading - loads generated stubs at runtime
-    3. Reflection - for servers with gRPC reflection enabled
+
+    0. sila2 SilaClient - standard SiLA2 protocol (all sila2-compliant servers)
+    1. Dynamic stub loading - loads generated stubs at runtime (custom servers)
     """
     
     def __init__(self, base_dir: Optional[Path] = None):

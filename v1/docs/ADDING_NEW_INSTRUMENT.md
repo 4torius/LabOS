@@ -18,15 +18,14 @@ The system is **truly plug & play**:
 
 ```
 ┌─────────────────────────────────────────────────┐
-│         web interface / lab_core.py              │  <- User interfaces
+│         web interface / lab_core.py             │  <- User interfaces
 ├─────────────────────────────────────────────────┤
 │              PnP Discovery (src/discovery.py)   │  <- Auto-discovers servers
-│         mDNS, port scan, config file            │      via multiple methods
+│         mDNS/DNS-SD + config seed (2-phase)     │      via SiLA2-native strategy
 ├─────────────────────────────────────────────────┤
 │    Execution Client (src/client.py)             │  <- Tries strategies in order
-│    Strategy 0: sila2 SilaClient (preferred)     │      new sila2 servers
-│    Strategy 1: SiLA2Common fallback (legacy)    │      old custom servers
-│    Strategy 2: Dynamic stub fallback            │      last resort
+│    Strategy 0: sila2 SilaClient (primary)       │      all sila2-compliant servers
+│    Strategy 1: Dynamic stub loading (fallback)  │      custom/non-sila2 servers
 ├─────────────────────────────────────────────────┤
 │           Your SiLA2 Server                     │  <- Your new server
 │     (FeatureImplementationBase + .sila.xml)     │      built with sila2 library
