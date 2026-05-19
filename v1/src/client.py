@@ -180,7 +180,6 @@ class PnPClient:
         self.base_dir = Path(base_dir) if base_dir else Path.cwd()
         self._channels: Dict[str, grpc.aio.Channel] = {}
         self._stubs: Dict[str, Any] = {}
-        self._stub_modules: Dict[str, Any] = {}
     
     async def connect(self, server: PnPServer, timeout: float = 5.0) -> bool:
         """
@@ -282,40 +281,27 @@ class PnPClient:
         # Find the command definition
         cmd_info = server.find_command(command)
         if not cmd_info:
-            # Try direct execution anyway via SiLA2Common (command might be new/not in cache)
-            logger.warning(f"Command '{command}' not in cache, trying direct execution via SiLA2Common")
-            result = await self._execute_direct_common(server, feature, command, params, timeout, on_progress)
-            if result is not None:
-                return result
             return CommandResult(
                 success=False,
                 error=f"Command not found: {command}. Available: {[c[1] for c in server.get_all_commands()]}"
             )
-        
+
         feature_obj, cmd_obj = cmd_info
 
-        # Try execution strategies in order of preference
-
-        # Strategy 0: sila2 standard library SilaClient (preferred, works with all sila2-compliant servers)
+        # Strategy 0: sila2 standard library SilaClient (primary path for all sila2-compliant servers)
         result = await self._execute_via_sila2_client(server, feature_obj, cmd_obj, params, timeout, on_progress)
         if result is not None:
             return result
 
-        # Strategy 1: SiLA2Common.ExecuteCommand (legacy custom protocol)
-        result = await self._execute_via_common(server, feature_obj, cmd_obj, params, timeout, on_progress)
-        if result is not None:
-            return result
-
-        # Strategy 2: Dynamic stub (loaded at runtime, legacy)
+        # Strategy 1: Dynamic gRPC stubs (fallback for custom/non-sila2 servers — add stubs to pnp_stubs/)
         result = await self._execute_via_stub(server, feature_obj, cmd_obj, params, timeout, on_progress)
         if result is not None:
             return result
 
-        # Strategy 3: Fallback - indicate what's needed
         return CommandResult(
             success=False,
             error=f"Cannot execute {command} on {server.name}. "
-                  f"Server needs sila2 library, SiLA2Common.ExecuteCommand, or gRPC stubs."
+                  f"Server requires sila2 library or gRPC stubs in pnp_stubs/."
         )
     
     def _get_sila_client(self, host: str, port: int) -> Any:
@@ -454,173 +440,6 @@ class PnPClient:
             logger.warning("sila2 client executor error: %s", exc, exc_info=True)
             return None
 
-    async def _execute_via_common(
-        self,
-        server: PnPServer,
-        feature: PnPFeature,
-        command: PnPCommand,
-        params: Dict[str, Any],
-        timeout: float,
-        on_progress: Optional[Callable]
-    ) -> Optional[CommandResult]:
-        """
-        Execute via SiLA2Common.ExecuteCommand (legacy custom protocol).
-        """
-        try:
-            # Try to import SiLA2Common stubs
-            try:
-                from .pnp_stubs import SiLA2Common_pb2 as common_pb2
-                from .pnp_stubs import SiLA2Common_pb2_grpc as common_grpc
-            except ImportError:
-                return None  # Stubs not available, try next strategy
-            
-            channel = self._channels.get(server.address)
-            if not channel:
-                return None
-            
-            stub = common_grpc.SiLA2ServerInfoStub(channel)
-            
-            # Build request
-            params_str = {k: str(v) for k, v in params.items()}
-            
-            # timeout=None means wait indefinitely (use 0 to signal server)
-            timeout_secs = 0 if timeout is None else int(timeout)
-            
-            request = common_pb2.ExecuteCommandRequest(
-                feature=feature.identifier,
-                command=command.identifier,
-                parameters=params_str,
-                timeout_seconds=timeout_secs
-            )
-            
-            # Execute (streaming response) - no client-side timeout, wait for server
-            try:
-                final_result = None
-                last_response = None
-                async for response in stub.ExecuteCommand(request):
-                    last_response = response
-                    if on_progress and response.is_intermediate:
-                        on_progress(response.progress, response.status)
-                    
-                    if not response.is_intermediate:
-                        final_result = response
-                        break
-
-                # Some servers close the stream without sending an explicit
-                # non-intermediate terminal frame. If the last frame looks
-                # complete, treat it as final to avoid false workflow failures.
-                if final_result is None and last_response is not None:
-                    status_text = str(getattr(last_response, 'status', '') or '').lower()
-                    progress_val = int(getattr(last_response, 'progress', 0) or 0)
-                    if status_text in {'complete', 'completed', 'done', 'success', 'succeeded', 'finished'} or progress_val >= 100:
-                        final_result = last_response
-                
-                if final_result:
-                    data = dict(final_result.result)
-                    if getattr(final_result, 'status', '') and 'status' not in data:
-                        data['status'] = final_result.status
-                    if getattr(final_result, 'progress', 0) and 'progress' not in data:
-                        data['progress'] = str(final_result.progress)
-                    return CommandResult(
-                        success=final_result.success,
-                        data=data,
-                        error=final_result.error if not final_result.success else None,
-                        progress=final_result.progress,
-                        status=final_result.status
-                    )
-                
-                return CommandResult(success=False, error="No response from server")
-                
-            except grpc.RpcError as e:
-                if e.code() == grpc.StatusCode.UNIMPLEMENTED:
-                    return None  # Server doesn't implement ExecuteCommand, try next strategy
-                return CommandResult(success=False, error=f"gRPC error: {e.details()}")
-            
-        except Exception as e:
-            logger.debug(f"SiLA2Common execution failed: {e}")
-            return None
-    
-    async def _execute_direct_common(
-        self,
-        server: PnPServer,
-        feature_name: str,
-        command_name: str,
-        params: Dict[str, Any],
-        timeout: float,
-        on_progress: Optional[Callable]
-    ) -> Optional[CommandResult]:
-        """
-        Execute via SiLA2Common.ExecuteCommand directly without command lookup.
-        
-        Used when command is not in cache (e.g., server was updated).
-        """
-        try:
-            try:
-                from .pnp_stubs import SiLA2Common_pb2 as common_pb2
-                from .pnp_stubs import SiLA2Common_pb2_grpc as common_grpc
-            except ImportError:
-                return None
-            
-            channel = self._channels.get(server.address)
-            if not channel:
-                return None
-            
-            stub = common_grpc.SiLA2ServerInfoStub(channel)
-            
-            params_str = {k: str(v) for k, v in params.items()}
-            timeout_secs = 0 if timeout is None else int(timeout)
-            
-            request = common_pb2.ExecuteCommandRequest(
-                feature=feature_name or "",
-                command=command_name,
-                parameters=params_str,
-                timeout_seconds=timeout_secs
-            )
-            
-            try:
-                final_result = None
-                last_response = None
-                async for response in stub.ExecuteCommand(request):
-                    last_response = response
-                    if on_progress and response.is_intermediate:
-                        on_progress(response.progress, response.status)
-                    
-                    if not response.is_intermediate:
-                        final_result = response
-                        break
-
-                # Tolerate streams that end with only intermediate frames.
-                if final_result is None and last_response is not None:
-                    status_text = str(getattr(last_response, 'status', '') or '').lower()
-                    progress_val = int(getattr(last_response, 'progress', 0) or 0)
-                    if status_text in {'complete', 'completed', 'done', 'success', 'succeeded', 'finished'} or progress_val >= 100:
-                        final_result = last_response
-                
-                if final_result:
-                    data = dict(final_result.result)
-                    if getattr(final_result, 'status', '') and 'status' not in data:
-                        data['status'] = final_result.status
-                    if getattr(final_result, 'progress', 0) and 'progress' not in data:
-                        data['progress'] = str(final_result.progress)
-                    return CommandResult(
-                        success=final_result.success,
-                        data=data,
-                        error=final_result.error if not final_result.success else None,
-                        progress=final_result.progress,
-                        status=final_result.status
-                    )
-                
-                return CommandResult(success=False, error="No response from server")
-                
-            except grpc.RpcError as e:
-                if e.code() == grpc.StatusCode.UNIMPLEMENTED:
-                    return None
-                return CommandResult(success=False, error=f"gRPC error: {e.details()}")
-            
-        except Exception as e:
-            logger.debug(f"Direct SiLA2Common execution failed: {e}")
-            return None
-    
     async def _execute_via_stub(
         self,
         server: PnPServer,
@@ -934,7 +753,7 @@ class PnPClient:
         possible_names.append(f"{server_key}Service")
         possible_names.append(server_key)
         
-        # 3. Try extracting first word for common patterns like "Opentrons Flex" -> "OpentronsService"
+        # 3. Try first word: "My Custom Server" -> "MyService"
         first_word = server.name.split()[0] if server.name else ""
         if first_word:
             possible_names.append(f"{first_word}Service")
