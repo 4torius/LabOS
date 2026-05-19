@@ -524,10 +524,91 @@ class LabCore:
             return 0
     
     #                           DISCOVERY
-    
+
+    def _build_port_to_key(self) -> Dict[int, str]:
+        """Build port → lab_config key map for stable instrument IDs."""
+        result: Dict[int, str] = {}
+        try:
+            import yaml as _yaml
+            raw = _yaml.safe_load((self.base_dir / "lab_config.yaml").read_text())
+            for k, v in (raw or {}).get("servers", {}).items():
+                p = int((v or {}).get("port", 0))
+                if p:
+                    result[p] = k
+        except Exception:
+            pass
+        return result
+
+    def _server_to_instrument(self, server: PnPServer, port_to_key: Dict[int, str]) -> Instrument:
+        """Convert a PnPServer (with populated features) to an Instrument."""
+        inst_id = port_to_key.get(server.port) or server.name.lower().replace(" ", "_")
+        commands = []
+        for feature_id, cmd_id, cmd in server.get_all_commands():
+            params = []
+            for p in cmd.parameters:
+                ui_hint = p.infer_ui_hint()
+                options = p.constraints if p.constraints else []
+                if not options and ui_hint:
+                    options = self._get_options_for_hint(ui_hint)
+                params.append(CommandParameter(
+                    name=p.identifier,
+                    display_name=p.display_name,
+                    description=p.description,
+                    data_type=p.data_type,
+                    required=p.required,
+                    ui_hint=ui_hint,
+                    options=options,
+                ))
+            commands.append(Command(
+                id=cmd_id,
+                name=cmd.display_name or cmd_id,
+                description=cmd.description,
+                feature=feature_id,
+                important=True,
+                parameters=params,
+            ))
+        return Instrument(
+            id=inst_id,
+            name=server.name,
+            type=server.server_type or "instrument",
+            status="online" if server.server_online else "offline",
+            host=server.host,
+            port=server.port,
+            commands=commands,
+            _server=server,
+        )
+
+    def _on_mdns_server_discovered(self, server: PnPServer):
+        """Sync callback fired by the mDNS listener when a new server appears."""
+        try:
+            asyncio.get_event_loop().create_task(self._handle_new_server_async(server))
+        except RuntimeError:
+            pass  # No running loop (shouldn't happen during server operation)
+
+    async def _handle_new_server_async(self, server: PnPServer):
+        """Query metadata for a freshly-announced mDNS server and register it."""
+        if self._discovery is None:
+            return
+        loop = asyncio.get_running_loop()
+        # Fetch SiLAService metadata + feature definitions in thread
+        await loop.run_in_executor(
+            None, self._discovery._try_sila2_client_query, server.host, server.port, server
+        )
+        port_to_key = self._build_port_to_key()
+        instrument = self._server_to_instrument(server, port_to_key)
+        self._instruments[instrument.id] = instrument
+        logger.info(f"mDNS push: registered new instrument '{instrument.name}'")
+        if self._on_discovery_update:
+            self._on_discovery_update(list(self._instruments.values()))
+
     async def discover(self, timeout: float = 2.0) -> List[Instrument]:
         """
         Discover all available SiLA2 instruments.
+
+        On the first call (or after the cache TTL expires) this runs a full
+        bootstrap + mDNS scan and then starts a continuous mDNS listener so
+        that new instruments are registered immediately when they come online
+        (push, not polling).
 
         Returns:
             List of discovered instruments
@@ -536,78 +617,28 @@ class LabCore:
         if self._instruments and (now - self._last_discovery_time) < self._discovery_cache_ttl:
             return list(self._instruments.values())
 
+        # Stop old continuous listener before resetting the discovery instance
+        if self._discovery:
+            await self._discovery.stop_continuous_discovery()
+
         self._discovery = PnPDiscovery(self.base_dir)
+        self._discovery.set_discovery_callback(self._on_mdns_server_discovered)
         await self._discovery.discover_all(timeout=timeout)
 
-        self._instruments = {}
-
-        # Build port → config key map so instruments keep stable IDs across renames
-        _port_to_key: Dict[int, str] = {}
-        try:
-            import yaml as _yaml
-            _cfg_raw = _yaml.safe_load((self.base_dir / "lab_config.yaml").read_text())
-            for _k, _v in (_cfg_raw or {}).get("servers", {}).items():
-                _p = int((_v or {}).get("port", 0))
-                if _p:
-                    _port_to_key[_p] = _k
-        except Exception:
-            pass
-
-        for server in self._discovery.list_servers():
-            # Prefer the lab_config key (stable across SiLA2 server name changes);
-            # fall back to normalised server name for servers not in config.
-            inst_id = _port_to_key.get(server.port) or server.name.lower().replace(" ", "_")
-            
-            # All commands from GetFeatures are shown (no important_commands filter)
-            
-            # Convert commands
-            commands = []
-            for feature_id, cmd_id, cmd in server.get_all_commands():
-                params = []
-                for p in cmd.parameters:
-                    # Infer UI hint
-                    ui_hint = p.infer_ui_hint()
-                    
-                    # OPTION B: Dynamically populate options based on ui_hint
-                    options = p.constraints if p.constraints else []
-                    if not options and ui_hint:
-                        options = self._get_options_for_hint(ui_hint)
-                    
-                    params.append(CommandParameter(
-                        name=p.identifier,
-                        display_name=p.display_name,
-                        description=p.description,
-                        data_type=p.data_type,
-                        required=p.required,
-                        ui_hint=ui_hint,
-                        options=options
-                    ))
-                
-                commands.append(Command(
-                    id=cmd_id,
-                    name=cmd.display_name or cmd_id,
-                    description=cmd.description,
-                    feature=feature_id,
-                    important=True,
-                    parameters=params
-                ))
-            
-            instrument = Instrument(
-                id=inst_id,
-                name=server.name,
-                type=server.server_type or "instrument",
-                status="online" if server.server_online else "offline",
-                host=server.host,
-                port=server.port,
-                commands=commands,
-                _server=server
+        port_to_key = self._build_port_to_key()
+        self._instruments = {
+            inst.id: inst
+            for inst in (
+                self._server_to_instrument(s, port_to_key)
+                for s in self._discovery.list_servers()
             )
-            
-            self._instruments[inst_id] = instrument
-        
+        }
+
         self._last_discovery_time = time.monotonic()
 
-        # Notify callback
+        # Start continuous mDNS listener — new servers now arrive via push callback
+        await self._discovery.start_continuous_discovery()
+
         if self._on_discovery_update:
             self._on_discovery_update(list(self._instruments.values()))
 

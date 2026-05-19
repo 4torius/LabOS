@@ -16,13 +16,17 @@ paths:
   analysis: Library/Analysis
   workflows: Library/Workflows
   results: Results
+# Bootstrap seeds — used only at startup to pre-populate the PnP registry
+# before mDNS has had time to announce servers (or for servers on remote subnets
+# where mDNS multicast cannot reach).  Only host/port/name are used here;
+# all capability metadata is fetched from the running server via SiLAService.
 servers:
   tecan:
     name: Tecan M200 Pro
     enabled: true
     host: localhost
     port: 50051
-    directory: SiLA2/TecanM200SiLA2Server
+    directory: SiLA2/TecanM200SiLA2Server   # used by server auto-start only
     command_windows:
     - python
     - main.py
@@ -36,7 +40,7 @@ servers:
     enabled: true
     host: localhost
     port: 50302
-    directory: SiLA2/OpentronsSiLA2Server
+    directory: SiLA2/OpentronsSiLA2Server   # used by server auto-start only
     command_windows:
     - python
     - main.py
@@ -49,12 +53,7 @@ servers:
     name: Mobile Robot
     enabled: true
     host: 10.16.0.114      # Robot PC WiFi IP — update if different
-    port: 50053            # ext/MobileSiLA2Server (task-based, rpwc_msgs)
-    directory: ext/MobileSiLA2Server
-    command_windows: []
-    command_unix: []
-    startup_timeout: 20
-    check_file: ''
+    port: 50053            # on a different subnet; mDNS multicast cannot reach it
     remote: true           # Runs on external Linux PC, not started locally
     network:
       connection_timeout: 5
@@ -66,7 +65,7 @@ servers:
     enabled: true
     host: localhost
     port: 50500
-    directory: SiLA2/ManualStationSiLA2Server
+    directory: SiLA2/ManualStationSiLA2Server  # used by server auto-start only
     command_windows:
     - python
     - main.py
@@ -78,7 +77,8 @@ servers:
 discovery:
   enabled: true
   scan_interval: 30
-  service_type: _sila._tcp.local.
+  service_type: _sila._tcp.local.   # SiLA2-standard mDNS service type
+  bootstrap_timeout_s: 5            # per-server gRPC check timeout at startup
 workflow:
   parallel_execution: false
   default_timeout: 600
