@@ -13,18 +13,15 @@ from typing import Dict, List
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-try:
-    from contextlib import asynccontextmanager
-    from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
-    from fastapi.responses import HTMLResponse, FileResponse
-    from fastapi.staticfiles import StaticFiles
-    from fastapi.templating import Jinja2Templates
-    from fastapi.middleware.cors import CORSMiddleware
-    import uvicorn
-    FASTAPI_AVAILABLE = True
-except ImportError:
-    FASTAPI_AVAILABLE = False
-    print("FastAPI not installed. Run: pip install fastapi uvicorn jinja2 python-multipart")
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
+
+FASTAPI_AVAILABLE = True
 
 try:
     from src.lab_core import get_lab_core, InterventionRequest, InterventionAction
@@ -32,6 +29,7 @@ try:
 except (ImportError, NameError) as _err:
     logging.warning(f"LabCore not available at startup: {_err}")
     get_lab_core = None
+    InterventionAction = None
     LAB_CORE_AVAILABLE = False
 
 try:
@@ -142,7 +140,7 @@ def create_app() -> "FastAPI":
     state = AppState()
     ws_manager = ConnectionManager()
 
-    if _DB_AVAILABLE:
+    if _db is not None:
         _db.configure(BASE_DIR / "Results" / "labos.db")
         _db.init_db()
 
@@ -181,8 +179,9 @@ def create_app() -> "FastAPI":
     lab_core = None
     if LAB_CORE_AVAILABLE and get_lab_core:
         lab_core = get_lab_core(BASE_DIR)
+        assert InterventionAction is not None
 
-        async def webapp_intervention_handler(request: InterventionRequest) -> InterventionAction:
+        async def webapp_intervention_handler(request: InterventionRequest):
             intervention_id = str(uuid.uuid4())
             future = asyncio.get_event_loop().create_future()
             pending_interventions[intervention_id] = future
@@ -202,13 +201,15 @@ def create_app() -> "FastAPI":
                 return await asyncio.wait_for(future, timeout=float(WEBAPP_CONFIG["intervention_timeout"]))
             except asyncio.TimeoutError:
                 state.add_log("error", "Intervention timed out, aborting", "workflow")
-                return InterventionAction.ABORT
+                return InterventionAction.ABORT  # type: ignore[union-attr]
             finally:
                 pending_interventions.pop(intervention_id, None)
 
         lab_core.set_intervention_callback(webapp_intervention_handler)
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    # Work around Jinja2 cache key issues when globals include unhashable objects.
+    templates.env.cache = None
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -218,19 +219,19 @@ def create_app() -> "FastAPI":
 
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
-        return templates.TemplateResponse("index.html", {
+        return templates.TemplateResponse(request, "index.html", {
             "request": request, "title": "LabOS", "devices": list(state.devices.values())
         })
 
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard(request: Request):
-        return templates.TemplateResponse("dashboard.html", {
+        return templates.TemplateResponse(request, "dashboard.html", {
             "request": request, "title": "Dashboard", "devices": list(state.devices.values())
         })
 
     @app.get("/workflows", response_class=HTMLResponse)
     async def workflows_page(request: Request):
-        return templates.TemplateResponse("workflows.html", {
+        return templates.TemplateResponse(request, "workflows.html", {
             "request": request, "title": "Workflows",
             "nodered_url": WEBAPP_CONFIG.get("nodered_url", "http://localhost:1880")
         })
@@ -248,7 +249,7 @@ def create_app() -> "FastAPI":
                             "size": f.stat().st_size,
                             "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat()
                         })
-        return templates.TemplateResponse("results.html", {"request": request, "title": "Results", "results": results})
+        return templates.TemplateResponse(request, "results.html", {"request": request, "title": "Results", "results": results})
 
     @app.get("/api/results/{fmt}/{filename}")
     async def download_result(fmt: str, filename: str):
@@ -310,32 +311,32 @@ def create_app() -> "FastAPI":
 
     @app.get("/hardware", response_class=HTMLResponse)
     async def hardware_page(request: Request):
-        return templates.TemplateResponse("hardware.html", {"request": request, "title": "Hardware"})
+        return templates.TemplateResponse(request, "hardware.html", {"request": request, "title": "Hardware"})
 
     @app.get("/settings", response_class=HTMLResponse)
     async def settings_page(request: Request):
-        return templates.TemplateResponse("settings.html", {"request": request, "title": "Settings"})
+        return templates.TemplateResponse(request, "settings.html", {"request": request, "title": "Settings"})
 
     @app.get("/operator", response_class=HTMLResponse)
     async def operator_page(request: Request):
-        return templates.TemplateResponse("operator.html", {"request": request, "title": "Operator"})
+        return templates.TemplateResponse(request, "operator.html", {"request": request, "title": "Operator"})
 
     @app.get("/batch", response_class=HTMLResponse)
     @app.get("/recipes", response_class=HTMLResponse)
     async def recipe_generator_page(request: Request):
-        return templates.TemplateResponse("recipe_generator.html", {"request": request, "title": "Recipe Generator"})
+        return templates.TemplateResponse(request, "recipe_generator.html", {"request": request, "title": "Recipe Generator"})
 
     @app.get("/plates", response_class=HTMLResponse)
     async def plates_page(request: Request):
-        return templates.TemplateResponse("plates.html", {"request": request, "title": "Plates"})
+        return templates.TemplateResponse(request, "plates.html", {"request": request, "title": "Plates"})
 
     @app.get("/history", response_class=HTMLResponse)
     async def history_page(request: Request):
-        return templates.TemplateResponse("history.html", {"request": request, "title": "History"})
+        return templates.TemplateResponse(request, "history.html", {"request": request, "title": "History"})
 
     @app.get("/runs", response_class=HTMLResponse)
     async def runs_page(request: Request):
-        return templates.TemplateResponse("runs.html", {"request": request, "title": "Run History"})
+        return templates.TemplateResponse(request, "runs.html", {"request": request, "title": "Run History"})
 
     # --------------------------------------------------------------------------
     # Settings API

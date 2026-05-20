@@ -488,7 +488,7 @@ namespace TecanSiLA2Server.Instrument
             string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             string cleanPlateId = string.IsNullOrEmpty(plateId) ? "Unknown" : 
                 plateId.Replace(" ", "_").Replace("/", "-");
-            string baseName = $"{cleanPlateId}_{timestamp}";
+            string baseName = cleanPlateId;
 
             result.XmlFilePath = Path.Combine(_resultsPath, "XML", $"{baseName}.xml");
             result.CsvFilePath = Path.Combine(_resultsPath, "CSV", $"{baseName}.csv");
@@ -641,8 +641,6 @@ namespace TecanSiLA2Server.Instrument
                     output.RemoveAllExceptionListeners();
                 }
                 dummyForm?.Dispose();
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
             }
         }
 
