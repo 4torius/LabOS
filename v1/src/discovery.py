@@ -40,7 +40,7 @@ except ImportError:
 # mDNS/Zeroconf for automatic SiLA2 discovery (optional but recommended)
 try:
     from zeroconf import ServiceBrowser, ServiceListener, Zeroconf, ServiceInfo
-    from zeroconf.asyncio import AsyncZeroconf, AsyncServiceBrowser
+    from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
     ZEROCONF_AVAILABLE = True
 except ImportError:
     ZEROCONF_AVAILABLE = False
@@ -712,8 +712,8 @@ class PnPDiscovery:
     async def _handle_mdns_service_added(self, zc: Zeroconf, service_type: str, name: str):
         """Handle new mDNS service announcement."""
         try:
-            info = zc.get_service_info(service_type, name)
-            if not info:
+            info = AsyncServiceInfo(service_type, name)
+            if not await info.async_request(zc, timeout=3000):
                 return
             
             if info.addresses:

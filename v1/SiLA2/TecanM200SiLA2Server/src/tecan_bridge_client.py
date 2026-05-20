@@ -159,6 +159,7 @@ class TecanBridgeClient:
                         "excel_file_path": mr.excel_file_path,
                         "measurement_type": mr.measurement_type or "Unknown",
                     }
+                    break
         except grpc.RpcError as exc:
             yield {"error": exc.details() or str(exc)}
 

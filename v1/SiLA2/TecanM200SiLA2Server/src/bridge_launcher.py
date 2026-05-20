@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -28,11 +29,16 @@ class BridgeLauncher:
         self._host = host
         self._port = port
         self._proc: subprocess.Popen | None = None
+        self._stdout_thread: threading.Thread | None = None
+        self._stderr_thread: threading.Thread | None = None
 
     # ── public API ─────────────────────────────────────────────────────────
 
     def start(self) -> bool:
         """Build (if needed) and start the bridge. Returns True when ready."""
+        if self._probe():
+            logger.warning("Bridge already running on %s:%d; skipping start", self._host, self._port)
+            return True
         if not _BRIDGE_EXE.exists():
             logger.info("Bridge exe not found — building with dotnet...")
             if not self._build():
@@ -44,10 +50,14 @@ class BridgeLauncher:
             self._proc = subprocess.Popen(
                 [str(_BRIDGE_EXE)],
                 cwd=str(_BRIDGE_DIR),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
                 creationflags=flags,
             )
+            self._start_log_pumps()
         except Exception as exc:
             logger.error("Failed to start bridge: %s", exc)
             return False
@@ -78,6 +88,35 @@ class BridgeLauncher:
     @property
     def running(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
+
+    # ── logging helpers ─────────────────────────────────────────────────
+
+    def _start_log_pumps(self) -> None:
+        if not self._proc:
+            return
+        if self._proc.stdout:
+            self._stdout_thread = threading.Thread(
+                target=self._pump_stream,
+                args=(self._proc.stdout, logger.info),
+                name="tecan-bridge-stdout",
+                daemon=True,
+            )
+            self._stdout_thread.start()
+        if self._proc.stderr:
+            self._stderr_thread = threading.Thread(
+                target=self._pump_stream,
+                args=(self._proc.stderr, logger.error),
+                name="tecan-bridge-stderr",
+                daemon=True,
+            )
+            self._stderr_thread.start()
+
+    @staticmethod
+    def _pump_stream(stream, log_func) -> None:
+        for line in iter(stream.readline, ""):
+            msg = line.strip()
+            if msg:
+                log_func("[bridge] %s", msg)
 
     # ── internals ──────────────────────────────────────────────────────────
 
