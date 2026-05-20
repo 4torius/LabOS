@@ -1,2 +1,0 @@
-obj\Debug\net48\Protos/SiLA2Common.cs \
-obj\Debug\net48\Protos/SiLA2CommonGrpc.cs: Protos/SiLA2Common.proto
