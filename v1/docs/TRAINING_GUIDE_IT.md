@@ -34,7 +34,7 @@ Da eseguire la mattina stessa (o la sera prima) della sessione — niente rovina
 - [ ] Nella pagina **Hardware** è attiva una config HAL coerente con il deck fisico che hai allestito
 - [ ] Il software iControl di Tecan è **chiuso** sulla macchina host (blocca la porta USB necessaria al bridge)
 - [ ] Esegui una volta `Opentrons_Only_Test.workflow.json` per intero con una piastra di scarto — conferma che il liquid handling funzioni davvero oggi, non solo che il software risulti "online"
-- [ ] Se il trasporto via robot mobile fa parte della demo: verifica che i marker ArUco su ogni postazione siano puliti e non ostruiti, e fai una prova a vuoto di `execute_task`
+- [ ] Se il trasporto via robot mobile fa parte della demo: verifica che i marker ArUco su ogni postazione siano puliti e non ostruiti, e fai prima una `ExecuteTask` con `ExecutionMode: DryRun`
 
 ---
 
@@ -109,7 +109,7 @@ Uno script che puoi seguire alla lettera dal vivo:
 
 1. **Recipe Generator** — carica un piano Excel di esempio da `Library/Recipes/excel/`, configura una fase, genera una ricetta (e una HAL se non ne hai già una compatibile).
 2. **Hardware** — seleziona e attiva la config HAL corrispondente; allestisci il deck fisico di conseguenza (tip rack, piastra, reagenti) mentre spieghi a cosa serve ogni slot.
-3. **Workflow Builder** — costruisci (o carica uno già pronto) un workflow: Opentrons `ExecuteRecipe` → un `RequestOperatorTask` della Manual Station ("sposta la piastra al lettore") oppure, se il robot mobile è configurato per questa sessione, uno step `mobile` `execute_task` che trasporta la piastra automaticamente → Tecan `RunMeasurement`. Clicca Execute.
+3. **Workflow Builder** — costruisci (o carica uno già pronto) un workflow: Opentrons `ExecuteRecipe` → un `RequestOperatorTask` della Manual Station ("sposta la piastra al lettore") oppure, se il robot mobile è configurato per questa sessione, uno step `mobile` `ExecuteTask` (`TaskId`, `ExecutionMode: Normal`) che trasporta la piastra automaticamente → Tecan `RunMeasurement`. Clicca Execute.
 4. **Osserva la status bar** mentre lo step Opentrons gira — spiega che il sistema sta proteggendo automaticamente da tip residui anche se non lo vedi accadere (§8).
 5. **Pagina Operator** — quando parte lo step manuale, fai confermare il passaggio a un partecipante.
 6. **Run History** — a completamento, apri la run, mostra la timeline degli step, e apri **Results** per mostrare il file di output Tecan effettivo.
@@ -128,6 +128,7 @@ Funzionano automaticamente e sono facili da fraintendere come "non funzionanti" 
 - **Persistenza HAL + feedback di applicazione**: la config di deck attiva sopravvive a un riavvio, e la pagina Hardware ora mostra un chiaro toast di avviso se una selezione HAL non ha effettivamente raggiunto il robot (invece di sembrare tutto a posto silenziosamente).
 - **Archivio run**: ogni run viene registrata automaticamente; non serve salvare nulla manualmente per avere un record permanente.
 - **`Connect()` di Tecan**: ora rivalida sempre lo stato hardware reale — non dichiarerà più "connesso" dopo una disconnessione USB silenziosa.
+- **I comandi di attivazione hardware del robot mobile** (`SetHardwareActivation`, `ActivateAllHardware`, ecc.) sono esplicitamente segnalati dal server stesso come fisicamente rilevanti — possono attivare motori/servo reali su braccio, pinza o base. Trattali con la stessa cautela di `Home` su Opentrons o `PlateIn`/`PlateOut` su Tecan: conferma che qualcuno sia fisicamente presente e stia osservando prima di chiamarli, non lanciarli "per vedere cosa succede".
 
 ---
 

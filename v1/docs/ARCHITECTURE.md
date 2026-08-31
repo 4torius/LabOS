@@ -143,13 +143,15 @@ These were added in later hardening passes and are not visible anywhere except i
 
 ## Mobile Robot: Current Status
 
-**Confirmed working and complete.** The GoFaGo mobile manipulator's SiLA2 server runs remotely on its own Linux/Docker host at `192.168.11.22:50053` — `lab_config.yaml`'s `mobile` server entry (`enabled: true`, `remote: true`) points at it, and the orchestrator discovers and drives it like any other instrument.
+**Confirmed working and complete** — verified directly against the remote host's live Docker deployment and its actual FDL (not carried forward from an older draft). The GoFaGo mobile manipulator's SiLA2 server runs remotely on its own Linux/Docker host at `192.168.11.22:50053` (container `mobile-sila2`, `restart: always`) — `lab_config.yaml`'s `mobile` server entry (`enabled: true`, `remote: true`) points at it, and the orchestrator discovers and drives it exactly like the local instruments: same `sila2` library, same mDNS self-description, same `LabOSLibraryProvider` pattern (declares `mobile_task` as a dynamic library type backed by `Library/MobileTasks/`).
 
 A few things worth knowing about this instrument specifically:
 
 - **The server's source code is not part of this repository.** Unlike Opentrons/Tecan/Manual Station, GoFaGo's SiLA2 server is deployed and maintained entirely on the remote host — this repo only holds the *client-side* configuration (`lab_config.yaml`'s bootstrap entry). Don't look for it under `SiLA2/` here.
-- It exposes task-based execution: pre-taught manipulation routines (`execute_task`, `list_tasks`) run relative to ArUco fiducial markers at each workstation, plus base navigation (`navigate_to`). New tasks are taught by physically guiding the ABB GoFa arm through the motion (LfD — learning from demonstration) via the Exsensia platform on the remote host, then registered and refreshed into `Library/MobileTasks/` for the workflow builder to pick up.
-- An earlier session recorded an intermittent `"Server offline"` symptom (commands failing even while discovery showed it online) — this was an open issue as of that session's end but is understood to be resolved now that the instrument is confirmed working. If it resurfaces, check `docker logs` on the remote host and the orchestrator's discovery state before assuming a repeat of the same root cause.
+- Its feature is `TaskManagement` (9 commands, 6 properties) — task discovery/execution (`RefreshTasks`, `ExecuteTask`, `CancelTask`, `GetTaskDetails`) plus explicit hardware-activation control over the arm/gripper/camera/mobile base (`SetHardwareActivation(ByRole)`, `(De)ActivateAllHardware`). See [SERVERS.md](SERVERS.md#mobile-robot-sila2-server) for the full, FDL-verified reference.
+- **Self-healing by design**: a background thread keeps retrying the ROS connection if it's down, without crashing the server. If the ROS master itself gets restarted underneath it (a scenario an in-process `rospy` session can't recover from), the server deliberately terminates itself and relies on Docker's `restart: always` to come back up clean — a well-chosen failure mode rather than an accidental one.
+- New manipulation tasks are taught by physically guiding the ABB GoFa arm through the motion (LfD — learning from demonstration) via the Exsensia platform on the remote host, relative to each workstation's ArUco marker, then registered and refreshed into `Library/MobileTasks/`.
+- An earlier session recorded an intermittent `"Server offline"` symptom (commands failing even while discovery showed it online). That appears resolved — the container has been up continuously for weeks as of this check.
 
 ---
 

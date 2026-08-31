@@ -36,7 +36,7 @@ Run this the morning of (or the night before) the session — nothing kills a tr
 - [ ] A HAL config is active on the **Hardware** page and matches the physical deck you've set up
 - [ ] Tecan iControl software is **closed** on the host machine (it locks the USB port the bridge needs)
 - [ ] Run `Opentrons_Only_Test.workflow.json` once end-to-end with a scrap plate — confirms liquid handling actually works today, not just that the software is "online"
-- [ ] If mobile-robot plate transport is part of the demo: confirm ArUco markers at each workstation are clean and unobstructed, and do one `execute_task` dry run
+- [ ] If mobile-robot plate transport is part of the demo: confirm ArUco markers at each workstation are clean and unobstructed, and do one `ExecuteTask` run with `ExecutionMode: DryRun` first
 
 ---
 
@@ -111,7 +111,7 @@ A script you can literally follow live:
 
 1. **Recipe Generator** — load a sample Excel plan from `Library/Recipes/excel/`, configure one phase, generate a recipe (and a HAL if you don't already have a matching one).
 2. **Hardware** — select and activate the matching HAL config; load the physical deck to match (tip racks, plate, reagents) while narrating what each slot is for.
-3. **Workflow Builder** — build (or load a pre-made) workflow: Opentrons `ExecuteRecipe` → either a Manual Station `RequestOperatorTask` ("move the plate to the reader") or, if the mobile robot is set up for this session, a `mobile` `execute_task` step to transport the plate automatically → Tecan `RunMeasurement`. Click Execute.
+3. **Workflow Builder** — build (or load a pre-made) workflow: Opentrons `ExecuteRecipe` → either a Manual Station `RequestOperatorTask` ("move the plate to the reader") or, if the mobile robot is set up for this session, a `mobile` `ExecuteTask` step (`TaskId`, `ExecutionMode: Normal`) to transport the plate automatically → Tecan `RunMeasurement`. Click Execute.
 4. **Watch the status bar** as the Opentrons step runs — narrate that the system is automatically protecting against leftover tips even though you can't see it happening (§8).
 5. **Operator page** — when the manual step fires, show the trainee confirming it themselves.
 6. **Run History** — after completion, open the run, show the step timeline, and open **Results** to show the actual Tecan output file.
@@ -130,6 +130,7 @@ These operate automatically and are easy to misunderstand as "not working" if no
 - **HAL persistence + apply feedback**: the active deck config survives a restart, and the Hardware page now shows a clear warning toast if a HAL selection didn't actually reach the robot (rather than silently looking fine).
 - **Run archive**: every run is logged automatically; nothing needs to be manually saved to get a permanent record.
 - **Tecan `Connect()`**: always re-validates against the real hardware state now — it will not report "connected" after a silent USB disconnect.
+- **Mobile robot hardware-activation commands** (`SetHardwareActivation`, `ActivateAllHardware`, etc.) are explicitly flagged by the server itself as physically consequential — they can engage real motors/servos on the arm, gripper, or base. Treat them with the same caution as `Home` on Opentrons or `PlateIn`/`PlateOut` on Tecan: confirm someone is physically present and watching before calling them, don't fire them just to "see what happens."
 
 ---
 

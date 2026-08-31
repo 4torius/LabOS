@@ -72,7 +72,7 @@ Run this before the first workflow execution in a new environment or after any h
 - [ ] Recipe Generator: generate or load a small test recipe
 - [ ] Run `Opentrons_Only_Test.workflow.json` from the Workflow Builder with a scrap plate
 - [ ] Tecan: `RunMeasurement` with a short test protocol, verify an AnIML result appears in Run History
-- [ ] Mobile robot: `list_tasks` returns the expected task set
+- [ ] Mobile robot: `RefreshTasks` populates `AvailableTasks` with the expected task set
 
 ---
 
@@ -121,9 +121,10 @@ Run this before the first workflow execution in a new environment or after any h
 3. `Connect()` always re-validates against the real hardware state now (fixed) — it will no longer report "connected" after a silent USB drop. If you ever rebuild `TecanBridge.cs` in the future, remember the launcher prefers the **Release** build over Debug — rebuild Release too, or the fix you just made won't actually run (see [SERVERS.md](SERVERS.md#bridge-binary-is-up-to-date)).
 
 ### Mobile robot: task fails or "Server offline" despite discovery showing it online
-1. Verify the remote Docker container is up: `docker ps` / `docker logs` on `192.168.11.22`
-2. Confirm the ArUco marker at the target workstation is clean, lit, and unobstructed
-3. Re-run `list_tasks` to confirm the task registry is intact before assuming a connectivity fault
+1. Verify the remote Docker container is up: `docker ps` / `docker logs mobile-sila2` on `192.168.11.22`
+2. Check the `RobotConnectionStatus` property — the server's own background reconnect loop will show `Connecting`/`Disconnected` if it can't reach ROS, and self-restarts (via Docker) if the ROS master was itself restarted underneath it
+3. Confirm the ArUco marker at the target workstation is clean, lit, and unobstructed
+4. Re-run `RefreshTasks` to confirm the task registry (`AvailableTasks`) is intact before assuming a connectivity fault
 
 ### Workflow validation error: "Instrument(s) not found: X"
 The instrument name doesn't match a currently discovered server — check spelling and that the server is online. (The old Loop/IF/Note toolbox blocks that used to trigger this error have been removed from the Workflow Builder entirely.)

@@ -215,27 +215,58 @@ Any workflow step whose `Instrument` value contains `"manual"` is intercepted by
 
 ## Mobile Robot SiLA2 Server
 
-**Location**: hosted remotely — Docker deployment on the Linux host at `192.168.11.22`, **not part of this repository's checkout** (only the client-side bootstrap entry in `lab_config.yaml` lives here)
+**Location**: hosted remotely — Docker deployment on the Linux host at `192.168.11.22` (`mobile-sila2` container, image `mobile-sila2-server`, `restart: always`), **not part of this repository's checkout**. Verified live and running at the time of this documentation pass.
 **Port**: `50053`
-**Feature**: `TaskManagement` — task-based execution driving an ABB GoFa arm on a Robotnik RB-Kairos mobile base with an OnRobot RG6 gripper
+**Feature**: `TaskManagement` — 9 commands, 6 properties. Confirmed directly from the server's own FDL (`features/TaskManagement.sila.xml` on the remote host) — this is the authoritative command list, not carried forward from an older draft.
 
-Confirmed working. Runs entirely on the remote Linux workstation; the Windows orchestrator only connects to it over the LAN (`remote: true` in `lab_config.yaml` — the launcher never tries to start it locally).
+Like the local servers, it's built with the `sila2` library (self-describes via `SiLAService`, supports mDNS discovery, and implements `LabOSLibraryProvider` — declares `mobile_task` as a dynamic library type backed by `Library/MobileTasks/`). It runs a background reconnect loop against the ROS master: if ROS is down at startup it retries every interval without crashing, and if `roscore` itself gets restarted underneath it, the server deliberately exits (`SIGTERM`) so Docker's `restart: always` brings it back up with a clean ROS session, rather than trying to recover an unrecoverable `rospy` state in-process.
 
-### Commands (as last documented — reconfirm against the remote host's FDL if a command appears missing)
+### Properties
+
+| Property | Observable | Type | Description |
+|----------|-----------|------|--------------|
+| `AvailableTasks` | No | List of `TaskInfo` (`TaskId`, `TaskName`, `SubtaskCount`) | Discovered from the robot controller via ROS service; refreshed by `RefreshTasks` |
+| `AvailableHardware` | No | List of `HardwareInfo` (`HardwareId`, `HardwareName`, `Brand`, `Model`, `Activated`) | Queried live from the robot controller on every read — not cached |
+| `CurrentTaskId` | Yes | String | Empty when idle |
+| `CurrentSubtask` | Yes | String | Name of the subtask currently executing |
+| `TaskStatus` | Yes | String (`Idle`/`Executing`/`Paused`/`Completed`/`Failed`/`Cancelled`) | |
+| `RobotConnectionStatus` | Yes | String (`Connected`/`Disconnected`/`Connecting`/`Error`) | Reflects the ROS connection, updated by the background reconnect loop |
+
+### Commands
 
 | Command | Parameters | Description |
 |---------|-----------|--------------|
-| `execute_task` | `task_name` | Navigate to a workstation and execute a pre-taught manipulation task |
-| `list_tasks` | — | Return all tasks registered on the remote ROS action server |
-| `navigate_to` | `location_name` | Send the mobile base to a named map location |
-| `get_task_status` | — | Poll current task execution status |
-| `stop` | — | Interrupt the current task and return the arm to a safe/home position |
+| `RefreshTasks` | — | Re-query the robot controller for available tasks; updates `AvailableTasks` |
+| `ExecuteTask` (Observable) | `TaskId`, `ExecutionMode` (`Normal`/`StepByStep`/`DryRun`) | Runs a task via the ROS action server; streams `CurrentSubtask`/`Progress`/`Status` as intermediate responses |
+| `CancelTask` | — | Cancel the currently executing task |
+| `GetTaskDetails` | `TaskId` | Full task info including all subtasks (JSON) |
+| `ConnectToRobot` | `RosMasterUri` (empty = config default) | Explicitly (re)establish the ROS connection. **Physically consequential**: initializes the ROS node against the action server |
+| `SetHardwareActivation` | `HardwareId`, `Activate` (bool) | Activate/deactivate one piece of hardware by its raw controller ID. **The FDL itself flags this as physically consequential — may engage motors/servos** |
+| `SetHardwareActivationByRole` | `Hardware` (`Arm`/`Gripper`/`Camera`/`MobileBase`), `Activate` | Same, but by role — resolved to the real hardware ID live, so the caller never needs to know it |
+| `ActivateAllHardware` | — | Activates every registered hardware item one at a time. **Physically consequential** |
+| `DeactivateAllHardware` | — | Deactivates every registered hardware item |
+
+Defined execution errors: `TaskNotFound`, `TaskExecutionFailed`, `RobotNotConnected`, `HardwareNotFound`.
+
+**Note for anyone updating LabOS workflow examples**: earlier drafts of this documentation described a different, simpler command set (`execute_task`/`list_tasks`/`navigate_to`/`get_task_status`/`stop`) — that was stale. The commands above are what the server actually implements today.
+
+### Hardware Registered on the Controller
+
+From the current `config.yaml`, the robot controller manages: an ABB GoFa arm, an OnRobot gripper, a camera, and the Robotnik mobile base — each independently activatable via the hardware-activation commands above (`Arm`/`Gripper`/`Camera`/`MobileBase` roles).
+
+### Registered Stations & Gripper Profiles (from the remote `config.yaml`)
+
+Pre-configured pickup/place locations (name, type, approach offset where defined): `Home` (Exchange), `Opentrons` (Instrument), `Tecan` (Instrument), `Storage_A1`/`Storage_A2` (Storage), `Incubator` (Incubator) — each with real deck coordinates and heights calibrated on the physical setup.
+
+Gripper labware profiles (width / grip force / grip offset) are pre-defined for `96_well_plate`, `384_well_plate`, `reservoir`, and `tube_rack` — the server selects grip parameters based on what's being handled.
+
+### Safety Limits (from `config.yaml`)
+
+`min_battery: 20%` (minimum charge to operate), `obstacle_distance: 0.3m` (stops if something closer), `max_velocity: 0.5 m/s` (base), `arm_max_velocity: 0.3 m/s` (end-effector).
 
 ### Task Library
 
-Tasks are stored as JSON descriptors in `Library/MobileTasks/`, refreshed from the remote host's ROS action server (webapp: `POST /api/library/mobile-tasks/refresh`, or automatically at `list_tasks` time). Each task encodes a complete arm trajectory (approach, grasp, transfer, retract) relative to a workstation's ArUco fiducial marker — not the global map frame — decoupling manipulation accuracy from SLAM/navigation accuracy.
-
-Known task names from the shared workflow library (`Library/Workflows/`): station pick/place tasks for Opentrons and Tecan, plus generic storage pick and a `Home`/`Perception` (ArUco re-detection) utility task.
+Tasks are stored as JSON descriptors in `Library/MobileTasks/`, refreshed from the remote host's ROS action server (webapp: `POST /api/library/mobile-tasks/refresh`, or automatically via `RefreshTasks`). Each task encodes a complete arm trajectory (approach, grasp, transfer, retract) relative to a workstation's ArUco fiducial marker — not the global map frame — decoupling manipulation accuracy from SLAM/navigation accuracy.
 
 ### ArUco Marker Requirements
 
@@ -250,6 +281,6 @@ New manipulation tasks are taught by physically guiding the arm, not by programm
 3. Physically guide the arm through the full task: approach → grasp → transfer → retract to a safe position. Poses are recorded relative to the ArUco marker frame.
 4. Replay and validate with the Exsensia platform; re-record if execution isn't correct.
 5. Register the task under a name — it publishes to the ROS action server.
-6. Refresh the task library in LabOS (`POST /api/library/mobile-tasks/refresh`) — the new task appears in the Workflow Builder toolbox immediately.
+6. Call `RefreshTasks` (or `POST /api/library/mobile-tasks/refresh` from the webapp) — the new task appears in the Workflow Builder toolbox immediately.
 
-Anticipate the RG6 gripper's forward-push displacement during closure by pre-positioning slightly back before the final grasp. Verify a new task with at least 3 successful replays before using it in a real workflow.
+Anticipate the gripper's forward-push displacement during closure by pre-positioning slightly back before the final grasp. Verify a new task with at least 3 successful replays before using it in a real workflow.
