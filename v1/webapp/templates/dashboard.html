@@ -66,6 +66,7 @@ var COMMAND_ICONS = {
     'ExecuteRecipe': '📜', 'Transfer': '💧', 'TransferLiquid': '💧',
     'Aspirate': '⬆️', 'Dispense': '⬇️', 'Home': '🏠', 'GetStatus': '📊',
     'LoadHardwareConfig': '⚙️', 'Connect': '🔌', 'Disconnect': '🔌',
+    'PauseRun': '⏸️', 'ResumeRun': '▶️', 'AbortRun': '⏹️',
     'RunMeasurement': '📊', 'PlateIn': '📥', 'PlateOut': '📤',
     'SetTemperature': '🌡️', 'ListProtocols': '📑', 'TransportPlate': '🚚',
     'PickPlate': '📥', 'PlacePlate': '📤', 'GoHome': '🏠', 'GetPosition': '📍',
@@ -301,7 +302,32 @@ function generateInstrumentCard(instrumentId, instrumentData) {
         ? '<span class="badge bg-success float-end">Online</span>'
         : '<span class="badge bg-secondary float-end">Offline</span>';
     var cardOpacity = isOnline ? '' : 'opacity: 0.6;';
-    
+
+    // Dedicated run-control buttons (Pause/Resume/Abort), always visible above
+    // the truncated command list — these exist on Opentrons but were only
+    // reachable by digging through "... N more commands" before this.
+    var runControlIds = ['PauseRun', 'ResumeRun', 'AbortRun'];
+    var runControlLabels = {'PauseRun': 'Pausa', 'ResumeRun': 'Riprendi', 'AbortRun': 'Interrompi'};
+    var runControlsHtml = '';
+    for (var rc = 0; rc < runControlIds.length; rc++) {
+        var rcId = runControlIds[rc];
+        var rcCmd = null;
+        for (var rj = 0; rj < commands.length; rj++) {
+            var rcCandidate = commands[rj];
+            if ((typeof rcCandidate === 'string' ? rcCandidate : (rcCandidate.id || rcCandidate.name)) === rcId) {
+                rcCmd = rcCandidate;
+                break;
+            }
+        }
+        if (rcCmd) {
+            var rcHasParams = rcCmd.parameters && rcCmd.parameters.length > 0;
+            var rcClass = rcId === 'AbortRun' ? 'btn-outline-danger' : 'btn-outline-secondary';
+            runControlsHtml += '<button type="button" class="btn btn-sm ' + rcClass + ' me-1 mb-1" ' +
+                'onclick="executeCommand(\'' + instrumentId + '\', \'' + rcId + '\', ' + rcHasParams + ', \'' + instrumentId + '_' + rcId + '\'); return false;">' +
+                COMMAND_ICONS[rcId] + ' ' + runControlLabels[rcId] + '</button>';
+        }
+    }
+
     // Generate command list HTML
     var commandsHtml = '';
     var maxShow = 8;
@@ -331,6 +357,7 @@ function generateInstrumentCard(instrumentId, instrumentData) {
         '</div>' +
         '<div class="card-body">' +
         '<p class="text-muted small">' + (instrumentData.address || 'Discovered') + '</p>' +
+        (isOnline && runControlsHtml ? '<div class="mb-2">' + runControlsHtml + '</div>' : '') +
         (isOnline ? '<div class="list-group list-group-flush">' + commandsHtml + '</div>' : '<p class="text-muted"><i class="bi bi-wifi-off"></i> Server not responding</p>') +
         '</div></div></div>';
 }
@@ -340,12 +367,153 @@ function generateInstrumentCard(instrumentId, instrumentData) {
 // ============================================================================
 function executeCommand(instrumentId, commandName, hasParams, cmdKey) {
     log(instrumentId + ': ' + commandName, 'info');
-    
+
+    if (commandName === 'ConnectToRobot') {
+        openHardwarePanel(instrumentId);
+        return;
+    }
+
     if (hasParams) {
         showParameterModal(instrumentId, commandName);
     } else {
         executeDeviceCommand(instrumentId, commandName, {});
     }
+}
+
+// ============================================================================
+// HARDWARE ACTIVATION PANEL (ConnectToRobot -> per-hardware toggle dropdown)
+// ============================================================================
+function openHardwarePanel(instrumentId) {
+    var modalId = 'hardwarePanelModal';
+    var existing = document.getElementById(modalId);
+    if (existing) existing.remove();
+
+    var modalHtml = '<div class="modal fade" id="' + modalId + '" tabindex="-1">' +
+        '<div class="modal-dialog modal-dialog-scrollable">' +
+        '<div class="modal-content">' +
+        '<div class="modal-header bg-warning text-dark">' +
+        '<h5 class="modal-title"><i class="bi bi-robot"></i> Connect to Robot &mdash; Hardware Activation</h5>' +
+        '<button type="button" class="btn-close" data-bs-dismiss="modal"></button>' +
+        '</div>' +
+        '<div class="modal-body">' +
+        '<div class="alert alert-warning py-2 small mb-3"><i class="bi bi-exclamation-triangle"></i> ' +
+        'Activating hardware may engage real motors/servos on the physical robot.</div>' +
+        '<div class="d-flex gap-2 mb-3">' +
+        '<button class="btn btn-success btn-sm" onclick="setAllHardware(\'' + instrumentId + '\', true)">' +
+        '<i class="bi bi-power"></i> Activate All</button>' +
+        '<button class="btn btn-outline-danger btn-sm" onclick="setAllHardware(\'' + instrumentId + '\', false)">' +
+        '<i class="bi bi-power"></i> Deactivate All</button>' +
+        '<button class="btn btn-outline-secondary btn-sm ms-auto" onclick="refreshHardwarePanel(\'' + instrumentId + '\')">' +
+        '<i class="bi bi-arrow-clockwise"></i></button>' +
+        '</div>' +
+        '<div id="hardwareList"><div class="text-center py-3"><div class="spinner-border spinner-border-sm text-secondary"></div></div></div>' +
+        '</div>' +
+        '<div class="modal-footer">' +
+        '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>' +
+        '</div></div></div></div>';
+
+    document.getElementById('dynamic-modals').insertAdjacentHTML('beforeend', modalHtml);
+    new bootstrap.Modal(document.getElementById(modalId)).show();
+
+    refreshHardwarePanel(instrumentId);
+}
+
+function refreshHardwarePanel(instrumentId) {
+    var listEl = document.getElementById('hardwareList');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-secondary"></div></div>';
+
+    fetch('/api/devices/' + instrumentId + '/property/TaskManagement/AvailableHardware')
+        .then(function(resp) { return resp.json(); })
+        .then(function(result) {
+            if (result.status !== 'completed') {
+                listEl.innerHTML = '<div class="text-danger small">Error: ' + (result.error || 'unknown') + '</div>';
+                return;
+            }
+            var hardware = result.result || [];
+            if (!hardware.length) {
+                listEl.innerHTML = '<div class="text-muted small">No hardware registered on the robot controller.</div>';
+                return;
+            }
+            listEl.innerHTML = hardware.map(function(hw) {
+                var checked = hw.Activated ? 'checked' : '';
+                var badge = hw.Activated
+                    ? '<span class="badge bg-success">Active</span>'
+                    : '<span class="badge bg-secondary">Inactive</span>';
+                return '<div class="d-flex justify-content-between align-items-center border rounded p-2 mb-2">' +
+                    '<div>' +
+                    '<div class="fw-semibold small">' + hw.HardwareName + ' ' + badge + '</div>' +
+                    '<div class="text-muted" style="font-size:.72rem">' + hw.Brand + ' ' + hw.Model + '</div>' +
+                    '</div>' +
+                    '<div class="form-check form-switch mb-0">' +
+                    '<input class="form-check-input" type="checkbox" role="switch" ' + checked +
+                    ' onchange="toggleHardware(\'' + instrumentId + '\', \'' + hw.HardwareId + '\', this)">' +
+                    '</div>' +
+                    '</div>';
+            }).join('');
+        })
+        .catch(function(e) {
+            listEl.innerHTML = '<div class="text-danger small">Error: ' + e.message + '</div>';
+        });
+}
+
+function toggleHardware(instrumentId, hardwareId, switchEl) {
+    var activate = switchEl.checked;
+    if (activate && !confirm('Activate this hardware on the real robot? This may engage motors/servos.')) {
+        switchEl.checked = false;
+        return;
+    }
+    switchEl.disabled = true;
+    fetch('/api/devices/' + instrumentId + '/command', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({command: 'SetHardwareActivation', parameters: {HardwareId: hardwareId, Activate: activate}})
+    })
+    .then(function(resp) { return resp.json(); })
+    .then(function(result) {
+        switchEl.disabled = false;
+        if (result.status === 'completed' && result.result && result.result.Success === 'True') {
+            log('✅ Hardware ' + hardwareId + ' -> ' + (activate ? 'activated' : 'deactivated'), 'success');
+        } else {
+            var errMsg = (result.result && result.result.Message) || result.error || 'unknown error';
+            log('❌ Hardware activation failed: ' + errMsg, 'error');
+            switchEl.checked = !activate;
+        }
+        refreshHardwarePanel(instrumentId);
+    })
+    .catch(function(e) {
+        switchEl.disabled = false;
+        switchEl.checked = !activate;
+        log('❌ Error: ' + e.message, 'error');
+    });
+}
+
+function setAllHardware(instrumentId, activate) {
+    if (activate && !confirm('Activate ALL hardware on the real robot? This may engage motors/servos.')) {
+        return;
+    }
+    // Use the server-side ActivateAllHardware/DeactivateAllHardware commands rather
+    // than looping SetHardwareActivation per-item from here — the server enforces
+    // the mobile base being activated (and confirmed ready) before anything mounted
+    // on it, e.g. the arm, which a naive client-side loop can't guarantee.
+    var command = activate ? 'ActivateAllHardware' : 'DeactivateAllHardware';
+    fetch('/api/devices/' + instrumentId + '/command', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({command: command, parameters: {}})
+    })
+        .then(function(resp) { return resp.json(); })
+        .then(function(cmdResult) {
+            if (cmdResult.status === 'completed' && cmdResult.result) {
+                var msg = cmdResult.result.Message || '';
+                log('✅ ' + command + ': ' + msg, 'success');
+            } else {
+                var errMsg = (cmdResult.result && cmdResult.result.Message) || cmdResult.error || 'unknown error';
+                log('❌ ' + command + ' failed: ' + errMsg, 'error');
+            }
+            refreshHardwarePanel(instrumentId);
+        })
+        .catch(function(e) { log('❌ Error: ' + e.message, 'error'); });
 }
 
 function executeDeviceCommand(device, command, params) {
@@ -423,14 +591,9 @@ function showParameterModal(instrumentId, commandId) {
                 (paramType === 'float' || paramType === 'real' ? 'step="0.01"' : '') + '>';
         }
         else if (param.options && param.options.length > 0) {
-            // Server provided predefined options
-            fieldsHtml += '<select class="form-select param-input" data-param="' + paramName + '">';
-            fieldsHtml += '<option value="">-- Select --</option>';
-            for (var oi = 0; oi < param.options.length; oi++) {
-                var opt = param.options[oi];
-                fieldsHtml += '<option value="' + opt + '"' + (opt === paramDefault ? ' selected' : '') + '>' + opt + '</option>';
-            }
-            fieldsHtml += '</select>';
+            // Server provided predefined options — shared with workflows.html
+            // via /static/js/param-form-shared.js (see base.html).
+            fieldsHtml += buildConstrainedSelectHtml(paramName, param.options, paramDefault, param.required, 'form-select param-input');
         }
         // USE ui_hint FROM SERVER (preferred) or fallback to name matching
         else if (uiHint === 'recipe' || RECIPE_PARAMS.indexOf(paramLower) !== -1) {

@@ -703,15 +703,30 @@ function _updateActiveBtn() {
 async function setActiveConfig() {
     if (!currentFilename) return;
     try {
-        await fetch('/api/hardware/active', {
+        const resp = await fetch('/api/hardware/active', {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ filename: currentFilename })
         });
+        const result = await resp.json();
+        if (!resp.ok) throw new Error(result.detail || resp.statusText);
         activeFilename = currentFilename;
         _updateActiveBtn();
         await refreshConfigsList();
-        showToast('success', 'Active config set', currentFilename);
+
+        // Saving "active" in the webapp can succeed even if the robot never
+        // actually got the update (offline, or LoadHardwareConfig rejected it) -
+        // surface that distinction instead of always showing a plain success toast.
+        const apply = result.apply || {};
+        if (apply.applied) {
+            showToast('success', 'Active config set', currentFilename + ' (applied to robot)');
+        } else if (apply.attempted) {
+            showToast('warning', 'Selected, but NOT applied to the robot',
+                (apply.message || 'LoadHardwareConfig failed') + ' — re-apply once the robot is back online.');
+        } else {
+            showToast('warning', 'Selected in webapp only',
+                'Opentrons is offline/unreachable — the deck has not been updated. Re-apply once it is online.');
+        }
     } catch (e) {
         showToast('error', 'Error', e.message);
     }

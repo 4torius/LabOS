@@ -3,7 +3,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, Request
@@ -51,9 +51,6 @@ def create_instruments_router(
     state,
     ws_manager,
     lab_core,
-    plate_tracking: dict,
-    save_plate_tracking: Callable,
-    plate_tracking_lock,
     BASE_DIR: Path,
     LIBRARY_DIR: Path,
 ) -> APIRouter:
@@ -103,6 +100,19 @@ def create_instruments_router(
         if device_id not in state.devices:
             raise HTTPException(404, "Device not found")
         return asdict(state.devices[device_id])
+
+    @router.get("/api/devices/{device_id}/property/{feature}/{property_name}")
+    async def get_device_property(device_id: str, feature: str, property_name: str):
+        core = lab_core
+        if not core:
+            from src.lab_core import get_lab_core
+            core = get_lab_core(BASE_DIR)
+
+        await core.discover()
+        result = await core.get_property(device_id, feature, property_name)
+        if not result.success:
+            return {"status": "error", "error": result.error}
+        return {"status": "completed", "result": result.data}
 
     # Instrument commands (Plug & Play discovery)
 
@@ -214,11 +224,6 @@ def create_instruments_router(
                     "timestamp": datetime.now().isoformat(),
                 })
 
-                # Plate tracking (save_plate_tracking handles its own lock)
-                _auto_track_tecan(actual_id, command, params, result, plate_tracking, state)
-                _auto_track_opentrons(actual_id, command, params, result, plate_tracking, state)
-                await save_plate_tracking(plate_tracking)
-
                 if command == "RefreshTasks":
                     await ws_manager.broadcast({"type": "mobile_tasks_updated"})
 
@@ -271,7 +276,7 @@ def create_instruments_router(
         if plates_dir.exists():
             for f in sorted(plates_dir.glob("*.plate.json")):
                 try:
-                    data = json.loads(f.read_text(encoding='utf-8'))
+                    data = json.loads(f.read_text(encoding='utf-8-sig'))
                     if category and data.get("category", "") != category:
                         continue
                     plates.append(data)
@@ -292,7 +297,7 @@ def create_instruments_router(
         plates_dir = _resolve_library_path(BASE_DIR, "plates", "Library/Labware/Plates")
         for f in plates_dir.glob("*.plate.json"):
             try:
-                data = json.loads(f.read_text(encoding='utf-8'))
+                data = json.loads(f.read_text(encoding='utf-8-sig'))
                 if data.get("id") == plate_id or f.stem.replace(".plate", "") == plate_id:
                     return data
             except Exception:
@@ -305,7 +310,7 @@ def create_instruments_router(
         tipracks_dir = _resolve_library_path(BASE_DIR, "tipracks", "Library/Labware/TipRacks")
         index_file = tipracks_dir / "index.json"
         if index_file.exists():
-            data = json.loads(index_file.read_text(encoding='utf-8'))
+            data = json.loads(index_file.read_text(encoding='utf-8-sig'))
             data["path"] = str(tipracks_dir)
             return data
 
@@ -330,7 +335,7 @@ def create_instruments_router(
         pipettes_dir = _resolve_library_path(BASE_DIR, "pipettes", "Library/Labware/Pipettes")
         index_file = pipettes_dir / "index.json"
         if index_file.exists():
-            data = json.loads(index_file.read_text(encoding='utf-8'))
+            data = json.loads(index_file.read_text(encoding='utf-8-sig'))
             data["path"] = str(pipettes_dir)
             return data
 
@@ -386,7 +391,7 @@ def create_instruments_router(
                     continue
                 files.append(f.stem)
                 try:
-                    data = json.loads(f.read_text(encoding='utf-8'))
+                    data = json.loads(f.read_text(encoding='utf-8-sig'))
                     name = data.get('name', f.stem)
                     emoji = {'Aqueous': '💧', 'Viscous': '🍯', 'HighlyViscous': '🍯🍯',
                              'Volatile': '💨', 'Foaming': '🫧'}.get(name, '🔬')
@@ -394,27 +399,6 @@ def create_instruments_router(
                 except Exception:
                     classes[f.stem] = {'displayName': f.stem, 'description': ''}
         return {"files": files, "classes": classes}
-
-    @router.get("/api/files/pipetting-plans")
-    async def get_pipetting_plans():
-        files = []
-        plans_dir = LIBRARY_DIR / "PipettingPlans"
-        if plans_dir.exists():
-            for ext in ["*.xlsx", "*.xls", "*.csv"]:
-                for f in plans_dir.glob(ext):
-                    files.append({
-                        "name": f.name, "stem": f.stem,
-                        "size": f.stat().st_size,
-                        "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat()
-                    })
-        return {"files": sorted(files, key=lambda x: x["name"])}
-
-    @router.get("/api/files/pipetting-plans/{filename}")
-    async def get_pipetting_plan_file(filename: str):
-        file_path = LIBRARY_DIR / "PipettingPlans" / filename
-        if not file_path.exists():
-            raise HTTPException(404, f"File not found: {filename}")
-        return FileResponse(file_path, filename=filename)
 
     @router.get("/api/tecan/protocols")
     async def get_tecan_protocols():
@@ -449,29 +433,47 @@ def create_instruments_router(
 
     @router.post("/api/opentrons/refill-tips")
     async def refill_tip_rack(request: Request):
-        import asyncio
         data = await request.json()
         rack_type = data.get("rack_type", "all")
-        tip_state_file = BASE_DIR / "SiLA2" / "OpentronsSiLA2Server" / "tip_state.json"
+
+        # Delegate to the SiLA2 RefillTipRack command instead of writing
+        # tip_state.json directly here: that file is also owned/written by the
+        # SiLA2 server process's TipTracker (with its own lock + real rack
+        # capacities), so a second, unlocked writer here risked a cross-process
+        # race and always assumed 96 tips/rack even for 384-tip racks.
+        core = lab_core
+        if not core:
+            from src.lab_core import get_lab_core
+            core = get_lab_core(BASE_DIR)
 
         try:
-            tip_state = {}
+            await core.discover()
+            opentrons = next(
+                (i for i in core.list_instruments() if "opentrons" in i.id.lower() or "opentrons" in i.name.lower()),
+                None,
+            )
+            if opentrons is None:
+                return {"success": False, "error": "Opentrons instrument not found"}
+
+            result = await core.execute_command(opentrons.id, "RefillTipRack", {"RackSlot": rack_type})
+            if not result.success:
+                state.add_log("error", f"RefillTipRack error: {result.error}", "operator")
+                return {"success": False, "error": result.error}
+
+            message = "All tip racks refilled" if rack_type.lower() == "all" else f"Tip rack {rack_type} refilled"
+
+            # Read-only (never write) tip_state.json just to report an accurate
+            # count in the response/broadcast — TipTracker is the sole writer.
+            tips_restored = 0
+            tip_state_file = BASE_DIR / "SiLA2" / "OpentronsSiLA2Server" / "tip_state.json"
             if tip_state_file.exists():
-                tip_state = json.loads(tip_state_file.read_text(encoding='utf-8'))
+                tip_state = json.loads(tip_state_file.read_text(encoding='utf-8-sig'))
+                if rack_type.lower() == "all":
+                    tips_restored = sum(384 if "384" in key else 96 for key in tip_state)
+                else:
+                    tips_restored = 384 if "384" in rack_type else 96
 
-            if rack_type.lower() == "all":
-                for key in tip_state:
-                    tip_state[key] = 0
-                message = "All tip racks refilled"
-                tips_restored = sum(96 for _ in tip_state)
-            else:
-                tip_state[rack_type] = 0
-                message = f"Tip rack {rack_type} refilled"
-                tips_restored = 96
-
-            tip_state_file.write_text(json.dumps(tip_state, indent=2), encoding='utf-8')
             state.add_log("info", f"Tip rack refilled: {rack_type}", "operator")
-
             await ws_manager.broadcast({"type": "tip_refill_complete", "rack_type": rack_type,
                                         "message": message, "tips_restored": tips_restored})
 
@@ -484,7 +486,7 @@ def create_instruments_router(
     async def get_tip_status(hal_config: Optional[str] = None):
         try:
             tip_state_file = BASE_DIR / "SiLA2" / "OpentronsSiLA2Server" / "tip_state.json"
-            tip_usage = json.loads(tip_state_file.read_text(encoding='utf-8')) if tip_state_file.exists() else {}
+            tip_usage = json.loads(tip_state_file.read_text(encoding='utf-8-sig')) if tip_state_file.exists() else {}
 
             hal_dir = BASE_DIR / "Library" / "HardwareConfig"
             hal_file = None
@@ -501,7 +503,7 @@ def create_instruments_router(
 
             tip_racks = {}
             if hal_file and hal_file.exists():
-                hal_data = json.loads(hal_file.read_text(encoding='utf-8'))
+                hal_data = json.loads(hal_file.read_text(encoding='utf-8-sig'))
                 for logical_name, lw_config in hal_data.get("Labware", {}).items():
                     load_name = lw_config.get("LoadName", "")
                     if "tiprack" not in load_name.lower() and "tip" not in load_name.lower():
@@ -523,49 +525,3 @@ def create_instruments_router(
             return {"success": False, "error": str(e), "status": {}}
 
     return router
-
-
-# Plate-tracking helpers (shared with workflows router)
-
-def _auto_track_tecan(actual_id, command, params, result, plate_tracking, state):
-    if "tecan" not in actual_id.lower() or command not in ["RunMeasurement", "RunAnalysis"]:
-        return
-    plate_id = params.get("plate_id") or params.get("plateId") or params.get("PlateId")
-    if not plate_id:
-        return
-    if plate_id not in plate_tracking:
-        plate_tracking[plate_id] = {"created": datetime.now().isoformat(), "status": "analyzed", "analysis_results": []}
-    result_data = result.data if isinstance(result.data, dict) else {}
-    plate_tracking[plate_id]["analysis_results"].append({
-        "timestamp": datetime.now().isoformat(),
-        "measurement_type": params.get("measurement_type", "spectroscopy"),
-        "protocol": params.get("protocol") or params.get("protocol_file", ""),
-        "result_file": result_data.get("animl_file_path", "") or result_data.get("excel_file_path", ""),
-        "command": command, "instrument": actual_id, "raw_result": result_data
-    })
-    plate_tracking[plate_id]["status"] = "analyzed"
-    state.add_log("info", f"Analysis result linked to plate {plate_id}", "plates")
-
-
-def _auto_track_opentrons(actual_id, command, params, result, plate_tracking, state):
-    if "opentrons" not in actual_id.lower() or command not in ["ExecuteRecipe", "RunRecipe", "run_recipe"]:
-        return
-    plate_id = params.get("plate_id") or params.get("PlateId")
-    recipe_name = params.get("recipe") or params.get("recipe_name") or params.get("RecipeName", "")
-    if not plate_id and recipe_name:
-        plate_id = f"PLATE-{datetime.now().strftime('%Y%m%d')}-{recipe_name.replace('.json', '')}"
-    if not plate_id:
-        return
-    if plate_id not in plate_tracking:
-        plate_tracking[plate_id] = {
-            "created": datetime.now().isoformat(), "status": "pipetted", "analysis_results": [],
-            "pipetting_info": {"timestamp": datetime.now().isoformat(), "recipe": recipe_name,
-                               "instrument": actual_id, "command": command}
-        }
-    else:
-        plate_tracking[plate_id]["status"] = "pipetted"
-        plate_tracking[plate_id]["pipetting_info"] = {
-            "timestamp": datetime.now().isoformat(), "recipe": recipe_name,
-            "instrument": actual_id, "command": command
-        }
-    state.add_log("info", f"Pipetting recorded for plate {plate_id}", "plates")

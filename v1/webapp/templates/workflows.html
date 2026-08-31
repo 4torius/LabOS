@@ -359,6 +359,9 @@
             <button class="btn btn-outline-primary" id="btnSave">
                 <i class="bi bi-save"></i> Save
             </button>
+            <button class="btn btn-outline-danger" id="btnClear" title="Clear the canvas">
+                <i class="bi bi-trash"></i> Clear
+            </button>
             <button class="btn btn-success" id="btnRun">
                 <i class="bi bi-play-fill"></i> Run
             </button>
@@ -401,25 +404,6 @@
                 </div>
             </div>
             
-            <div class="toolbox-section">
-                <h6><i class="bi bi-code-slash"></i> Logic</h6>
-                <div class="tool-block loop" data-type="loop" draggable="true">
-                    <i class="bi bi-arrow-repeat" style="color:#6f42c1;"></i>
-                    <span>Loop</span>
-                </div>
-                <div class="tool-block condition" data-type="condition" draggable="true">
-                    <i class="bi bi-signpost-split" style="color:#fd7e14;"></i>
-                    <span>IF/Else</span>
-                </div>
-            </div>
-            
-            <div class="toolbox-section">
-                <h6><i class="bi bi-chat-text"></i> Note</h6>
-                <div class="tool-block note" data-type="note" draggable="true">
-                    <i class="bi bi-sticky text-secondary"></i>
-                    <span>Note</span>
-                </div>
-            </div>
         </div>
         
         <!-- CANVAS -->
@@ -614,36 +598,11 @@ var UTILITY_BLOCKS = {
             { id: 'Wait', label: '⏱️ Wait', params: ['seconds'], important: true }
         ]
     },
-    loop: {
-        name: 'Loop',
-        icon: 'bi-arrow-repeat',
-        color: 'purple',
-        isControl: true,
-        commands: [
-            { id: 'RepeatN', label: '🔁 Repeat N times', params: ['iterations'], important: true },
-            { id: 'EndLoop', label: '🔚 End Loop', important: true }
-        ]
-    },
-    condition: {
-        name: 'IF/Condition',
-        icon: 'bi-signpost-split',
-        color: 'orange',
-        isControl: true,
-        commands: [
-            { id: 'IfThen', label: '❓ IF condition', params: ['condition'], important: true },
-            { id: 'Else', label: '↪️ Else', important: true },
-            { id: 'EndIf', label: '🔚 End IF', important: true }
-        ]
-    },
-    note: {
-        name: 'Note',
-        icon: 'bi-sticky',
-        color: 'secondary',
-        isAnnotation: true,
-        commands: [
-            { id: 'Comment', label: '📝 Comment', params: ['text'], important: true }
-        ]
-    }
+    // Loop, IF/Condition, and Note blocks were removed: the workflow executor
+    // (routes/workflows.py, _execute_step) has no handling for them at all,
+    // so a workflow using one always failed pre-flight validation with
+    // "Instrument(s) not found: Note/Loop/IF-Condition" - a broken, misleading
+    // toolbox affordance rather than a real feature.
 };
 
 // ICON/COLOR mapping for known instrument types
@@ -734,8 +693,9 @@ function loadInstrumentsFromServers() {
             
             // Update toolbox with discovered instruments
             updateToolbox();
-            
+
             console.log('✅ INSTRUMENTS loaded:', Object.keys(INSTRUMENTS));
+            _restoreBuilderState();
         })
         .catch(function(err) {
             console.error('❌ Failed to load instruments:', err);
@@ -744,6 +704,7 @@ function loadInstrumentsFromServers() {
                 INSTRUMENTS[key] = UTILITY_BLOCKS[key];
             });
             updateToolbox();
+            _restoreBuilderState();
         });
 }
 
@@ -1043,6 +1004,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     // Setup toolbar buttons
     document.getElementById('btnSave').addEventListener('click', saveWorkflow);
+    document.getElementById('btnClear').addEventListener('click', clearWorkflowCanvas);
     document.getElementById('btnLoad').addEventListener('click', loadWorkflow);
     document.getElementById('btnRun').addEventListener('click', runWorkflow);
     document.getElementById('btnConfirmRun').addEventListener('click', confirmExecution);
@@ -1297,6 +1259,71 @@ function renderSteps() {
             removeStep(parseInt(this.getAttribute('data-index')));
         });
     }
+
+    _saveBuilderState();
+}
+
+// ============================================================================
+// BUILDER STATE PERSISTENCE (survive navigating away and back)
+// ============================================================================
+// This is a classic server-rendered page (Jinja + vanilla JS, no SPA router),
+// so every navigation away from /workflows is a full page unload -- all JS
+// state, including workflowSteps, is normally lost. Mirror it into
+// localStorage so it survives that round trip; only an explicit "Clear"
+// click (or a name/steps mismatch after a fresh Load/Import/Template, which
+// already call this themselves) actually discards it.
+var BUILDER_STATE_KEY = 'labos_workflow_builder_state';
+
+function _saveBuilderState() {
+    try {
+        localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify({
+            name: (document.getElementById('workflowName') || {}).value || '',
+            steps: workflowSteps
+        }));
+    } catch (e) {
+        console.warn('Could not persist workflow builder state:', e);
+    }
+}
+
+// Called once INSTRUMENTS is populated (from loadInstrumentsFromServers), so
+// command/parameter lookups used by the defaulting pass below actually
+// resolve. A no-op if nothing was ever saved (fresh browser/first visit).
+function _restoreBuilderState() {
+    var raw;
+    try {
+        raw = localStorage.getItem(BUILDER_STATE_KEY);
+    } catch (e) {
+        return;
+    }
+    if (!raw) return;
+    try {
+        var saved = JSON.parse(raw);
+        if (saved && Array.isArray(saved.steps) && saved.steps.length > 0) {
+            workflowSteps = saved.steps;
+            if (saved.name) document.getElementById('workflowName').value = saved.name;
+            _applyRequiredDefaultsToAllSteps();
+            renderSteps();
+            renderProperties();
+            console.log('🔁 Restored workflow builder state from a previous visit (' + workflowSteps.length + ' steps)');
+        }
+    } catch (e) {
+        console.warn('Could not restore workflow builder state:', e);
+    }
+}
+
+// Wipes the canvas on explicit user request. Everything else (Load, Import,
+// Template) already replaces workflowSteps wholesale and persists the new
+// state via renderSteps(); this is the only path that empties it back out.
+function clearWorkflowCanvas() {
+    if (workflowSteps.length === 0) return;
+    if (!confirm('Clear the whole canvas? This removes all ' + workflowSteps.length + ' step(s) and cannot be undone.')) return;
+    workflowSteps = [];
+    selectedStepIndex = null;
+    document.getElementById('workflowName').value = 'NewWorkflow';
+    try { localStorage.removeItem(BUILDER_STATE_KEY); } catch (e) {}
+    renderSteps();
+    renderProperties();
+    showNotification('Canvas cleared', 'info');
 }
 
 // ============================================================================
@@ -1370,7 +1397,9 @@ function renderProperties() {
         }
     }
     if (!cmd) cmd = inst.commands[0];
-    
+    applyRequiredConstrainedDefaults(step, cmd);
+    applyRequiredStringDefaults(step, cmd);
+
     // Dynamic parameters with smart dropdowns
     // First check API parameters, then fallback to local cmd.params
     var paramList = [];
@@ -1404,13 +1433,9 @@ function renderProperties() {
                     uiHint !== 'recipe' && uiHint !== 'protocol' && uiHint !== 'hal_config' &&
                     uiHint !== 'location' && uiHint !== 'labware' && uiHint !== 'tip_rack' &&
                     uiHint !== 'liquid_class' && uiHint !== 'mobile_task') {
-                html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
-                html += '<option value="">-- Select --</option>';
-                for (var oi = 0; oi < paramObj.options.length; oi++) {
-                    var opt = paramObj.options[oi];
-                    html += '<option value="' + opt + '"' + (currentValue === opt ? ' selected' : '') + '>' + opt.replace(/_/g, ' ') + '</option>';
-                }
-                html += '</select>';
+                // Server provided predefined options — shared with dashboard.html
+                // via /static/js/param-form-shared.js (see base.html).
+                html += buildConstrainedSelectHtml(param, paramObj.options, currentValue, paramObj.required, 'form-select form-select-sm param-input', true);
             } else if (uiHint === 'recipe' || RECIPE_PARAMS.indexOf(paramLower) !== -1) {
                 // Recipe dropdown
                 html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
@@ -1550,10 +1575,38 @@ function renderProperties() {
     }
 }
 
+// applyRequiredConstrainedDefaults() is defined once, shared with dashboard.html,
+// in /static/js/param-form-shared.js (loaded globally via base.html).
+
+// Steps rebuilt from a serialized source (Load, Template, Import) get their
+// params straight from the saved JSON, with no properties panel ever opened
+// for them — so a required Constrained/Set param that was missing when it was
+// first saved (e.g. a step never individually selected before that save)
+// stays missing forever, surviving reload/re-save. Run the same defaulting
+// addStep()+selectStep() gets, for every step, right after reconstruction.
+function _applyRequiredDefaultsToAllSteps() {
+    workflowSteps.forEach(function(step) {
+        var inst = INSTRUMENTS[step.type];
+        var cmd = inst && inst.commands && inst.commands.find(function(c) { return c.id === step.command; });
+        if (cmd) {
+            applyRequiredConstrainedDefaults(step, cmd);
+            applyRequiredStringDefaults(step, cmd);
+        }
+    });
+}
+
 function updateCommand(cmdId) {
     if (selectedStepIndex === null) return;
-    workflowSteps[selectedStepIndex].command = cmdId;
-    workflowSteps[selectedStepIndex].params = {};
+    var step = workflowSteps[selectedStepIndex];
+    step.command = cmdId;
+    step.params = {};
+
+    var inst = INSTRUMENTS[step.type];
+    var cmd = inst && inst.commands.find(function(c) { return c.id === cmdId; });
+    applyRequiredConstrainedDefaults(step, cmd);
+    applyRequiredStringDefaults(step, cmd);
+
+    step.params = normalizeStepParamsForCommand(step.command, step.params);
     renderSteps();
     renderProperties();
 }
@@ -1722,12 +1775,13 @@ function loadWorkflowFile(filename) {
                 });
             }
             
+            _applyRequiredDefaultsToAllSteps();
             selectedStepIndex = null;
             renderSteps();
             renderProperties();
-            
+
             bootstrap.Modal.getInstance(document.getElementById('loadModal')).hide();
-            
+
             console.log('Workflow loaded:', workflow.WorkflowName);
         })
         .catch(function(e) {
@@ -1965,6 +2019,7 @@ function _loadTemplate(templateId) {
                 dependsOn: s.DependsOn || []
             });
         });
+        _applyRequiredDefaultsToAllSteps();
         selectedStepIndex = null;
         renderSteps();
         renderProperties();
@@ -2089,6 +2144,7 @@ function importWorkflow(e) {
                     dependsOn: s.DependsOn || []
                 });
             });
+            _applyRequiredDefaultsToAllSteps();
             selectedStepIndex = null;
             renderSteps();
             renderProperties();

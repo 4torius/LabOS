@@ -6,7 +6,7 @@ import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
@@ -88,9 +88,6 @@ def create_workflows_router(
     state,
     ws_manager,
     lab_core,
-    plate_tracking: dict,
-    save_plate_tracking: Callable,
-    plate_tracking_lock: asyncio.Lock,
     pending_operator_actions: list,
     pending_operator_actions_lock: asyncio.Lock,
     pending_interventions: dict,
@@ -112,7 +109,7 @@ def create_workflows_router(
         if wf_dir.exists():
             for f in wf_dir.glob("*.workflow.json"):
                 try:
-                    wf = json.loads(f.read_text(encoding='utf-8'))
+                    wf = json.loads(f.read_text(encoding='utf-8-sig'))
                     workflows.append({
                         "id": f.stem,
                         "name": wf.get("WorkflowName", f.stem),
@@ -129,7 +126,7 @@ def create_workflows_router(
         for pattern in [f"{workflow_id}.workflow.json", f"{workflow_id}.json", workflow_id]:
             wf_path = wf_dir / pattern
             if wf_path.exists():
-                return json.loads(wf_path.read_text(encoding='utf-8'))
+                return json.loads(wf_path.read_text(encoding='utf-8-sig'))
         raise HTTPException(404, f"Workflow {workflow_id} not found")
 
     @router.post("/api/workflows/save")
@@ -316,7 +313,6 @@ def create_workflows_router(
             result_dict = await _execute_step(
                 step.instrument, step.action, step.parameters,
                 state, ws_manager, _exec_core, shared_wf_ctx,
-                plate_tracking, save_plate_tracking, plate_tracking_lock,
                 pending_operator_actions, pending_operator_actions_lock, WEBAPP_CONFIG,
                 base_dir=BASE_DIR,
             )
@@ -477,38 +473,11 @@ def create_workflows_router(
                 "steps_failed": result.steps_failed,
             }
 
-    # Experiment archive (Settimana 8: archivio runs)
-
-    @router.get("/api/runs")
-    async def list_runs():
-        runs_dir = BASE_DIR / "Results" / "runs"
-        if not runs_dir.exists():
-            return {"runs": []}
-        runs = []
-        for f in sorted(runs_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
-            try:
-                data = json.loads(f.read_text(encoding='utf-8'))
-                runs.append({
-                    "run_id": data.get("run_id", f.stem),
-                    "workflow_name": data.get("workflow_name"),
-                    "started_at": data.get("started_at"),
-                    "status": data.get("status"),
-                    "steps_completed": data.get("steps_completed", 0),
-                    "steps_failed": data.get("steps_failed", 0),
-                    "duration_seconds": data.get("duration_seconds"),
-                })
-            except Exception:
-                pass
-        return {"runs": runs, "count": len(runs)}
-
-    @router.get("/api/runs/{run_id}")
-    async def get_run(run_id: str):
-        runs_dir = BASE_DIR / "Results" / "runs"
-        run_file = runs_dir / f"{run_id}.json"
-        if not run_file.exists():
-            raise HTTPException(404, f"Run {run_id} not found")
-        return json.loads(run_file.read_text(encoding='utf-8'))
-
+    # Note: the persistent, UI-facing run archive is the SQLite-backed
+    # /api/db/runs (routes/db.py), used by the Run History page. The
+    # Results/runs/*.json files written by _save_run_archive() are kept
+    # purely as a redundant flat-file backup — no route reads them back
+    # (a duplicate read-only API here was removed as dead/confusing).
 
     # Experiment Templates (Settimana 9)
 
@@ -520,7 +489,7 @@ def create_workflows_router(
         templates_list = []
         for f in sorted(TEMPLATES_DIR.glob("*.template.json"), key=lambda p: p.stat().st_mtime, reverse=True):
             try:
-                t = json.loads(f.read_text(encoding='utf-8'))
+                t = json.loads(f.read_text(encoding='utf-8-sig'))
                 templates_list.append({
                     "id": f.stem,
                     "name": t.get("TemplateName", f.stem),
@@ -538,7 +507,7 @@ def create_workflows_router(
         for pattern in [f"{template_id}.template.json", f"{template_id}.json", template_id]:
             t_path = TEMPLATES_DIR / pattern
             if t_path.exists():
-                return json.loads(t_path.read_text(encoding='utf-8'))
+                return json.loads(t_path.read_text(encoding='utf-8-sig'))
         raise HTTPException(404, f"Template {template_id} not found")
 
     @router.post("/api/templates/save")
@@ -566,7 +535,7 @@ def create_workflows_router(
                 break
         if not t_path:
             raise HTTPException(404, f"Template {template_id} not found")
-        tmpl = json.loads(t_path.read_text(encoding='utf-8'))
+        tmpl = json.loads(t_path.read_text(encoding='utf-8-sig'))
         wf = {
             "WorkflowName": override.get("WorkflowName", tmpl.get("TemplateName", template_id)),
             "Steps": tmpl.get("Steps", []),
@@ -600,7 +569,7 @@ def create_workflows_router(
                 break
         if not wf_path:
             raise HTTPException(404, f"Workflow {workflow_id} not found")
-        content = wf_path.read_text(encoding='utf-8')
+        content = wf_path.read_text(encoding='utf-8-sig')
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         download_name = f"{workflow_id}_{ts}.workflow.json"
         return Response(
@@ -637,7 +606,7 @@ def create_workflows_router(
         versions = []
         for f in sorted(versions_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
             try:
-                meta = json.loads(f.read_text(encoding='utf-8'))
+                meta = json.loads(f.read_text(encoding='utf-8-sig'))
                 versions.append({
                     "version_id": f.stem,
                     "workflow_name": meta.get("WorkflowName", workflow_id),
@@ -663,7 +632,7 @@ def create_workflows_router(
                 break
         if not wf_path:
             raise HTTPException(404, f"Workflow {workflow_id} not found")
-        data = json.loads(wf_path.read_text(encoding='utf-8'))
+        data = json.loads(wf_path.read_text(encoding='utf-8-sig'))
         vid = _create_version_snapshot(LIBRARY_DIR, workflow_id, data, note)
         return {"success": True, "version_id": vid}
 
@@ -672,20 +641,20 @@ def create_workflows_router(
         v_path = LIBRARY_DIR / "Workflows" / ".versions" / workflow_id / f"{version_id}.json"
         if not v_path.exists():
             raise HTTPException(404, "Version not found")
-        return json.loads(v_path.read_text(encoding='utf-8'))
+        return json.loads(v_path.read_text(encoding='utf-8-sig'))
 
     @router.post("/api/workflows/{workflow_id}/versions/{version_id}/restore")
     async def restore_version(workflow_id: str, version_id: str):
         v_path = LIBRARY_DIR / "Workflows" / ".versions" / workflow_id / f"{version_id}.json"
         if not v_path.exists():
             raise HTTPException(404, "Version not found")
-        data = json.loads(v_path.read_text(encoding='utf-8'))
+        data = json.loads(v_path.read_text(encoding='utf-8-sig'))
         # Snapshot current before overwriting
         wf_dir = LIBRARY_DIR / "Workflows"
         safe = re.sub(r'[^\w\-. ]', '', workflow_id).strip().replace(" ", "_")
         current_path = wf_dir / f"{safe}.workflow.json"
         if current_path.exists():
-            current = json.loads(current_path.read_text(encoding='utf-8'))
+            current = json.loads(current_path.read_text(encoding='utf-8-sig'))
             _create_version_snapshot(LIBRARY_DIR, workflow_id, current, "pre-restore backup")
         data.pop("_saved_at", None)
         data.pop("_version_note", None)
@@ -779,7 +748,6 @@ def create_workflows_router(
                         r = await _execute_step(
                             step.instrument, step.action, step.parameters,
                             state, ws_manager, _exec_core, _sc,
-                            plate_tracking, save_plate_tracking, plate_tracking_lock,
                             pending_operator_actions, pending_operator_actions_lock, WEBAPP_CONFIG,
                             base_dir=BASE_DIR,
                         )
@@ -847,7 +815,7 @@ def create_workflows_router(
                         runs_dir = BASE_DIR / "Results" / "runs"
                         run_file = runs_dir / f"{run_id}.json"
                         if run_file.exists():
-                            run_data = json.loads(run_file.read_text(encoding='utf-8'))
+                            run_data = json.loads(run_file.read_text(encoding='utf-8-sig'))
                             run_data["batch_id"] = batch_id
                             run_data["sample_id"] = sample_id
                             run_file.write_text(json.dumps(run_data, indent=2, default=str), encoding='utf-8')
@@ -920,9 +888,6 @@ async def _execute_step(
     ws_manager,
     core,
     workflow_context: dict,
-    plate_tracking: dict,
-    save_plate_tracking: Callable,
-    plate_tracking_lock: asyncio.Lock,
     pending_operator_actions: list,
     pending_operator_actions_lock: asyncio.Lock,
     WEBAPP_CONFIG: dict,
@@ -992,10 +957,9 @@ async def _execute_step(
         if result.success:
             state.add_log("info", f"{action} completed on {device_id}", "workflow")
 
-            # Plate tracking (save_plate_tracking handles its own lock)
-            _wf_track_tecan(device_id, action, params, result, workflow_context, plate_tracking, state, base_dir=base_dir)
-            _wf_track_opentrons(device_id, action, params, result, workflow_context, plate_tracking, state, base_dir=base_dir)
-            await save_plate_tracking(plate_tracking)
+            # Plate ID assignment + DB population (Plates / Run History pages)
+            _wf_track_tecan(device_id, action, params, result, workflow_context, state, base_dir=base_dir)
+            _wf_track_opentrons(device_id, action, params, result, workflow_context, state, base_dir=base_dir)
 
             # Tip refill notification on warning message
             result_msg = result.message or (result.data.get("message") if isinstance(result.data, dict) else str(result.data or ""))
@@ -1125,7 +1089,7 @@ async def _wait_refill(rack_type, state, ws_manager, pending_operator_actions, l
     return {"status": "completed", "action": "RefillTipRack", "rack_type": rack_type}
 
 
-def _wf_track_tecan(device_id, action, params, result, wf_ctx, plate_tracking, state, base_dir: Optional[Path] = None):
+def _wf_track_tecan(device_id, action, params, result, wf_ctx, state, base_dir: Optional[Path] = None):
     if "tecan" not in device_id.lower() or action not in ["RunMeasurement", "RunAnalysis"]:
         return
     plate_id = (params.get("PlateID") or params.get("plate_id") or params.get("plateId")
@@ -1133,18 +1097,7 @@ def _wf_track_tecan(device_id, action, params, result, wf_ctx, plate_tracking, s
     result_data = result.data if isinstance(result.data, dict) else {}
     animl_path = result_data.get("animl_file_path", "") or result_data.get("AnIMLFilePath", "")
 
-    if plate_id and plate_id not in plate_tracking:
-        plate_tracking[plate_id] = {"created": datetime.now().isoformat(), "status": "analyzed", "analysis_results": []}
     if plate_id:
-        plate_tracking[plate_id]["analysis_results"] = plate_tracking[plate_id].get("analysis_results", [])
-        plate_tracking[plate_id]["analysis_results"].append({
-            "timestamp": datetime.now().isoformat(),
-            "measurement_type": params.get("measurement_type", "spectroscopy"),
-            "protocol": params.get("ProtocolFile") or params.get("protocol", ""),
-            "result_file": animl_path or result_data.get("excel_file_path", ""),
-            "command": action, "instrument": device_id, "workflow_context": True, "raw_result": result_data,
-        })
-        plate_tracking[plate_id]["status"] = "analyzed"
         state.add_log("info", f"Analysis result linked to plate {plate_id}", "plates")
 
     # DB: parse AnIML per-well and save with full measurement metadata
@@ -1201,7 +1154,7 @@ def _resolve_plate_metadata(recipe_name: str, base_dir: Path) -> dict:
     """Read active HAL config, find the primary well-plate labware, return plate metadata."""
     try:
         active_file = base_dir / "Library" / "HardwareConfig" / ".active"
-        hal_name = active_file.read_text(encoding="utf-8").strip() if active_file.exists() else ""
+        hal_name = active_file.read_text(encoding="utf-8-sig").strip() if active_file.exists() else ""
         if not hal_name:
             return {}
         hal_path = base_dir / "Library" / "HardwareConfig" / hal_name
@@ -1209,14 +1162,14 @@ def _resolve_plate_metadata(recipe_name: str, base_dir: Path) -> dict:
             hal_path = base_dir / "Library" / "HardwareConfig" / f"{hal_name}.json"
         if not hal_path.exists():
             return {}
-        hal = json.loads(hal_path.read_text(encoding="utf-8"))
+        hal = json.loads(hal_path.read_text(encoding="utf-8-sig"))
         for logical, lw in hal.get("Labware", {}).items():
             load_name = lw.get("LoadName", "")
             if "wellplate" in load_name.lower():
                 slot = lw.get("Slot", "")
                 plate_json = base_dir / "Library" / "Labware" / "Plates" / f"{load_name}.plate.json"
                 if plate_json.exists():
-                    meta = json.loads(plate_json.read_text(encoding="utf-8"))
+                    meta = json.loads(plate_json.read_text(encoding="utf-8-sig"))
                     return {
                         "plate_type": load_name,
                         "display_name": meta.get("display_name"),
@@ -1251,7 +1204,7 @@ def _extract_wells_from_recipe(recipe_name: str, plate_id: str, base_dir: Path) 
         recipe_path = base_dir / "Library" / "Recipes" / f"{recipe_name}.json"
         if not recipe_path.exists():
             return []
-        recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
+        recipe = json.loads(recipe_path.read_text(encoding="utf-8-sig"))
         steps = recipe.get("Steps", [])
         now = datetime.utcnow().isoformat()
 
@@ -1352,7 +1305,7 @@ def _extract_wells_from_recipe(recipe_name: str, plate_id: str, base_dir: Path) 
         return []
 
 
-def _wf_track_opentrons(device_id, action, params, result, wf_ctx, plate_tracking, state, base_dir: Optional[Path] = None):
+def _wf_track_opentrons(device_id, action, params, result, wf_ctx, state, base_dir: Optional[Path] = None):
     if "opentrons" not in device_id.lower() or action not in ["ExecuteRecipe", "RunRecipe", "run_recipe"]:
         return
     recipe_name = params.get("RecipeName") or params.get("recipe_name") or params.get("recipe", "")
@@ -1363,12 +1316,6 @@ def _wf_track_opentrons(device_id, action, params, result, wf_ctx, plate_trackin
         wf_ctx["plate_id"] = plate_id
         wf_ctx["current_plate_id"] = plate_id
         state.add_log("info", f"Plate ID: {plate_id}", "workflow")
-
-    plate_tracking[plate_id] = {
-        "created": datetime.now().isoformat(), "status": "pipetted", "analysis_results": [],
-        "pipetting_info": {"timestamp": datetime.now().isoformat(), "recipe": recipe_name,
-                           "instrument": device_id, "command": action, "workflow_context": True},
-    }
 
     if _DB_AVAILABLE:
         try:

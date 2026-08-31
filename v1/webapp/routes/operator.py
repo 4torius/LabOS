@@ -111,15 +111,21 @@ def create_operator_router(
 
         # Update tip_state.json on tip refill acknowledgment
         if action and (action.get("action") == "RefillTipRack" or "refill" in str(action.get("title", "")).lower()):
-            _update_tip_state(BASE_DIR, action.get("params", {}).get("rack_type", "all"), state, ws_manager)
+            await _update_tip_state(BASE_DIR, action.get("params", {}).get("rack_type", "all"), state, ws_manager, lab_core)
 
         return {"success": True, "remaining": len(pending_operator_actions)}
 
     @router.post("/api/operator/manual-step")
     async def record_manual_step(request: Request):
+        # This is a free-text session-log entry only - it is not a tracked
+        # workflow step or pending action (see operator.html's "Add Log Note").
         data = await request.json()
         step_id = int(datetime.now().timestamp() * 1000)
-        state.add_log("info", f"Manual step recorded: {data.get('type', 'note')}", "operator")
+        note_type = data.get("type", "note")
+        description = (data.get("description") or "").strip()
+        value = (data.get("value") or "").strip()
+        message = f"[{note_type}] {description}" + (f" = {value}" if value else "")
+        state.add_log("info", message, "operator")
         return {"success": True, "step_id": step_id}
 
     @router.post("/api/operator/test-notification")
@@ -212,21 +218,32 @@ def create_operator_router(
     return router
 
 
-def _update_tip_state(BASE_DIR: Path, rack_type: str, state, ws_manager):
-    """Reset tip counters in tip_state.json after operator acknowledges refill."""
-    tip_state_file = BASE_DIR / "SiLA2" / "OpentronsSiLA2Server" / "tip_state.json"
+async def _update_tip_state(BASE_DIR: Path, rack_type: str, state, ws_manager, lab_core):
+    """Reset tip counters after operator acknowledges refill, via the SiLA2
+    RefillTipRack command (same rationale as instruments.py's /api/opentrons/refill-tips:
+    tip_state.json is owned by the SiLA2 server's TipTracker; writing it directly
+    here duplicated that logic and raced with it across processes)."""
+    core = lab_core
+    if not core:
+        from src.lab_core import get_lab_core
+        core = get_lab_core(BASE_DIR)
+
     try:
-        tip_state = {}
-        if tip_state_file.exists():
-            tip_state = json.loads(tip_state_file.read_text(encoding='utf-8'))
-        if rack_type.lower() == "all":
-            for key in tip_state:
-                tip_state[key] = 0
-            message = "All tip racks refilled"
-        else:
-            tip_state[rack_type] = 0
-            message = f"Tip rack {rack_type} refilled"
-        tip_state_file.write_text(json.dumps(tip_state, indent=2), encoding='utf-8')
+        await core.discover()
+        opentrons = next(
+            (i for i in core.list_instruments() if "opentrons" in i.id.lower() or "opentrons" in i.name.lower()),
+            None,
+        )
+        if opentrons is None:
+            state.add_log("error", "Error during tip refill: Opentrons instrument not found", "operator")
+            return
+
+        result = await core.execute_command(opentrons.id, "RefillTipRack", {"RackSlot": rack_type})
+        if not result.success:
+            state.add_log("error", f"Error during tip refill: {result.error}", "operator")
+            return
+
+        message = "All tip racks refilled" if rack_type.lower() == "all" else f"Tip rack {rack_type} refilled"
         state.add_log("info", f"Tip rack refilled: {rack_type}", "operator")
         asyncio.create_task(ws_manager.broadcast({"type": "tip_refill_complete", "rack_type": rack_type, "message": message}))
     except Exception as e:

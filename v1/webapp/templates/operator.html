@@ -163,7 +163,7 @@
                         <div class="col-6">
                             <div class="quick-btn btn btn-outline-info w-100" onclick="showManualInput()">
                                 <i class="bi bi-keyboard"></i>
-                                Manual Input
+                                Add Log Note
                             </div>
                         </div>
                         <div class="col-6">
@@ -258,10 +258,14 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header bg-primary text-white">
-                <h5 class="modal-title"><i class="bi bi-keyboard"></i> Manual Input</h5>
+                <h5 class="modal-title"><i class="bi bi-keyboard"></i> Add Log Note</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
+                <p class="text-muted small mb-3">
+                    This writes a free-text entry to the session log. It does <strong>not</strong> create or complete
+                    a workflow step — use the Pending Actions list above for anything that needs to gate a running workflow.
+                </p>
                 <div class="mb-3">
                     <label class="form-label fw-semibold">Type</label>
                     <select class="form-select" id="manual-step-type">

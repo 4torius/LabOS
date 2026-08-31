@@ -106,13 +106,7 @@
                     <div class="form-check mb-2">
                         <input class="form-check-input" type="checkbox" id="generateHAL" checked>
                         <label class="form-check-label small" for="generateHAL">
-                            <i class="bi bi-cpu"></i> Generate HAL Config (auto slot assignment)
-                        </label>
-                    </div>
-                    <div class="form-check mb-2 ms-4" id="halSaveOption">
-                        <input class="form-check-input" type="checkbox" id="saveHAL" checked>
-                        <label class="form-check-label small" for="saveHAL">
-                            Save HAL to Library/HardwareConfig
+                            <i class="bi bi-cpu"></i> Generate + save HAL Config (auto slot assignment)
                         </label>
                     </div>
                 </div>
@@ -173,10 +167,12 @@ let groupConfigs = {};
 let generatedRecipes = [];
 let generatedWorkflow = null;
 let generatedHAL = null;
+let currentFileBaseName = '';
 
 // Config-loaded options — populated from /api/plates (Library/Labware/Plates/*.plate.json)
 let TARGET_PLATES = {};        // id → display_name
 let PLATE_CATALOG = {};        // id → full plate definition object
+let RESERVOIR_TYPES = {};      // load_name → display label
 let LIQUID_CLASSES = {
     'Aqueous': '💧 Aqueous',
     'Viscous': '🍯 Viscous (glycerol)',
@@ -184,6 +180,10 @@ let LIQUID_CLASSES = {
     'Volatile': '💨 Volatile (ethanol)',
     'Foaming': '🫧 Foaming'
 };
+
+// Module-treatment catalog (heater-shaker, temperature module, ...) for the
+// generic "+ Add step" mechanism — populated from /api/batch/step-schema.
+let STEP_CATALOG = { modules: {}, presets: {} };
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -217,6 +217,24 @@ async function loadConfigOptions() {
         };
     }
 
+    // Reservoir types, from the combined labware catalog (category === 'reservoir')
+    try {
+        const labwareResp = await fetch('/api/hardware/catalog/labware');
+        const labwareData = await labwareResp.json();
+        RESERVOIR_TYPES = {};
+        for (const item of (labwareData.labware || [])) {
+            if (item.category === 'reservoir') {
+                RESERVOIR_TYPES[item.load_name] = `${item.display_name} (${item.total_wells} well)`;
+            }
+        }
+    } catch (e) {
+        console.warn('Could not load reservoir catalog, using fallback:', e);
+        RESERVOIR_TYPES = {
+            'nest_12_reservoir_15ml': 'NEST 12 Well Reservoir 15 mL (12 well)',
+            'nest_1_reservoir_290ml': 'NEST 1 Well Reservoir 290 mL (1 well)',
+        };
+    }
+
     // Liquid classes
     try {
         const lcResp = await fetch('/api/files/liquidclasses');
@@ -229,6 +247,14 @@ async function loadConfigOptions() {
         }
     } catch (e) {
         console.warn('Could not load liquid classes:', e);
+    }
+
+    // Module treatment catalog (heater-shaker, temperature module, ...)
+    try {
+        const stepResp = await fetch('/api/batch/step-schema');
+        STEP_CATALOG = await stepResp.json();
+    } catch (e) {
+        console.warn('Could not load step schema:', e);
     }
 }
 
@@ -254,6 +280,16 @@ function buildPlateInfoBadge(plateId) {
 function buildTargetPlateOptions(selectedValue = '') {
     let html = '';
     for (const [value, label] of Object.entries(TARGET_PLATES)) {
+        const selected = value === selectedValue ? ' selected' : '';
+        html += `<option value="${value}"${selected}>${label}</option>`;
+    }
+    return html;
+}
+
+// Build HTML options for reservoir types
+function buildReservoirOptions(selectedValue = '') {
+    let html = '';
+    for (const [value, label] of Object.entries(RESERVOIR_TYPES)) {
         const selected = value === selectedValue ? ' selected' : '';
         html += `<option value="${value}"${selected}>${label}</option>`;
     }
@@ -357,7 +393,13 @@ async function parseExcelFile() {
         
         // Store parsed data
         parsedSheets = result.sheets || [];
-        
+
+        // Remember the source filename, sanitized, to use as recipe name when
+        // the workbook has only one sheet (sheet names like "Sheet1"/"Foglio1"
+        // aren't descriptive on their own).
+        const rawName = result.filename || libraryFile || (fileInput.files[0] && fileInput.files[0].name) || 'Recipe';
+        currentFileBaseName = rawName.replace(/\.[^/.]+$/, '').replace(/[^\w]+/g, '_');
+
         // Update badge
         document.getElementById('sheetBadge').textContent = `${parsedSheets.length} sheet(s)`;
         
@@ -445,17 +487,32 @@ function renderConfigPanel() {
                         <div class="collapse mt-2" id="liquidClassContainer-${sheetIdx}">
                             <div class="card card-body bg-secondary py-2">
                                 <div class="small text-muted mb-2">
-                                    Specify liquid type to optimize aspiration/dispensing
+                                    Specify liquid type to optimize aspiration/dispensing.
+                                    I campi extra (air gap, mix, blow out) si aggiungono allo stesso comando Distribute/Transfer
+                                    - per un controllo ancora più fine (es. step Aspirate/Dispense separati) modifica il JSON a mano.
                                 </div>
                                 <div id="liquidClassList-${sheetIdx}">
                                     ${reagents.map(r => `
-                                        <div class="d-flex align-items-center gap-2 mb-1">
+                                        <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
                                             <span class="badge bg-info" style="width: 80px;">${r}</span>
                                             <select class="form-select form-select-sm liquid-class-select" style="width: auto;"
                                                     onchange="updateReagentLiquidClass(${sheetIdx}, '${r}', this.value)">
                                                 <option value="">Default (Aqueous)</option>
                                                 ${buildLiquidClassOptions()}
                                             </select>
+                                            <label class="small text-muted mb-0">Air gap</label>
+                                            <input type="number" class="form-control form-control-sm" style="width: 65px;" min="0" placeholder="µL"
+                                                   onchange="updateReagentAdvanced(${sheetIdx}, '${r}', 'air_gap', this.value, 'number')">
+                                            <label class="small text-muted mb-0">Mix dopo</label>
+                                            <input type="number" class="form-control form-control-sm" style="width: 55px;" min="0" placeholder="cicli"
+                                                   onchange="updateReagentAdvanced(${sheetIdx}, '${r}', 'mix_after_cycles', this.value, 'number')">
+                                            <input type="number" class="form-control form-control-sm" style="width: 65px;" min="0" placeholder="µL"
+                                                   onchange="updateReagentAdvanced(${sheetIdx}, '${r}', 'mix_after_volume', this.value, 'number')">
+                                            <div class="form-check form-check-inline mb-0">
+                                                <input class="form-check-input" type="checkbox"
+                                                       onchange="updateReagentAdvanced(${sheetIdx}, '${r}', 'blow_out', this.checked, 'bool')">
+                                                <label class="form-check-label small">Blow out</label>
+                                            </div>
                                         </div>
                                     `).join('')}
                                 </div>
@@ -480,6 +537,25 @@ function renderConfigPanel() {
                             </select>
                             <div id="plateInfo-${sheetIdx}">${buildPlateInfoBadge(Object.keys(TARGET_PLATES)[0] || '')}</div>
                         </div>
+                    </div>
+
+                    <!-- Reservoir selection -->
+                    <div class="row mt-2">
+                        <div class="col-7">
+                            <label class="form-label small">Tipo di reservoir:</label>
+                            <select class="form-select form-select-sm" id="reservoirType-${sheetIdx}">
+                                ${buildReservoirOptions()}
+                            </select>
+                        </div>
+                        <div class="col-5">
+                            <label class="form-label small">Numero di reservoir:</label>
+                            <input type="number" class="form-control form-control-sm" id="numReservoirs-${sheetIdx}"
+                                   min="1" max="${reagents.length}" placeholder="${reagents.length} (uno a testa)">
+                        </div>
+                    </div>
+                    <div class="small text-muted mt-1">
+                        <i class="bi bi-info-circle"></i> Lascia vuoto per un reservoir dedicato a ogni reagente.
+                        Riduci il numero per far condividere più reagenti sullo stesso reservoir fisico (pozzetti riempiti in ordine: A1, A2, ...).
                     </div>
                 </div>
             </div>
@@ -546,18 +622,333 @@ function updateReagentLiquidClass(sheetIdx, reagent, liquidClass) {
     }
 }
 
+// Advanced per-reagent liquid handling overrides (air gap, mix after, blow out) -
+// merged onto the same Distribute/Transfer command the backend already builds.
+function updateReagentAdvanced(sheetIdx, reagent, field, value, type) {
+    const config = groupConfigs[sheetIdx];
+    if (!config.reagent_advanced) config.reagent_advanced = {};
+    if (!config.reagent_advanced[reagent]) config.reagent_advanced[reagent] = {};
+    const adv = config.reagent_advanced[reagent];
+    if (type === 'bool') {
+        adv[field] = value;
+    } else if (value === '') {
+        delete adv[field];
+    } else {
+        adv[field] = parseFloat(value);
+    }
+    if (Object.keys(adv).length === 0) delete config.reagent_advanced[reagent];
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Module treatments ("+ Add step"): heater-shaker / temperature module /
+// etc. inserted before the first phase, after any phase, or after the last
+// phase. Only available in "Single Recipe" mode — each treatment moves a
+// labware onto a module mid-protocol, which only makes sense within one
+// continuously-executed recipe (not across separately-run multi-recipe steps).
+// ═══════════════════════════════════════════════════════════════════════
+
+function getTreatmentList(sheetIdx, scope, groupIdx) {
+    const config = groupConfigs[sheetIdx];
+    if (scope === 'pre') {
+        if (!config.pre_treatments) config.pre_treatments = [];
+        return config.pre_treatments;
+    }
+    if (scope === 'post') {
+        if (!config.post_treatments) config.post_treatments = [];
+        return config.post_treatments;
+    }
+    const group = config.groups[groupIdx];
+    if (!group.treatments) group.treatments = [];
+    return group.treatments;
+}
+
+function addTreatment(sheetIdx, scope, groupIdx, presetKey) {
+    const list = getTreatmentList(sheetIdx, scope, groupIdx);
+    const sheet = parsedSheets[sheetIdx];
+    const reagents = sheet.summary?.reagents || [];
+    let treatment;
+
+    if (presetKey && STEP_CATALOG.presets[presetKey]) {
+        const preset = STEP_CATALOG.presets[presetKey];
+        treatment = {
+            kind: preset.kind,
+            target: preset.target || reagents[0] || 'TargetPlate',
+            params: { ...preset.params },
+            return_after: preset.return_after
+        };
+        // "Mantieni caldo" needs a matching cleanup step later, or the source
+        // stays on the heater-shaker (and heated) for the rest of the run.
+        if (preset.cleanup_params) {
+            getTreatmentList(sheetIdx, 'post', -1).push({
+                kind: preset.kind,
+                target: treatment.target,
+                params: { ...preset.cleanup_params },
+                return_after: true
+            });
+        }
+    } else {
+        const firstKind = Object.keys(STEP_CATALOG.modules)[0];
+        treatment = { kind: firstKind, target: 'TargetPlate', params: {}, return_after: true };
+    }
+    list.push(treatment);
+    renderGroups(sheetIdx);
+}
+
+function removeTreatment(sheetIdx, scope, groupIdx, tIdx) {
+    getTreatmentList(sheetIdx, scope, groupIdx).splice(tIdx, 1);
+    renderGroups(sheetIdx);
+}
+
+function updateTreatmentKind(sheetIdx, scope, groupIdx, tIdx, kind) {
+    const t = getTreatmentList(sheetIdx, scope, groupIdx)[tIdx];
+    t.kind = kind;
+    t.params = {};
+    renderGroups(sheetIdx);
+}
+
+function updateTreatmentTarget(sheetIdx, scope, groupIdx, tIdx, target) {
+    getTreatmentList(sheetIdx, scope, groupIdx)[tIdx].target = target;
+}
+
+function updateTreatmentReturn(sheetIdx, scope, groupIdx, tIdx, checked) {
+    getTreatmentList(sheetIdx, scope, groupIdx)[tIdx].return_after = checked;
+}
+
+function updateTreatmentParam(sheetIdx, scope, groupIdx, tIdx, field, value, type) {
+    const t = getTreatmentList(sheetIdx, scope, groupIdx)[tIdx];
+    if (!t.params) t.params = {};
+    if (type === 'bool') {
+        t.params[field] = value;
+    } else if (value === '') {
+        delete t.params[field];
+    } else {
+        t.params[field] = parseFloat(value);
+    }
+}
+
+function renderTreatmentCard(sheetIdx, scope, groupIdx, tIdx, treatment) {
+    const sheet = parsedSheets[sheetIdx];
+    const reagents = sheet.summary?.reagents || [];
+    const moduleEntry = STEP_CATALOG.modules[treatment.kind] || {};
+    const fields = moduleEntry.fields || [];
+
+    const kindOptions = Object.entries(STEP_CATALOG.modules).map(([key, m]) =>
+        `<option value="${key}" ${key === treatment.kind ? 'selected' : ''}>${m.label}</option>`
+    ).join('');
+
+    const targetOptions = [`<option value="TargetPlate" ${treatment.target === 'TargetPlate' ? 'selected' : ''}>Piastra di destinazione</option>`]
+        .concat(reagents.map(r => `<option value="${r}" ${treatment.target === r ? 'selected' : ''}>${r} (sorgente)</option>`))
+        .join('');
+
+    const fieldsHtml = fields.map(f => {
+        const val = (treatment.params || {})[f.name];
+        if (f.type === 'bool') {
+            const checked = val !== undefined ? val : (f.default || false);
+            return `
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" ${checked ? 'checked' : ''}
+                           onchange="updateTreatmentParam(${sheetIdx}, '${scope}', ${groupIdx}, ${tIdx}, '${f.name}', this.checked, 'bool')">
+                    <label class="form-check-label small">${f.label}</label>
+                </div>`;
+        }
+        return `
+            <div class="d-inline-block me-2 mb-1">
+                <label class="form-label small mb-0 d-block">${f.label}${f.unit ? ' (' + f.unit + ')' : ''}</label>
+                <input type="number" class="form-control form-control-sm" style="width: 100px;"
+                       value="${val !== undefined ? val : ''}"
+                       ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.max !== undefined ? `max="${f.max}"` : ''}
+                       onchange="updateTreatmentParam(${sheetIdx}, '${scope}', ${groupIdx}, ${tIdx}, '${f.name}', this.value, 'number')">
+            </div>`;
+    }).join('');
+
+    return `
+        <div class="card bg-dark border-info mb-2">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-1">
+                    <select class="form-select form-select-sm" style="width: auto;"
+                            onchange="updateTreatmentKind(${sheetIdx}, '${scope}', ${groupIdx}, ${tIdx}, this.value)">
+                        ${kindOptions}
+                    </select>
+                    <select class="form-select form-select-sm" style="width: auto;"
+                            onchange="updateTreatmentTarget(${sheetIdx}, '${scope}', ${groupIdx}, ${tIdx}, this.value)">
+                        ${targetOptions}
+                    </select>
+                    <button class="btn btn-sm btn-outline-danger" onclick="removeTreatment(${sheetIdx}, '${scope}', ${groupIdx}, ${tIdx})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+                <div>${fieldsHtml}</div>
+                <div class="form-check mt-1">
+                    <input class="form-check-input" type="checkbox" ${treatment.return_after !== false ? 'checked' : ''}
+                           onchange="updateTreatmentReturn(${sheetIdx}, '${scope}', ${groupIdx}, ${tIdx}, this.checked)">
+                    <label class="form-check-label small">Riporta la piastra/sorgente al proprio slot dopo questo step</label>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderTreatmentsSection(sheetIdx, scope, groupIdx, title) {
+    const isMultiMode = document.getElementById('modeMultiRecipe').checked;
+    if (isMultiMode) {
+        return `<div class="small text-muted fst-italic mb-2">${title}: richiede la modalità "Single Recipe with Delays".</div>`;
+    }
+    const list = getTreatmentList(sheetIdx, scope, groupIdx);
+    let html = `<div class="small fw-bold text-muted mb-1">${title}</div>`;
+    list.forEach((t, tIdx) => {
+        html += renderTreatmentCard(sheetIdx, scope, groupIdx, tIdx, t);
+    });
+    html += `
+        <div class="btn-group btn-group-sm mb-3">
+            <button class="btn btn-outline-info" onclick="addTreatment(${sheetIdx}, '${scope}', ${groupIdx})">
+                <i class="bi bi-plus"></i> Aggiungi step
+            </button>
+            <button class="btn btn-outline-warning" onclick="addTreatment(${sheetIdx}, '${scope}', ${groupIdx}, 'heat_shake')">
+                🔥 Scalda e agita
+            </button>
+            <button class="btn btn-outline-warning" onclick="addTreatment(${sheetIdx}, '${scope}', ${groupIdx}, 'keep_warm')">
+                🌡️ Mantieni caldo
+            </button>
+        </div>
+    `;
+    return html;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Per-reagent batching: split ONE reagent's own distribution into chunks of N
+// wells, with a module treatment run before each chunk (typically re-heating
+// the reagent's own source reservoir so it doesn't solidify while sitting on
+// deck during a long distribution - see the SPAAC reference recipe pattern).
+// ═══════════════════════════════════════════════════════════════════════
+
+function getReagentBatchConfig(sheetIdx, groupIdx, reagent) {
+    const group = groupConfigs[sheetIdx].groups[groupIdx];
+    if (!group.reagent_batches) group.reagent_batches = {};
+    if (!group.reagent_batches[reagent]) group.reagent_batches[reagent] = { batch_size: null, treatment: null };
+    return group.reagent_batches[reagent];
+}
+
+function updateReagentBatchSize(sheetIdx, groupIdx, reagent, value) {
+    const cfg = getReagentBatchConfig(sheetIdx, groupIdx, reagent);
+    const size = parseInt(value);
+    cfg.batch_size = (size && size > 0) ? size : null;
+    if (cfg.batch_size && !cfg.treatment) {
+        cfg.treatment = { kind: Object.keys(STEP_CATALOG.modules)[0], target: reagent, params: {}, return_after: false };
+    }
+    renderGroups(sheetIdx);
+}
+
+function updateReagentBatchTreatmentKind(sheetIdx, groupIdx, reagent, kind) {
+    const cfg = getReagentBatchConfig(sheetIdx, groupIdx, reagent);
+    cfg.treatment.kind = kind;
+    cfg.treatment.params = {};
+    renderGroups(sheetIdx);
+}
+
+function updateReagentBatchTreatmentTarget(sheetIdx, groupIdx, reagent, target) {
+    getReagentBatchConfig(sheetIdx, groupIdx, reagent).treatment.target = target;
+}
+
+function updateReagentBatchTreatmentField(sheetIdx, groupIdx, reagent, field, value, type) {
+    const cfg = getReagentBatchConfig(sheetIdx, groupIdx, reagent);
+    if (!cfg.treatment.params) cfg.treatment.params = {};
+    if (type === 'bool') {
+        cfg.treatment.params[field] = value;
+    } else if (value === '') {
+        delete cfg.treatment.params[field];
+    } else {
+        cfg.treatment.params[field] = parseFloat(value);
+    }
+}
+
+function renderReagentBatchConfig(sheetIdx, groupIdx, reagent) {
+    const isMultiMode = document.getElementById('modeMultiRecipe').checked;
+    const group = groupConfigs[sheetIdx].groups[groupIdx];
+    const cfg = (group.reagent_batches || {})[reagent];
+    const batchSize = cfg?.batch_size || '';
+
+    let html = `
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <span class="badge bg-info" style="min-width: 80px;">${reagent}</span>
+            <label class="small text-muted mb-0">Batch da</label>
+            <input type="number" class="form-control form-control-sm" style="width: 70px;" min="1"
+                   value="${batchSize}" placeholder="tutti insieme"
+                   onchange="updateReagentBatchSize(${sheetIdx}, ${groupIdx}, '${reagent}', this.value)">
+            <span class="small text-muted">pozzetti</span>
+        </div>`;
+
+    if (isMultiMode) {
+        return html + `<div class="small text-muted fst-italic mb-2 ms-3">Il trattamento tra batch richiede "Single Recipe with Delays".</div>`;
+    }
+
+    if (cfg && cfg.batch_size && cfg.treatment) {
+        const sheet = parsedSheets[sheetIdx];
+        const reagents = sheet.summary?.reagents || [];
+        const moduleEntry = STEP_CATALOG.modules[cfg.treatment.kind] || {};
+        const fields = moduleEntry.fields || [];
+
+        const kindOptions = Object.entries(STEP_CATALOG.modules).map(([key, m]) =>
+            `<option value="${key}" ${key === cfg.treatment.kind ? 'selected' : ''}>${m.label}</option>`
+        ).join('');
+        const targetOptions = [`<option value="TargetPlate" ${cfg.treatment.target === 'TargetPlate' ? 'selected' : ''}>Piastra di destinazione</option>`]
+            .concat(reagents.map(r => `<option value="${r}" ${cfg.treatment.target === r ? 'selected' : ''}>${r} (sorgente)</option>`))
+            .join('');
+        const fieldsHtml = fields.map(f => {
+            const val = (cfg.treatment.params || {})[f.name];
+            if (f.type === 'bool') {
+                const checked = val !== undefined ? val : (f.default || false);
+                return `
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" ${checked ? 'checked' : ''}
+                               onchange="updateReagentBatchTreatmentField(${sheetIdx}, ${groupIdx}, '${reagent}', '${f.name}', this.checked, 'bool')">
+                        <label class="form-check-label small">${f.label}</label>
+                    </div>`;
+            }
+            return `
+                <div class="d-inline-block me-2 mb-1">
+                    <label class="form-label small mb-0 d-block">${f.label}${f.unit ? ' (' + f.unit + ')' : ''}</label>
+                    <input type="number" class="form-control form-control-sm" style="width: 90px;"
+                           value="${val !== undefined ? val : ''}"
+                           onchange="updateReagentBatchTreatmentField(${sheetIdx}, ${groupIdx}, '${reagent}', '${f.name}', this.value, 'number')">
+                </div>`;
+        }).join('');
+
+        html += `
+            <div class="card bg-dark border-warning mb-2 ms-3">
+                <div class="card-body py-2">
+                    <div class="small text-muted mb-1">Tra un batch e l'altro:</div>
+                    <div class="d-flex gap-2 flex-wrap mb-1">
+                        <select class="form-select form-select-sm" style="width: auto;"
+                                onchange="updateReagentBatchTreatmentKind(${sheetIdx}, ${groupIdx}, '${reagent}', this.value)">
+                            ${kindOptions}
+                        </select>
+                        <select class="form-select form-select-sm" style="width: auto;"
+                                onchange="updateReagentBatchTreatmentTarget(${sheetIdx}, ${groupIdx}, '${reagent}', this.value)">
+                            ${targetOptions}
+                        </select>
+                    </div>
+                    <div>${fieldsHtml}</div>
+                </div>
+            </div>
+        `;
+    }
+    return html;
+}
+
 // Render groups
 function renderGroups(sheetIdx) {
     const container = document.getElementById(`groupsContainer-${sheetIdx}`);
     if (!container) return;
-    
+
     const config = groupConfigs[sheetIdx];
     const sheet = parsedSheets[sheetIdx];
     const allReagents = sheet.summary?.reagents || [];
     const isMultiMode = document.getElementById('modeMultiRecipe').checked;
-    
+
     let html = '';
-    
+
+    html += renderTreatmentsSection(sheetIdx, 'pre', -1, '⏱️ Prima della prima fase');
+
     config.groups.forEach((group, groupIdx) => {
         html += `
             <div class="card bg-secondary mb-2">
@@ -576,7 +967,7 @@ function renderGroups(sheetIdx) {
                         <label class="form-label small text-muted mb-1">Click reagents to assign:</label>
                         <div class="d-flex flex-wrap gap-1">
                             ${allReagents.map(r => `
-                                <span class="badge ${group.columns.includes(r) ? 'bg-primary' : 'bg-dark border border-secondary'}" 
+                                <span class="badge ${group.columns.includes(r) ? 'bg-primary' : 'bg-dark border border-secondary'}"
                                       style="cursor: pointer;"
                                       onclick="toggleReagent(${sheetIdx}, ${groupIdx}, '${r}')">
                                     ${r}
@@ -584,7 +975,19 @@ function renderGroups(sheetIdx) {
                             `).join('')}
                         </div>
                     </div>
-                    
+
+                    ${group.columns.length > 0 ? `
+                        <div class="mb-2">
+                            <a class="small text-muted text-decoration-none" data-bs-toggle="collapse"
+                               href="#batchContainer-${sheetIdx}-${groupIdx}" role="button">
+                                <i class="bi bi-collection"></i> Dividi in batch (opzionale) <i class="bi bi-chevron-down"></i>
+                            </a>
+                            <div class="collapse mt-1" id="batchContainer-${sheetIdx}-${groupIdx}">
+                                ${group.columns.map(r => renderReagentBatchConfig(sheetIdx, groupIdx, r)).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
                     <div class="d-flex align-items-center gap-2 mb-2">
                         <label class="form-label small mb-0 text-nowrap">Strategy:</label>
                         <select class="form-select form-select-sm" style="width: auto;"
@@ -618,8 +1021,11 @@ function renderGroups(sheetIdx) {
                 </div>
             </div>
         `;
+        html += renderTreatmentsSection(sheetIdx, 'group', groupIdx, `⏱️ Dopo "${group.name}"`);
     });
-    
+
+    html += renderTreatmentsSection(sheetIdx, 'post', -1, "⏱️ Dopo l'ultima fase");
+
     container.innerHTML = html || '<div class="text-muted small">No phases. Click "Add Phase" to start.</div>';
 }
 
@@ -749,20 +1155,21 @@ async function generateRecipes() {
     const saveRecipes = document.getElementById('saveRecipes').checked;
     const saveWorkflow = document.getElementById('saveWorkflow')?.checked || false;
     const generateHAL = document.getElementById('generateHAL').checked;
-    const saveHAL = document.getElementById('saveHAL').checked;
-    
+    const saveHAL = generateHAL;  // a generated HAL nobody saves is rarely useful - same behavior as recipes
+
     const outputPanel = document.getElementById('outputPanel');
     outputPanel.innerHTML = '<div class="text-center py-5"><div class="spinner-border"></div><p class="mt-3">Generating...</p></div>';
-    
+
     // Reset state
     generatedRecipes = [];
     generatedWorkflow = null;
     generatedHAL = null;
-    
+
     const errors = [];
     let maxSources = 0;  // Track max sources needed across all recipes
     let targetPlate = 'corning_96_wellplate_360ul_flat';
-    
+    const singleRecipeAndSheet = !isMultiMode && parsedSheets.filter(s => !s.error).length === 1;
+
     for (let i = 0; i < parsedSheets.length; i++) {
         const sheet = parsedSheets[i];
         if (sheet.error) continue;
@@ -777,6 +1184,10 @@ async function generateRecipes() {
         config.plate_columns = plateInfo.columns || 12;
         config.plate_total_wells = plateInfo.total_wells || 96;
         config.plate_row_labels = plateInfo.row_labels || ['A','B','C','D','E','F','G','H'];
+
+        config.reservoir_type = document.getElementById(`reservoirType-${i}`)?.value || Object.keys(RESERVOIR_TYPES)[0] || 'nest_12_reservoir_15ml';
+        const numReservoirsRaw = document.getElementById(`numReservoirs-${i}`)?.value;
+        config.num_reservoirs = numReservoirsRaw ? parseInt(numReservoirsRaw) : null;
         
         // Count total reagents for this sheet (= number of sources needed)
         const totalReagents = config.groups.reduce((sum, g) => sum + g.columns.length, 0);
@@ -804,14 +1215,16 @@ async function generateRecipes() {
                 // Generate multiple recipes (one per phase)
                 await generateMultiRecipes(sheet, config, i, saveRecipes);
             } else {
-                // Generate single recipe with embedded delays
-                await generateSingleRecipe(sheet, config, i, saveRecipes);
+                // Generate single recipe with embedded delays. When it's the only
+                // recipe in this batch, ask for its HAL inline (recipe-aware: knows
+                // about modules/reservoir sharing) instead of the generic fallback below.
+                await generateSingleRecipe(sheet, config, i, saveRecipes, generateHAL && singleRecipeAndSheet);
             }
         } catch (e) {
             errors.push(`${sheet.sheet_name}: ${e.message}`);
         }
     }
-    
+
     // Generate workflow if multi-mode and requested
     if (isMultiMode && generatedRecipes.length > 0 && saveWorkflow) {
         try {
@@ -820,11 +1233,13 @@ async function generateRecipes() {
             errors.push(`Workflow generation: ${e.message}`);
         }
     }
-    
-    // Generate generic HAL if requested (after all recipes to know max sources)
-    if (generateHAL && generatedRecipes.length > 0) {
+
+    // Generic reusable HAL: only needed when there's more than one recipe in this
+    // batch (multi-recipe mode, or multiple Excel sheets) - a single recipe already
+    // got its own recipe-aware HAL above.
+    if (generateHAL && generatedRecipes.length > 0 && !singleRecipeAndSheet) {
         try {
-            await generateGenericHAL(maxSources, targetPlate, saveHAL);
+            await generateGenericHAL(maxSources, targetPlate, groupConfigs[0]?.reservoir_type, saveHAL);
         } catch (e) {
             errors.push(`HAL generation: ${e.message}`);
         }
@@ -832,6 +1247,14 @@ async function generateRecipes() {
     
     // Show results
     showResults(errors);
+}
+
+// Base name for a generated recipe: the sheet name when the workbook has
+// multiple sheets (so recipes stay distinguishable), otherwise the source
+// filename (a single sheet is usually named generically, e.g. "Sheet1").
+function getRecipeBaseName(sheet) {
+    const validSheetCount = parsedSheets.filter(s => !s.error).length;
+    return validSheetCount > 1 ? sheet.sheet_name : (currentFileBaseName || sheet.sheet_name);
 }
 
 // Generate multiple recipes (one per phase)
@@ -851,7 +1274,7 @@ async function generateMultiRecipes(sheet, config, sheetIdx, saveRecipes) {
             reagent_liquid_classes: config.reagent_liquid_classes || {}  // Include liquid classes
         };
         
-        const recipeName = `${sheet.sheet_name}_${group.name}`;
+        const recipeName = `${getRecipeBaseName(sheet)}_${group.name}`;
         
         const resp = await fetch('/api/batch/generate-recipe-with-config', {
             method: 'POST',
@@ -879,10 +1302,13 @@ async function generateMultiRecipes(sheet, config, sheetIdx, saveRecipes) {
     }
 }
 
-// Generate single recipe with embedded delays
-async function generateSingleRecipe(sheet, config, sheetIdx, saveRecipes) {
-    const recipeName = sheet.sheet_name;
-    
+// Generate single recipe with embedded delays. When `generateHalInline` is set
+// (single sheet + single recipe, the common case), ask the backend to build the
+// HAL from THIS recipe directly (generate_hal_config_from_recipe) - it knows the
+// exact modules/reservoir layout used, unlike the generic reusable HAL below.
+async function generateSingleRecipe(sheet, config, sheetIdx, saveRecipes, generateHalInline) {
+    const recipeName = getRecipeBaseName(sheet);
+
     const resp = await fetch('/api/batch/generate-recipe-with-config', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -890,42 +1316,53 @@ async function generateSingleRecipe(sheet, config, sheetIdx, saveRecipes) {
             sheet_data: sheet,
             config: config,  // Full config with all groups and delays
             recipe_name: recipeName,
-            save_to_library: saveRecipes
+            save_to_library: saveRecipes,
+            generate_hal: !!generateHalInline
         })
     });
-    
+
     const result = await resp.json();
-    
+
     if (result.error) {
         throw new Error(result.error);
     }
-    
+
     generatedRecipes.push({
         recipe: result.recipe,
         delay_after: 0,
         saved_file: result.saved_recipe
     });
+
+    if (generateHalInline && result.hal_config) {
+        generatedHAL = result.hal_config;
+        if (result.saved_hal) generatedHAL.saved_file = result.saved_hal;
+    }
 }
 
-// Generate generic HAL configuration (reusable for any recipe)
-async function generateGenericHAL(numSources, targetPlate, saveToLibrary) {
+// Generate generic HAL configuration (reusable across several recipes at once -
+// used for multi-sheet/multi-recipe batches, where no single recipe's module
+// layout applies to all of them). Named after the source file, not "Generic_HAL",
+// so multiple generations stay distinguishable in the library.
+async function generateGenericHAL(numSources, targetPlate, reservoirType, saveToLibrary) {
+    const halName = `${currentFileBaseName || 'Recipe'}_HAL`;
     const resp = await fetch('/api/batch/generate-hal', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-            hal_name: 'Generic_HAL',
+            hal_name: halName,
             num_sources: numSources,
             target_plate: targetPlate,
+            reservoir_type: reservoirType,
             save_to_library: saveToLibrary
         })
     });
-    
+
     const result = await resp.json();
-    
+
     if (result.error) {
         throw new Error(result.error);
     }
-    
+
     generatedHAL = result.hal_config;
 }
 
@@ -1003,6 +1440,14 @@ function showResults(errors) {
                         <i class="bi bi-droplet"></i> ${mappingStr || (metadata.Reagents || []).join(', ')}
                     </div>
                     ${item.saved_file ? `<div class="small text-success"><i class="bi bi-check"></i> ${item.saved_file}</div>` : ''}
+                    ${(metadata.Notes && metadata.Notes.length > 0) ? `
+                        <details class="small mt-1">
+                            <summary class="text-muted"><i class="bi bi-droplet-half"></i> Quantità richieste / note (${metadata.Notes.length})</summary>
+                            <ul class="mb-0 mt-1 ps-3">
+                                ${metadata.Notes.map(n => `<li>${n}</li>`).join('')}
+                            </ul>
+                        </details>
+                    ` : ''}
                 </div>
             `;
         });

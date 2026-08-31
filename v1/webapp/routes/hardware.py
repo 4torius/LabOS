@@ -38,7 +38,7 @@ def create_hardware_router(base_dir: Path, library_dir: Path, lab_core=None) -> 
     def _read_active() -> str:
         """Return active HAL config filename, or empty string if none set."""
         try:
-            return ACTIVE_FILE.read_text(encoding="utf-8").strip()
+            return ACTIVE_FILE.read_text(encoding="utf-8-sig").strip()
         except FileNotFoundError:
             return ""
 
@@ -52,7 +52,7 @@ def create_hardware_router(base_dir: Path, library_dir: Path, lab_core=None) -> 
         path = HAL_DIR / filename
         if not path.exists():
             return {"filename": None, "config": None}
-        return {"filename": filename, "config": json.loads(path.read_text(encoding="utf-8"))}
+        return {"filename": filename, "config": json.loads(path.read_text(encoding="utf-8-sig"))}
 
     @router.put("/api/hardware/active")
     async def set_active_config(request: Request):
@@ -136,7 +136,7 @@ def create_hardware_router(base_dir: Path, library_dir: Path, lab_core=None) -> 
         configs = []
         for f in sorted(HAL_DIR.glob("*.json")):
             try:
-                data = json.loads(f.read_text(encoding="utf-8"))
+                data = json.loads(f.read_text(encoding="utf-8-sig"))
                 configs.append({
                     "filename": f.name,
                     "name": data.get("ConfigName", f.stem),
@@ -161,7 +161,7 @@ def create_hardware_router(base_dir: Path, library_dir: Path, lab_core=None) -> 
             path.resolve().relative_to(HAL_DIR.resolve())
         except ValueError:
             raise HTTPException(403, "Access denied")
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
 
     @router.post("/api/hardware/configs")
     async def save_hal_config(request: Request):
@@ -218,7 +218,7 @@ def create_hardware_router(base_dir: Path, library_dir: Path, lab_core=None) -> 
         if PLATES_DIR.exists():
             for f in sorted(PLATES_DIR.glob("*.plate.json")):
                 try:
-                    d = json.loads(f.read_text(encoding="utf-8"))
+                    d = json.loads(f.read_text(encoding="utf-8-sig"))
                     items.append({
                         "load_name": d.get("load_name", f.stem.replace(".plate", "")),
                         "display_name": d.get("display_name", d.get("load_name", f.stem)),
@@ -238,7 +238,7 @@ def create_hardware_router(base_dir: Path, library_dir: Path, lab_core=None) -> 
                     display = entry.name.replace("_", " ").title()
                     for vf in sorted(entry.glob("*.json")):
                         try:
-                            meta = json.loads(vf.read_text(encoding="utf-8")).get("metadata", {})
+                            meta = json.loads(vf.read_text(encoding="utf-8-sig")).get("metadata", {})
                             display = meta.get("displayName", display)
                             break
                         except Exception:
@@ -257,7 +257,7 @@ def create_hardware_router(base_dir: Path, library_dir: Path, lab_core=None) -> 
         if RESERVOIRS_DIR.exists():
             for f in sorted(RESERVOIRS_DIR.glob("*.json")):
                 try:
-                    d = json.loads(f.read_text(encoding="utf-8"))
+                    d = json.loads(f.read_text(encoding="utf-8-sig"))
                     meta = d.get("metadata", {})
                     wells = d.get("wells", {})
                     load_name = f.stem

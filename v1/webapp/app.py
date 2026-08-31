@@ -4,7 +4,9 @@
 import asyncio
 import json
 import logging
+import os
 import sys
+import tempfile
 import uuid
 import yaml
 from datetime import datetime
@@ -40,7 +42,7 @@ except ImportError:
     _DB_AVAILABLE = False
 
 from webapp.models import DeviceState, AppState
-from src.config_schema import load_lab_config, validate_lab_config
+from src.config_schema import DEFAULT_CONFIG, load_lab_config, validate_lab_config, _deep_merge
 
 logger = logging.getLogger(__name__)
 
@@ -59,17 +61,12 @@ STATIC_DIR.mkdir(parents=True, exist_ok=True)
 (STATIC_DIR / "css").mkdir(exist_ok=True)
 (STATIC_DIR / "js").mkdir(exist_ok=True)
 
-PLATE_TRACKING_FILE = BASE_DIR / "Results" / "plate_tracking.json"
-_plate_tracking_lock = asyncio.Lock()
-
-
 def load_webapp_config() -> dict:
+    # Single source of truth for these defaults is config_schema.DEFAULT_CONFIG —
+    # a local copy here previously drifted out of sync (e.g. discovery_timeout).
     defaults = {
-        "intervention_timeout": 3600,
-        "manual_action_timeout": 300,
-        "tip_refill_timeout": 600,
-        "discovery_timeout": 1.0,
-        "nodered_url": "http://localhost:1880",
+        **DEFAULT_CONFIG["webapp"]["timeouts"],
+        "nodered_url": DEFAULT_CONFIG["webapp"]["nodered_url"],
     }
     try:
         config_path = BASE_DIR / "lab_config.yaml"
@@ -84,24 +81,6 @@ def load_webapp_config() -> dict:
     except Exception as e:
         logger.warning(f"Failed to load webapp config: {e}")
     return defaults
-
-
-def load_plate_tracking() -> dict:
-    try:
-        if PLATE_TRACKING_FILE.exists():
-            return json.loads(PLATE_TRACKING_FILE.read_text(encoding='utf-8'))
-    except Exception as e:
-        logger.warning(f"Failed to load plate tracking: {e}")
-    return {}
-
-
-async def save_plate_tracking(tracking: dict):
-    async with _plate_tracking_lock:
-        try:
-            PLATE_TRACKING_FILE.parent.mkdir(parents=True, exist_ok=True)
-            PLATE_TRACKING_FILE.write_text(json.dumps(tracking, indent=2), encoding='utf-8')
-        except Exception as e:
-            logger.error(f"Failed to save plate tracking: {e}")
 
 
 WEBAPP_CONFIG = load_webapp_config()
@@ -123,11 +102,14 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
+        dead = []
         for conn in list(self.active_connections):
             try:
                 await conn.send_json(message)
             except Exception:
-                pass
+                dead.append(conn)
+        for conn in dead:
+            self.disconnect(conn)
 
 # ==============================================================================
 # Application factory
@@ -144,6 +126,26 @@ def create_app() -> "FastAPI":
         _db.configure(BASE_DIR / "Results" / "labos.db")
         _db.init_db()
 
+    # Holds a strong reference to the fire-and-forget startup discovery task so
+    # asyncio doesn't garbage-collect it mid-execution.
+    _background_tasks: set = set()
+
+    async def _run_startup_discovery():
+        """Populate state.devices via PnP discovery in the background so a slow
+        or unreachable configured server can't delay uvicorn accepting connections."""
+        if not lab_core:
+            return
+        try:
+            instruments = await lab_core.discover(timeout=float(WEBAPP_CONFIG.get("discovery_timeout", 3.0)))
+            for inst in instruments:
+                state.devices[inst.id] = DeviceState(
+                    id=inst.id, name=inst.name, type=inst.type,
+                    status=inst.status, host=inst.host, port=inst.port
+                )
+            state.add_log("info", f"PnP Discovery: found {len(instruments)} instruments")
+        except Exception as e:
+            state.add_log("warning", f"Startup discovery failed: {e}")
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         state.add_log("info", "LabOS WebApp started")
@@ -154,17 +156,9 @@ def create_app() -> "FastAPI":
         except Exception as e:
             state.add_log("error", f"Invalid configuration: {e}", "system")
             raise
-        if lab_core:
-            try:
-                instruments = await lab_core.discover()
-                for inst in instruments:
-                    state.devices[inst.id] = DeviceState(
-                        id=inst.id, name=inst.name, type=inst.type,
-                        status=inst.status, host=inst.host, port=inst.port
-                    )
-                state.add_log("info", f"PnP Discovery: found {len(instruments)} instruments")
-            except Exception as e:
-                state.add_log("warning", f"Startup discovery failed: {e}")
+        discovery_task = asyncio.create_task(_run_startup_discovery())
+        _background_tasks.add(discovery_task)
+        discovery_task.add_done_callback(_background_tasks.discard)
         yield
 
     app = FastAPI(title="LabOS WebApp", description="Integrated Lab Automation Platform", version="2.0.0", lifespan=lifespan)
@@ -276,7 +270,7 @@ def create_app() -> "FastAPI":
         except ValueError:
             raise HTTPException(403, "Access denied")
         try:
-            return {"filename": filename, "format": fmt, "content": file_path.read_text(encoding="utf-8"), "size": file_path.stat().st_size}
+            return {"filename": filename, "format": fmt, "content": file_path.read_text(encoding="utf-8-sig"), "size": file_path.stat().st_size}
         except UnicodeDecodeError:
             return {"filename": filename, "format": fmt, "content": "(Binary file - download to view)", "size": file_path.stat().st_size, "binary": True}
 
@@ -362,8 +356,16 @@ def create_app() -> "FastAPI":
             existing, _ = load_lab_config(config_path, apply_defaults=False, strict=False)
             for section in ['servers', 'system', 'discovery', 'workflow', 'error_handling', 'webapp', 'paths', 'ui_dropdowns']:
                 if section in new_config:
-                    if section in existing and isinstance(existing[section], dict):
-                        existing[section].update(new_config[section])
+                    # Deep merge (not .update()): a partial nested payload — e.g. only
+                    # {"mobile": {"host": "..."}} inside "servers" — must not silently
+                    # drop sibling keys that .update() would leave untouched at the
+                    # top level but that a shallow merge loses one level down.
+                    if (
+                        section in existing
+                        and isinstance(existing[section], dict)
+                        and isinstance(new_config[section], dict)
+                    ):
+                        existing[section] = _deep_merge(existing[section], new_config[section])
                     else:
                         existing[section] = new_config[section]
 
@@ -375,8 +377,19 @@ def create_app() -> "FastAPI":
                     "warnings": validation.warnings,
                 })
 
-            with open(config_path, 'w', encoding='utf-8') as f:
-                yaml.dump(existing, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            # Atomic write: lab_config.yaml is the single source of truth PnP
+            # discovery bootstraps from — a crash mid-write must not corrupt it.
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                dir=str(config_path.parent), prefix=".lab_config_", suffix=".yaml.tmp"
+            )
+            try:
+                with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
+                    yaml.dump(existing, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+                os.replace(tmp_path, config_path)
+            except Exception:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                raise
             return {
                 "status": "ok",
                 "message": "Configuration saved",
@@ -446,21 +459,17 @@ def create_app() -> "FastAPI":
     # Routers (extracted modules)
     # --------------------------------------------------------------------------
 
-    plate_tracking = load_plate_tracking()
-
     from webapp.routes.batch import create_batch_router
-    from webapp.routes.plates import create_plates_router
     from webapp.routes.instruments import create_instruments_router
     from webapp.routes.workflows import create_workflows_router
     from webapp.routes.operator import create_operator_router
     from webapp.routes.hardware import create_hardware_router
     from webapp.routes.db import create_db_router
 
-    app.include_router(create_batch_router(state, LIBRARY_DIR, plate_tracking, save_plate_tracking, _plate_tracking_lock))
-    app.include_router(create_plates_router(state, plate_tracking, save_plate_tracking, _plate_tracking_lock))
-    app.include_router(create_instruments_router(state, ws_manager, lab_core, plate_tracking, save_plate_tracking, _plate_tracking_lock, BASE_DIR, LIBRARY_DIR))
+    app.include_router(create_batch_router(state, LIBRARY_DIR))
+    app.include_router(create_instruments_router(state, ws_manager, lab_core, BASE_DIR, LIBRARY_DIR))
     app.include_router(create_workflows_router(
-        state, ws_manager, lab_core, plate_tracking, save_plate_tracking, _plate_tracking_lock,
+        state, ws_manager, lab_core,
         pending_operator_actions, pending_operator_actions_lock, pending_interventions,
         BASE_DIR, LIBRARY_DIR, WEBAPP_CONFIG
     ))
@@ -638,6 +647,20 @@ app = create_app() if FASTAPI_AVAILABLE else None
 
 def main():
     import argparse
+
+    # When stdout/stderr aren't a real Windows console (redirected to a file,
+    # piped, run as a service), Python falls back to the system ANSI codepage
+    # (cp1252) instead of UTF-8 — the banner's box-drawing characters below
+    # then raise UnicodeEncodeError and crash the process before uvicorn even
+    # starts. reconfigure() makes startup output resilient regardless of how
+    # the process is launched.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
     parser = argparse.ArgumentParser(description="LabOS WebApp")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=5000)
