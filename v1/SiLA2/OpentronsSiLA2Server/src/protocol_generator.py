@@ -99,53 +99,70 @@ class GenerationResult:
 #                    LIQUID CLASS LIBRARY LOADER
 # ═══════════════════════════════════════════════════════════════════════════
 
-def load_liquid_classes_from_library() -> Dict[str, dict]:
+def load_liquid_classes_from_library(library_path: Optional[str] = None) -> Dict[str, dict]:
     """
-    Load liquid class definitions from Library/LiquidClasses/*.json
-    Returns a dict mapping class name to parameters.
+    Load liquid classes from Library/LiquidClasses/ folder.
+
+    Args:
+        library_path: Path to Library folder (auto-detected if None)
+
+    Returns:
+        Dictionary of {name: parameters} for all liquid classes
+
+    Environment:
+        BICOCCALAB_LIBRARY_PATH: Override path to Library folder
     """
     liquid_classes = {}
-    
-    # Find the Library folder (relative to this file or workspace root)
-    possible_paths = [
-        os.path.join(os.path.dirname(__file__), "..", "..", "..", "Library", "LiquidClasses"),
-        os.path.join(os.getcwd(), "Library", "LiquidClasses"),
-        r"C:\Users\PC\Desktop\AutoLAB\v1\Library\LiquidClasses"
-    ]
-    
-    library_path = None
-    for p in possible_paths:
-        if os.path.isdir(p):
-            library_path = p
-            break
-    
-    if not library_path:
-        logger.warning("LiquidClasses library folder not found, using defaults")
+
+    # Priority 1: Environment variable
+    env_library = os.environ.get("BICOCCALAB_LIBRARY_PATH")
+    if env_library:
+        library_path = os.path.join(env_library, "LiquidClasses")
+
+    # Priority 2: Auto-detect from relative paths
+    if library_path is None:
+        # Try relative paths from common locations
+        candidates = [
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "Library", "LiquidClasses"),
+            os.path.join(os.getcwd(), "Library", "LiquidClasses"),
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "Library", "LiquidClasses"),
+        ]
+        for candidate in candidates:
+            candidate = os.path.abspath(candidate)
+            if os.path.isdir(candidate):
+                library_path = candidate
+                break
+
+    if not library_path or not os.path.isdir(library_path):
+        logger.warning(f"LiquidClasses library not found, using defaults only")
         return liquid_classes
-    
-    # Load all JSON files (except schema)
+
+    # Load all .json files (except schema)
     for filename in os.listdir(library_path):
         if filename.endswith('.json') and not filename.endswith('.schema.json'):
             filepath = os.path.join(library_path, filename)
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                
-                name = data.get('name', filename.replace('.json', ''))
-                params = data.get('parameters', {})
-                
-                # Also store loadName for native Opentrons API
-                if 'loadName' in data:
-                    params['_loadName'] = data['loadName']
-                if 'description' in data:
-                    params['description'] = data['description']
-                
+                    lc_data = json.load(f)
+
+                name = lc_data.get("name", filename.replace(".json", ""))
+                params = lc_data.get("parameters", {})
+
+                # Add loadName if present
+                if "loadName" in lc_data:
+                    params["load_name"] = lc_data["loadName"]
+
+                # Add description if present
+                if "description" in lc_data:
+                    params["description"] = lc_data["description"]
+
                 liquid_classes[name] = params
-                logger.debug(f"Loaded liquid class: {name}")
-                
+                logger.debug(f"Loaded liquid class: {name} from {filename}")
+
             except Exception as e:
-                logger.warning(f"Failed to load liquid class {filename}: {e}")
-    
+                logger.warning(f"Failed to load liquid class from {filename}: {e}")
+
+    logger.info(f"Loaded {len(liquid_classes)} liquid classes from library")
     return liquid_classes
 
 # Load liquid classes from Library at module import time
@@ -170,6 +187,7 @@ COMMAND_SCHEMA = {
     "ConsumeTips": {"required": ["PipetteMount"], "optional": ["Quantity", "TrashLocation"]},
     "VerifyTipPresence": {"required": ["PipetteMount"], "optional": ["ExpectedState"]},
     "GetTipPresence": {"required": ["PipetteMount"], "optional": []},
+    "DropTipIfPresent": {"required": ["PipetteMount"], "optional": ["TrashLocation"]},
     "GetNextTip": {"required": ["PipetteMount"], "optional": ["TipRack", "StartingTip"]},
     
     # ═══════════════════════════════════════════════════════════════════════
@@ -177,7 +195,7 @@ COMMAND_SCHEMA = {
     # ═══════════════════════════════════════════════════════════════════════
     # Location can be specified as "Location", "Labware", or "Labware:Well"
     # LiquidClass: Aqueous (default), Viscous, Volatile, HighlyViscous, Foaming
-    "Aspirate": {"required": ["PipetteMount", "Volume"], "optional": ["Location", "Labware", "Rate", "LiquidClass", "DelayAfter"], "location_fields": ["Location", "Labware"]},
+    "Aspirate": {"required": ["PipetteMount", "Volume"], "optional": ["Location", "Labware", "Rate", "LiquidClass", "DelayAfter", "VerifyLiquid"], "location_fields": ["Location", "Labware"]},
     "AspirateInPlace": {"required": ["PipetteMount", "Volume"], "optional": ["Rate", "LiquidClass"]},
     "Dispense": {"required": ["PipetteMount", "Volume"], "optional": ["Location", "Labware", "Rate", "PushOut", "LiquidClass", "DelayAfter"], "location_fields": ["Location", "Labware"]},
     "DispenseInPlace": {"required": ["PipetteMount", "Volume"], "optional": ["Rate", "PushOut", "LiquidClass"]},
@@ -398,6 +416,16 @@ def run(ctx: protocol_api.ProtocolContext):
         for i, c in settings["Trash"].items():
             if c["Type"]=="WasteChute": objects["Trash"][i]=ctx.load_waste_chute()
             elif c["Type"]=="TrashBin": objects["Trash"][i]=ctx.load_trash_bin(c["Slot"])
+        # Steps throughout this file default an unspecified TrashLocation to
+        # the literal string "default" (see every `step.get("TrashLocation",
+        # "default")` below) - but a recipe's trash is keyed by its logical
+        # Requirements name (e.g. "MyTrash"), not "default". Without this
+        # alias, get_loc("default") falls through to returning the raw
+        # string "default" instead of a real location, and e.g.
+        # pip.drop_tip("default") fails silently under Force=True (confirmed
+        # on hardware: "Force Drop ignored: ...it is default").
+        if "default" not in objects["Trash"] and objects["Trash"]:
+            objects["Trash"]["default"] = next(iter(objects["Trash"].values()))
     else:
         try: objects["Trash"]["default"] = ctx.load_trash_bin("A3")
         except: pass
@@ -595,7 +623,29 @@ def run(ctx: protocol_api.ProtocolContext):
             pip = get_pip(step["PipetteMount"])
             loc = get_loc(step["Location"])
             vol = step["Volume"]
-            
+
+            # Scoped to explicit manual Aspirate only - Distribute/Transfer/
+            # Consolidate are black-box Opentrons calls with no hook between
+            # their internal aspirate/dispense pairs, so they can't be covered
+            # the same way (see COMMAND_SCHEMA note / Fase 5 plan).
+            #
+            # detect_liquid_presence() returns a bool and explicitly does NOT
+            # raise when no liquid is found (official docs: "Will not raise
+            # an error if it does not detect liquid") - it's the return value
+            # that must be checked, not an exception. Only channels 1 and
+            # 8/96 have the pressure sensor on multi-channel pipettes; this
+            # server only drives single-channel pipettes today so that's not
+            # a live concern, but it's why this can't be assumed to work if a
+            # multi-channel pipette is ever added.
+            if step.get("VerifyLiquid"):
+                liquid_present = pip.detect_liquid_presence(loc)
+                if not liquid_present:
+                    raise RuntimeError(
+                        f"VerifyLiquid: no liquid detected at {step['Location']} "
+                        f"before Aspirate - aborting"
+                    )
+                ctx.comment(f"VerifyLiquid: liquid confirmed at {step['Location']}")
+
             # Apply LiquidClass preset if specified
             lc_name = step.get("LiquidClass")
             lc_params = LIQUID_CLASS_PRESETS.get(lc_name, {}) if lc_name else {}
@@ -683,7 +733,22 @@ def run(ctx: protocol_api.ProtocolContext):
             if hasattr(target_to_check, 'open_labware_latch'):
                 ctx.comment(f"Auto-Opening Latch on {target_to_check}")
                 target_to_check.open_labware_latch()
-            ctx.move_labware(l, n, use_gripper=step.get("UseGripper", True))
+
+            move_kwargs = {"use_gripper": step.get("UseGripper", True)}
+            pick_up_offset = step.get("PickUpOffset")
+            drop_offset = step.get("DropOffset")
+            if pick_up_offset or drop_offset:
+                # Additive on top of the labware definition's own
+                # gripperOffsets.default - calibrated per labware type on the
+                # physical robot, not guessed. See COMMAND_SCHEMA: both are
+                # {"x":.., "y":.., "z":..} dicts in mm.
+                from opentrons.types import Point
+                if pick_up_offset:
+                    move_kwargs["pick_up_offset"] = Point(**pick_up_offset)
+                if drop_offset:
+                    move_kwargs["drop_offset"] = Point(**drop_offset)
+
+            ctx.move_labware(l, n, **move_kwargs)
 
         elif cmd == "MoveToWell":
             pip = get_pip(step["PipetteMount"])
@@ -1129,13 +1194,18 @@ def run(ctx: protocol_api.ProtocolContext):
         # ═══════════════════════════════════════════════════════════════════
 
         elif cmd == "VerifyTipPresence":
+            # detect_tip_presence() returns a TipPresenceStatus-like enum, but
+            # its import path shifts across opentrons versions (confirmed
+            # broken on the robot's installed version: `TipPresenceStatus` is
+            # not exported from `opentrons.protocol_api` there). Compare on
+            # the string value instead of importing the enum type.
             pip = get_pip(step["PipetteMount"])
             expected = step.get("ExpectedState", "present")
-            from opentrons.protocol_api import TipPresenceStatus
             status = pip.detect_tip_presence()
-            if expected == "present" and status != TipPresenceStatus.PRESENT:
+            status_str = str(getattr(status, "value", status)).lower()
+            if expected == "present" and "present" not in status_str:
                 raise RuntimeError(f"Expected tip present but got: {status}")
-            elif expected == "absent" and status != TipPresenceStatus.ABSENT:
+            elif expected == "absent" and "absent" not in status_str:
                 raise RuntimeError(f"Expected tip absent but got: {status}")
             ctx.comment(f"Tip presence verified: {status}")
 
@@ -1143,6 +1213,25 @@ def run(ctx: protocol_api.ProtocolContext):
             pip = get_pip(step["PipetteMount"])
             status = pip.detect_tip_presence()
             ctx.comment(f"Tip presence: {status}")
+
+        elif cmd == "DropTipIfPresent":
+            # Non-raising leftover-tip guard: checks the physical sensor
+            # (not pip.has_tip, which is a fresh, uninformed software flag at
+            # the start of every new run) and drops only if something is
+            # actually there. Meant to run as the first step(s) of a real
+            # recipe, not as a separate protocol.
+            pip = get_pip(step["PipetteMount"])
+            loc = get_loc(step.get("TrashLocation", "default"))
+            status = pip.detect_tip_presence()
+            status_str = str(getattr(status, "value", status)).lower()
+            if "present" in status_str:
+                ctx.comment(f"Leftover tip detected on {step['PipetteMount']} - dropping before run")
+                try:
+                    pip.drop_tip(loc, home_after=True)
+                except Exception as e:
+                    ctx.comment(f"Leftover tip drop failed: {e}")
+            else:
+                ctx.comment(f"No leftover tip on {step['PipetteMount']}")
 
         elif cmd == "GetNextTip":
             pip = get_pip(step["PipetteMount"])
@@ -1697,77 +1786,6 @@ class ProtocolSimulator:
         ))
         
         return errors
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-#                    LIQUID CLASS LIBRARY LOADER
-# ═══════════════════════════════════════════════════════════════════════════
-
-def load_liquid_classes_from_library(library_path: Optional[str] = None) -> dict:
-    """
-    Load liquid classes from Library/LiquidClasses/ folder.
-    
-    Args:
-        library_path: Path to Library folder (auto-detected if None)
-        
-    Returns:
-        Dictionary of {name: parameters} for all liquid classes
-        
-    Environment:
-        BICOCCALAB_LIBRARY_PATH: Override path to Library folder
-    """
-    liquid_classes = {}
-    
-    # Priority 1: Environment variable
-    env_library = os.environ.get("BICOCCALAB_LIBRARY_PATH")
-    if env_library:
-        library_path = os.path.join(env_library, "LiquidClasses")
-    
-    # Priority 2: Auto-detect from relative paths
-    if library_path is None:
-        # Try relative paths from common locations
-        candidates = [
-            os.path.join(os.path.dirname(__file__), "..", "..", "..", "Library", "LiquidClasses"),
-            os.path.join(os.getcwd(), "Library", "LiquidClasses"),
-            os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "Library", "LiquidClasses"),
-        ]
-        for candidate in candidates:
-            candidate = os.path.abspath(candidate)
-            if os.path.isdir(candidate):
-                library_path = candidate
-                break
-    
-    if not library_path or not os.path.isdir(library_path):
-        logger.warning(f"LiquidClasses library not found, using defaults only")
-        return liquid_classes
-    
-    # Load all .json files (except schema)
-    for filename in os.listdir(library_path):
-        if filename.endswith('.json') and not filename.endswith('.schema.json'):
-            filepath = os.path.join(library_path, filename)
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    lc_data = json.load(f)
-                
-                name = lc_data.get("name", filename.replace(".json", ""))
-                params = lc_data.get("parameters", {})
-                
-                # Add loadName if present
-                if "loadName" in lc_data:
-                    params["load_name"] = lc_data["loadName"]
-                
-                # Add description if present
-                if "description" in lc_data:
-                    params["description"] = lc_data["description"]
-                
-                liquid_classes[name] = params
-                logger.debug(f"Loaded liquid class: {name} from {filename}")
-                
-            except Exception as e:
-                logger.warning(f"Failed to load liquid class from {filename}: {e}")
-    
-    logger.info(f"Loaded {len(liquid_classes)} liquid classes from library")
-    return liquid_classes
 
 
 class ProtocolGenerator:

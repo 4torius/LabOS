@@ -72,18 +72,27 @@ class RobotClient:
     # ═══════════════════════════════════════════════════════════════════
         
     async def connect(self):
-        """Initialize the HTTP client."""
+        """Initialize the HTTP client and verify the robot responds."""
         transport = None
         if self.local_address:
             transport = httpx.AsyncHTTPTransport(local_address=self.local_address)
-        
+
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=self.timeout,
             headers={"Opentrons-Version": "*"},
             transport=transport
         )
-        
+
+        # Verify the robot actually responds before declaring success
+        try:
+            response = await self._client.get("/health")
+            response.raise_for_status()
+        except Exception as exc:
+            await self._client.aclose()
+            self._client = None
+            raise ConnectionError(f"Robot at {self.base_url} did not respond: {exc}") from exc
+
         addr_info = f" via {self.local_address}" if self.local_address else ""
         logger.info(f"Connected to Opentrons at {self.base_url}{addr_info}")
         
@@ -98,6 +107,14 @@ class RobotClient:
     def is_connected(self) -> bool:
         """Check if client is connected."""
         return self._client is not None
+
+    def _require_connected(self) -> None:
+        """Raise a clear error if the robot HTTP client is not initialized."""
+        if self._client is None:
+            raise ConnectionError(
+                f"Not connected to Opentrons robot at {self.base_url}. "
+                "The robot may be off or unreachable."
+            )
     
     async def connect_with_retry(
         self, 
@@ -140,6 +157,7 @@ class RobotClient:
     
     async def get_health(self) -> Dict[str, Any]:
         """Get robot health status."""
+        self._require_connected()
         try:
             response = await self._client.get("/health")
             response.raise_for_status()
@@ -150,6 +168,7 @@ class RobotClient:
             
     async def get_robot_info(self) -> Dict[str, Any]:
         """Get robot information (name, serial, version)."""
+        self._require_connected()
         try:
             response = await self._client.get("/robot/settings")
             response.raise_for_status()
@@ -200,6 +219,7 @@ class RobotClient:
         Returns:
             Protocol ID
         """
+        self._require_connected()
         files = {"files": (filename, content.encode('utf-8'), "application/x-python")}
         response = await self._client.post("/protocols", files=files)
         
@@ -302,10 +322,14 @@ class RobotClient:
         
     async def _send_action(self, run_id: str, action: str):
         """Send an action to a run."""
+        self._require_connected()
         payload = {"data": {"actionType": action}}
         response = await self._client.post(f"/runs/{run_id}/actions", json=payload)
         if not response.is_success:
-            logger.warning(f"Action {action} failed: {response.status_code}")
+            # Must raise, not just log: callers (play_run/pause_run/stop_run)
+            # otherwise report success unconditionally right after calling this,
+            # even when the robot actually rejected the action.
+            raise RuntimeError(f"Action '{action}' rejected by robot API ({response.status_code}): {response.text}")
             
     # ═══════════════════════════════════════════════════════════════════
     #                          RUN STATUS
@@ -313,6 +337,7 @@ class RobotClient:
     
     async def get_run_status(self, run_id: str) -> str:
         """Get the current status of a run."""
+        self._require_connected()
         try:
             response = await self._client.get(f"/runs/{run_id}")
             if not response.is_success:
@@ -324,7 +349,17 @@ class RobotClient:
             return "connection-error"
             
     async def get_run_commands(self, run_id: str) -> Optional[Dict[str, Any]]:
-        """Get the commands log for a run."""
+        """
+        Get the commands log for a run.
+
+        NOTE: this is the /runs/{id}/commands *list* endpoint, which on this
+        robot's API does not populate each command's "result" field (e.g. a
+        loadPipette command here never carries the pipetteId it produced) -
+        only "params" and "status". Anything needing a command's result
+        (e.g. resolving which pipetteId maps to which mount) must come from
+        get_run_detail() instead, not from here.
+        """
+        self._require_connected()
         try:
             response = await self._client.get(
                 f"/runs/{run_id}/commands",
@@ -335,45 +370,76 @@ class RobotClient:
         except Exception as e:
             logger.error(f"Failed to get run commands: {e}")
         return None
+
+    async def get_run_detail(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get full run detail: status, pipettes (id -> mount/name), labware,
+        errors, etc. Unlike get_run_commands(), this DOES include the
+        pipetteId -> mount mapping (under data.pipettes), needed to resolve
+        which mount a pickUpTip/dropTip command in the command log belongs to.
+        """
+        self._require_connected()
+        try:
+            response = await self._client.get(f"/runs/{run_id}")
+            if response.is_success:
+                return response.json()
+        except Exception as e:
+            logger.error(f"Failed to get run detail: {e}")
+        return None
         
     async def wait_for_run_completion(
-        self, 
-        run_id: str, 
+        self,
+        run_id: str,
         poll_interval: float = 1.0,
-        on_status_change: Optional[Callable] = None
+        on_status_change: Optional[Callable] = None,
+        timeout: Optional[float] = 7200.0
     ) -> str:
         """
         Wait for a run to complete.
-        
+
         Args:
             run_id: Run ID to monitor
             poll_interval: Polling interval in seconds
             on_status_change: Optional callback for status changes
-            
+            timeout: Max seconds to wait before giving up. None disables the
+                bound (not recommended: a run that never reaches a terminal
+                state would otherwise poll forever and hold any caller-side lock).
+
         Returns:
             Final status string
+
+        Raises:
+            TimeoutError: If the run doesn't reach a terminal state within `timeout`.
         """
         last_status = ""
         terminal_states = {"succeeded", "failed", "stopped"}
-        
+        loop = asyncio.get_event_loop()
+        deadline = None if timeout is None else loop.time() + timeout
+
         while True:
             status = await self.get_run_status(run_id)
-            
+
             if status != last_status:
                 logger.info(f"Run status: {status}")
                 if on_status_change:
                     await on_status_change(status)
                 last_status = status
-                
+
             # Check for terminal state
             if status in terminal_states or "failed" in status or "stopped" in status:
                 return status
-                
+
+            if deadline is not None and loop.time() >= deadline:
+                raise TimeoutError(
+                    f"Run {run_id} did not reach a terminal state within {timeout}s "
+                    f"(last known status: {status!r})"
+                )
+
             # Handle "finishing" state
             if status == "finishing":
                 await asyncio.sleep(2.0)
                 continue
-                
+
             await asyncio.sleep(poll_interval)
             
     # ═══════════════════════════════════════════════════════════════════
@@ -382,26 +448,23 @@ class RobotClient:
     
     async def home(self):
         """Home all robot axes."""
-        try:
-            response = await self._client.post("/robot/home", json={"target": "robot"})
-            if response.is_success:
-                logger.info("Robot homed")
-            else:
-                logger.warning(f"Home failed: {response.status_code}")
-        except Exception as e:
-            logger.error(f"Home error: {e}")
+        self._require_connected()
+        response = await self._client.post("/robot/home", json={"target": "robot"})
+        if not response.is_success:
+            raise RuntimeError(f"Home failed: {response.status_code} - {response.text}")
+        logger.info("Robot homed")
             
     async def set_lights(self, on: bool) -> bool:
         """Turn robot lights on or off."""
-        try:
-            response = await self._client.post("/robot/lights", json={"on": on})
-            return response.is_success
-        except Exception as e:
-            logger.warning(f"Failed to set lights: {e}")
-            return False
+        self._require_connected()
+        response = await self._client.post("/robot/lights", json={"on": on})
+        if not response.is_success:
+            raise RuntimeError(f"SetLights failed: {response.status_code} - {response.text}")
+        return True
     
     async def get_lights(self) -> Optional[bool]:
         """Get robot lights status."""
+        self._require_connected()
         try:
             response = await self._client.get("/robot/lights")
             if response.is_success:
@@ -417,6 +480,7 @@ class RobotClient:
     
     async def get_modules(self) -> List[Dict[str, Any]]:
         """Get list of attached modules."""
+        self._require_connected()
         try:
             response = await self._client.get("/modules")
             if response.is_success:
@@ -442,12 +506,13 @@ class RobotClient:
         Returns:
             Number of images extracted
         """
+        self._require_connected()
         os.makedirs(output_dir, exist_ok=True)
-        
+
         try:
             data = await self.get_run_commands(run_id)
             commands = data.get("data", []) if data else []
-            
+
             capturing = False
             filename = "image.jpg"
             image_data = []
@@ -503,6 +568,7 @@ class RobotClient:
         Returns:
             Dict mapping rack load names to tip counts used
         """
+        self._require_connected()
         try:
             data = await self.get_run_commands(run_id)
             commands = data.get("data", []) if data else []

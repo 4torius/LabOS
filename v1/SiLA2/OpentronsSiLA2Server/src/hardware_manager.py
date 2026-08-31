@@ -40,15 +40,56 @@ class HardwareManager:
         self._config: Dict[str, Any] = {}
         self._config_folder = config_folder
         self._current_config_file: Optional[str] = None
-        
-        if config_path and os.path.exists(config_path):
-            self._load_config(config_path)
+
+        # The .active marker (written by switch_config()/switch_hardware_config,
+        # and by the webapp's HAL selector) records whichever config was last
+        # explicitly chosen as active - it takes priority over the caller's
+        # config_path so that a config switch survives a server restart
+        # instead of silently reverting to config.yaml's static default.
+        resolved_path = config_path
+        if config_folder:
+            active = self._read_active_marker()
+            if active:
+                active_path = os.path.join(config_folder, active)
+                if os.path.exists(active_path):
+                    resolved_path = active_path
+                    logger.info(f"Loading HAL config from .active marker: {active}")
+                else:
+                    logger.warning(f".active marker points to missing config '{active}' - ignoring")
+
+        if resolved_path and os.path.exists(resolved_path):
+            self._load_config(resolved_path)
         elif config_folder:
-            self._config_folder = config_folder
             configs = self.list_available_configs()
             if configs:
                 self._load_config(os.path.join(config_folder, configs[0]))
-                
+
+    def _active_marker_path(self) -> Optional[str]:
+        if not self._config_folder:
+            return None
+        return os.path.join(self._config_folder, ".active")
+
+    def _read_active_marker(self) -> Optional[str]:
+        path = self._active_marker_path()
+        if not path or not os.path.exists(path):
+            return None
+        try:
+            with open(path, 'r', encoding='utf-8-sig') as f:
+                return f.read().strip() or None
+        except Exception as e:
+            logger.warning(f"Failed to read HAL .active marker: {e}")
+            return None
+
+    def _write_active_marker(self, config_filename: str):
+        path = self._active_marker_path()
+        if not path:
+            return
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(config_filename)
+        except Exception as e:
+            logger.warning(f"Failed to write HAL .active marker: {e}")
+
     def _load_config(self, config_path: str):
         """Load a hardware configuration file."""
         if not os.path.exists(config_path):
@@ -92,6 +133,7 @@ class HardwareManager:
             
         try:
             self._load_config(config_path)
+            self._write_active_marker(config_name)
             return True
         except Exception as e:
             logger.error(f"Failed to switch config: {e}")

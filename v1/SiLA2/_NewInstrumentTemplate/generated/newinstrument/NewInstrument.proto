@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+import "SiLAFramework.proto";
+
+package sila2.org.silastandard.instruments.newinstrument.v1;
+
+/* Template feature for new instruments. Replace this description with your instrument's purpose. */
+service NewInstrument {
+  /* Initialize the instrument and establish connection */
+  rpc Initialize (sila2.org.silastandard.instruments.newinstrument.v1.Initialize_Parameters) returns (sila2.org.silastandard.instruments.newinstrument.v1.Initialize_Responses) {}
+  /* Set an instrument parameter */
+  rpc SetParameter (sila2.org.silastandard.instruments.newinstrument.v1.SetParameter_Parameters) returns (sila2.org.silastandard.instruments.newinstrument.v1.SetParameter_Responses) {}
+  /* Execute a long-running operation with progress updates */
+  rpc RunOperation (sila2.org.silastandard.instruments.newinstrument.v1.RunOperation_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
+  /* Monitor the state of RunOperation */
+  rpc RunOperation_Info (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.ExecutionInfo) {}
+  /* Retrieve intermediate responses of RunOperation */
+  rpc RunOperation_Intermediate (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.instruments.newinstrument.v1.RunOperation_IntermediateResponses) {}
+  /* Retrieve result of RunOperation */
+  rpc RunOperation_Result(sila2.org.silastandard.CommandExecutionUUID) returns (sila2.org.silastandard.instruments.newinstrument.v1.RunOperation_Responses) {}
+  /* Get current instrument status */
+  rpc GetStatus (sila2.org.silastandard.instruments.newinstrument.v1.GetStatus_Parameters) returns (sila2.org.silastandard.instruments.newinstrument.v1.GetStatus_Responses) {}
+  /* Emergency stop - halt all operations */
+  rpc Stop (sila2.org.silastandard.instruments.newinstrument.v1.Stop_Parameters) returns (sila2.org.silastandard.instruments.newinstrument.v1.Stop_Responses) {}
+  /* The name/model of this instrument */
+  rpc Get_InstrumentName (sila2.org.silastandard.instruments.newinstrument.v1.Get_InstrumentName_Parameters) returns (sila2.org.silastandard.instruments.newinstrument.v1.Get_InstrumentName_Responses) {}
+  /* Whether the instrument is connected and ready */
+  rpc Subscribe_IsConnected (sila2.org.silastandard.instruments.newinstrument.v1.Subscribe_IsConnected_Parameters) returns (stream sila2.org.silastandard.instruments.newinstrument.v1.Subscribe_IsConnected_Responses) {}
+}
+
+/* Parameters for Initialize */
+message Initialize_Parameters {
+}
+
+/* Responses of Initialize */
+message Initialize_Responses {
+  sila2.org.silastandard.Boolean Success = 1;  /* Whether initialization was successful */
+}
+
+/* Parameters for SetParameter */
+message SetParameter_Parameters {
+  sila2.org.silastandard.String ParameterName = 1;  /* Name of the parameter to set */
+  sila2.org.silastandard.String Value = 2;  /* New value for the parameter */
+}
+
+/* Responses of SetParameter */
+message SetParameter_Responses {
+  sila2.org.silastandard.String PreviousValue = 1;  /* The previous value before change */
+}
+
+/* Parameters for RunOperation */
+message RunOperation_Parameters {
+  sila2.org.silastandard.Integer Duration = 1;  /* How long to run the operation */
+}
+
+/* Responses of RunOperation */
+message RunOperation_Responses {
+  sila2.org.silastandard.String Result = 1;  /* Operation result data */
+}
+
+/* Intermediate responses of RunOperation */
+message RunOperation_IntermediateResponses {
+  sila2.org.silastandard.Integer Progress = 1;  /* Current progress percentage (0-100) */
+}
+
+/* Parameters for GetStatus */
+message GetStatus_Parameters {
+}
+
+/* Responses of GetStatus */
+message GetStatus_Responses {
+  sila2.org.silastandard.String Status = 1;  /* Current status (idle, running, error, etc.) */
+}
+
+/* Parameters for Stop */
+message Stop_Parameters {
+}
+
+/* Responses of Stop */
+message Stop_Responses {
+  sila2.org.silastandard.Boolean Stopped = 1;  /* Whether stop was successful */
+}
+
+/* Parameters for InstrumentName */
+message Get_InstrumentName_Parameters {
+}
+
+/* Responses of InstrumentName */
+message Get_InstrumentName_Responses {
+  sila2.org.silastandard.String InstrumentName = 1;  /* The name/model of this instrument */
+}
+
+/* Parameters for IsConnected */
+message Subscribe_IsConnected_Parameters {
+}
+
+/* Responses of IsConnected */
+message Subscribe_IsConnected_Responses {
+  sila2.org.silastandard.Boolean IsConnected = 1;  /* Whether the instrument is connected and ready */
+}

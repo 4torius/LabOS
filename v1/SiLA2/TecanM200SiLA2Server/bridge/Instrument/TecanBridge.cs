@@ -40,6 +40,7 @@ namespace TecanSiLA2Server.Instrument
         private readonly ServerConfiguration _config;
         private MeasurementServer? _server;
         private bool _isConnected;
+        private bool _isConnecting;
         private readonly object _lock = new();
         private string _currentStatus = "Disconnected";
         private string _lastMessage = "Not connected";
@@ -136,13 +137,37 @@ namespace TecanSiLA2Server.Instrument
 
         public bool Connect(string connectionString = "")
         {
+            // The lock is only held for this initial check-and-set, NOT across
+            // the STA thread's Join below. ConnectInternal/UpdateStatus (running
+            // on the STA thread) need the same _lock to report status — holding
+            // it here for the whole Join would deadlock that thread until the
+            // timeout expired, making every Connect() call (even successful
+            // ones) block for the full configured timeout instead of returning
+            // as soon as the instrument responds. _isConnecting takes over the
+            // job of preventing two concurrent Connect() calls.
             lock (_lock)
             {
-                if (_isConnected)
+                if (_isConnecting)
                 {
-                    _logger.LogWarning("Already connected");
-                    return true;
+                    _logger.LogWarning("Connection already in progress");
+                    return false;
                 }
+                _isConnecting = true;
+            }
+
+            try
+            {
+                // _isConnected only reflects our own last successful ConnectInternal()
+                // (or an explicit Disconnect()) — nothing else ever revalidates it
+                // against the real COM/hardware state in between. If the instrument
+                // drops off silently (USB unplugged, power-cycled, driver crash),
+                // the flag stays stuck on true and this method would previously
+                // short-circuit "already connected" without ever touching the SDK
+                // again. Always disconnect first so every Connect() genuinely
+                // re-validates against the instrument instead of trusting the flag.
+                // Disconnect() re-enters _lock, which is safe: C# lock/Monitor is
+                // reentrant for the owning thread.
+                Disconnect();
 
                 // L'SDK Tecan richiede un thread STA per la comunicazione COM
                 // Eseguiamo la connessione in un thread STA dedicato
@@ -161,7 +186,7 @@ namespace TecanSiLA2Server.Instrument
                 });
                 staThread.SetApartmentState(ApartmentState.STA);
                 staThread.Start();
-                
+
                 // Timeout più lungo per permettere la selezione dello strumento via GUI
                 int timeoutSeconds = _config.ConnectionTimeoutSeconds > 0 ? _config.ConnectionTimeoutSeconds : 60;
                 staThread.Join(TimeSpan.FromSeconds(timeoutSeconds));
@@ -174,7 +199,11 @@ namespace TecanSiLA2Server.Instrument
                 }
 
                 // Usa _isConnected invece di una variabile locale - è settato da ConnectInternal
-                return _isConnected;
+                return IsConnected;
+            }
+            finally
+            {
+                lock (_lock) { _isConnecting = false; }
             }
         }
 
@@ -448,6 +477,13 @@ namespace TecanSiLA2Server.Instrument
                     result.ErrorMessage = "Instrument is busy";
                     return result;
                 }
+                // Set Busy atomically with the check above — otherwise two
+                // concurrent RunMeasurementAsync calls could both pass this
+                // check before either sets status to Busy (UpdateStatus only
+                // runs later, on the STA thread), starting two measurement
+                // threads against the same physical instrument at once.
+                _currentStatus = "Busy";
+                _lastMessage = "Starting measurement...";
             }
 
             // Resolve protocol path - try multiple variations
@@ -488,7 +524,7 @@ namespace TecanSiLA2Server.Instrument
             string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             string cleanPlateId = string.IsNullOrEmpty(plateId) ? "Unknown" : 
                 plateId.Replace(" ", "_").Replace("/", "-");
-            string baseName = cleanPlateId;
+            string baseName = $"{cleanPlateId}_{timestamp}";
 
             result.XmlFilePath = Path.Combine(_resultsPath, "XML", $"{baseName}.xml");
             result.CsvFilePath = Path.Combine(_resultsPath, "CSV", $"{baseName}.csv");

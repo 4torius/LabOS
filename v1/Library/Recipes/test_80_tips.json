@@ -886,12 +886,6 @@
       "Command": "DropTip",
       "PipetteMount": "left",
       "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "G9",
-      "TipRack": "MyTips"
     }
   ]
 }

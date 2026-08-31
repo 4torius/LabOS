@@ -47,71 +47,71 @@
   <!-- Tecan SDK References - dalla cartella lib locale -->
   <ItemGroup>
     <Reference Include="Tecan.At.Common">
-      <HintPath>lib\Tecan.At.Common.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.Common.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Tecan.At.Common.DocumentManagement">
-      <HintPath>lib\Tecan.At.Common.DocumentManagement.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.Common.DocumentManagement.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Tecan.At.Common.DocumentManagement.Reader">
-      <HintPath>lib\Tecan.At.Common.DocumentManagement.Reader.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.Common.DocumentManagement.Reader.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Tecan.At.Common.FileManagement">
-      <HintPath>lib\Tecan.At.Common.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.Common.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Tecan.At.Common.Results">
-      <HintPath>lib\Tecan.At.Common.Results.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.Common.Results.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Tecan.At.Instrument.Common">
-      <HintPath>lib\Tecan.At.Instrument.Common.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.Instrument.Common.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Tecan.At.Instrument.Common.Reader">
-      <HintPath>lib\Tecan.At.Instrument.Common.Reader.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.Instrument.Common.Reader.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Tecan.At.Measurement.Server">
-      <HintPath>lib\Tecan.At.Measurement.Server.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.Measurement.Server.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Tecan.At.Measurement.Common">
-      <HintPath>lib\Tecan.At.Measurement.Common.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.Measurement.Common.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Tecan.At.Communication.Server">
-      <HintPath>lib\Tecan.At.Communication.Server.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.Communication.Server.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Tecan.At.Instrument.Server">
-      <HintPath>lib\Tecan.At.Instrument.Server.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.Instrument.Server.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Tecan.At.XFluor.Connect.Reader">
-      <HintPath>lib\Tecan.At.XFluor.Connect.Reader.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.XFluor.Connect.Reader.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Tecan.At.XFluor.Core">
-      <HintPath>lib\Tecan.At.XFluor.Core.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.XFluor.Core.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Tecan.At.XFluor.ExcelOutput">
-      <HintPath>lib\Tecan.At.XFluor.ExcelOutput.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.XFluor.ExcelOutput.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Tecan.At.XFluor.Device">
-      <HintPath>lib\Tecan.At.XFluor.Device.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.XFluor.Device.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Tecan.At.XFluor.Device.Reader">
-      <HintPath>lib\Tecan.At.XFluor.Device.Reader.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\Tecan.At.XFluor.Device.Reader.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="log4net">
-      <HintPath>lib\log4net.dll</HintPath>
+      <HintPath>C:\Program Files (x86)\Tecan\i-control\2.0\log4net.dll</HintPath>
       <Private>true</Private>
     </Reference>
   </ItemGroup>

@@ -1,0 +1,45 @@
+{
+  "WorkflowName": "Pick_place OT",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "GoFaGo Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "ExecutionMode": "Normal",
+        "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "GoFaGo Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "ExecutionMode": "Normal",
+        "TaskId": "dxvadjvibetfceaybdybsqsqcmzimdfj"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 3,
+      "Instrument": "OpentronsFlex",
+      "Action": "ExecuteRecipe",
+      "Parameters": {
+        "RecipeName": "test_6.json"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 4,
+      "Instrument": "GoFaGo Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "ExecutionMode": "Normal",
+        "TaskId": "qufptekmeyycpckgbvcpudozfdfkctba"
+      },
+      "DependsOn": []
+    }
+  ],
+  "CreatedAt": "2026-08-05T14:51:19.265220"
+}

@@ -1,0 +1,11 @@
+{
+  "library_types": [
+    {
+      "hint": "your_hint_name",
+      "display_name": "Display Name in Workflow Builder",
+      "folder": "Library/YourFolder",
+      "file_extension": ".json",
+      "parameter_names": ["YourSiLA2ParameterIdentifier"]
+    }
+  ]
+}

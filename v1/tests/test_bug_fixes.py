@@ -181,6 +181,22 @@ class TestDefaultTimeout:
         _, kwargs = registry.execute.call_args
         assert kwargs.get("timeout") == 42.0
 
+    @pytest.mark.asyncio
+    async def test_step_with_zero_timeout_means_unlimited(self):
+        """Step with timeout_seconds=0 means unlimited and must reach registry.execute
+        as 0, not silently fall back to the default (0 is falsy in Python, so a
+        naive `step.timeout_seconds or default` would get this wrong)."""
+        registry = _make_registry()
+        registry.execute = AsyncMock(return_value=_cmd_ok())
+
+        executor = _make_executor(registry=registry, default_timeout=900.0)
+        step = _make_step(retry_count=0, timeout_seconds=0)
+        await executor._execute_step_with_retry(step)
+
+        registry.execute.assert_called_once()
+        _, kwargs = registry.execute.call_args
+        assert kwargs.get("timeout") == 0
+
     def test_load_default_step_timeout_function(self, tmp_path):
         """_load_default_step_timeout reads workflow.default_timeout from yaml."""
         import yaml

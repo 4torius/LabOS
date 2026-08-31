@@ -1,198 +1,146 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
-Instrument Servicer Template
-============================
+New Instrument Implementation Template
+=======================================
 
-This is where you implement your instrument's commands.
-Each method corresponds to a command defined in features/NewInstrument.sila.xml
+TODO: Rename this file to newinstrument_impl.py (match your feature name).
 
-INSTRUCTIONS:
-1. Implement each command method
-2. Add your hardware communication code
-3. The PnP system handles everything else!
+This class implements every abstract method defined in
+generated/newinstrument/newinstrument_base.py (auto-generated from your FDL XML).
+
+Re-open that file whenever you add commands to the FDL — each new command
+becomes a new abstract method you must implement here.
+
+Usage pattern:
+    impl = NewInstrumentImpl(sila_server, config)
+    sila_server.set_feature_implementation(NewInstrumentFeature, impl)
 """
 
-import asyncio
 import logging
-from typing import Optional, Dict, Any
+import os
+import sys
+import time
+from typing import Optional
+
+# Ensure the server root is on sys.path so "generated.*" can be imported
+_SERVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _SERVER_DIR not in sys.path:
+    sys.path.insert(0, _SERVER_DIR)
+
+from sila2.server import MetadataDict, ObservableCommandInstanceWithIntermediateResponses
+
+from generated.newinstrument.newinstrument_base import NewInstrumentBase
+from generated.newinstrument.newinstrument_types import (
+    GetStatus_Responses,
+    Initialize_Responses,
+    RunOperation_IntermediateResponses,
+    RunOperation_Responses,
+    SetParameter_Responses,
+    Stop_Responses,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class InstrumentServicer:
+class NewInstrumentImpl(NewInstrumentBase):
     """
-    SiLA2 Servicer for New Instrument.
-    
-    Implements the commands defined in features/NewInstrument.sila.xml
+    Concrete implementation of the NewInstrument SiLA2 feature.
+
+    TODO:
+    1. Rename this class to match your instrument (e.g. CentrifugeImpl)
+    2. Add hardware-specific attributes in __init__
+    3. Fill in each command method with your hardware logic
     """
-    
-    def __init__(self, config: dict):
-        """
-        Initialize the servicer.
-        
-        Args:
-            config: Configuration from config.yaml
-        """
+
+    def __init__(self, parent_server, config: dict):
+        super().__init__(parent_server=parent_server)
         self.config = config
-        self.hardware_config = config.get('hardware', {})
-        self.simulation = self.hardware_config.get('simulation', True)
-        
-        # Instrument state
-        self._connected = False
+        hw = config.get("hardware", {})
+        self._simulation = hw.get("simulation", True)
+
+        # TODO: add your hardware connection attributes here
+        # e.g. self._serial = None  or  self._client = httpx.AsyncClient(...)
+
         self._status = "idle"
-        
-        # TODO: Initialize your hardware connection here
-        # Example:
-        # self.serial_port = self.hardware_config.get('serial_port')
-        # self.baud_rate = self.hardware_config.get('baud_rate', 9600)
-        
-        logger.info(f"InstrumentServicer initialized (simulation={self.simulation})")
-    
-    #                           COMMAND IMPLEMENTATIONS
-    
-    async def Initialize(self) -> bool:
-        """
-        Initialize the instrument and establish connection.
-        
-        Returns:
-            True if initialization was successful
-        """
+        # Set initial value for the observable IsConnected property
+        self.update_IsConnected(False)
+        logger.info("NewInstrumentImpl initialised (simulation=%s)", self._simulation)
+
+    # ── Non-observable property ────────────────────────────────────────────────
+
+    def get_InstrumentName(self, *, metadata: MetadataDict) -> str:
+        return self.config.get("sila2", {}).get("server_name", "New Instrument")
+
+    # ── Commands ───────────────────────────────────────────────────────────────
+
+    def Initialize(self, *, metadata: MetadataDict) -> Initialize_Responses:
+        """Connect to hardware and prepare for operation."""
         logger.info("Initialize called")
-        
-        if self.simulation:
-            # Simulate initialization
-            await asyncio.sleep(0.5)
-            self._connected = True
-            self._status = "ready"
-            logger.info("Simulated initialization complete")
-            return True
-        
-        # TODO: Implement real hardware initialization
-        # Example:
+        if self._simulation:
+            time.sleep(0.2)
+            self._status = "idle"
+            self.update_IsConnected(True)
+            return Initialize_Responses(Success=True)
+
+        # TODO: open serial / TCP / USB connection here
         # try:
-        #     self.connection = serial.Serial(self.serial_port, self.baud_rate)
-        #     response = self.connection.readline()
-        #     self._connected = True
-        #     return True
+        #     self._device = MyDevice(self.config["hardware"]["port"])
+        #     self.update_IsConnected(True)
+        #     return Initialize_Responses(Success=True)
         # except Exception as e:
-        #     logger.error(f"Initialization failed: {e}")
-        #     return False
-        
-        return True
-    
-    async def SetParameter(self, parameter_name: str, value: str) -> str:
-        """
-        Set an instrument parameter.
-        
-        Args:
-            parameter_name: Name of the parameter to set
-            value: New value for the parameter
-            
-        Returns:
-            The previous value before change
-        """
-        logger.info(f"SetParameter: {parameter_name} = {value}")
-        
-        # TODO: Implement parameter setting
-        # Example:
-        # previous = self._parameters.get(parameter_name, "")
-        # self._parameters[parameter_name] = value
-        # self._send_command(f"SET {parameter_name} {value}")
-        # return previous
-        
-        return "(previous value)"
-    
-    async def RunOperation(self, duration: int):
-        """
-        Execute a long-running operation with progress updates.
-        
-        This is an Observable command - it yields progress updates.
-        
-        Args:
-            duration: How long to run the operation (seconds)
-            
-        Yields:
-            Progress percentage (0-100)
-            
-        Returns:
-            Operation result
-        """
-        logger.info(f"RunOperation started: duration={duration}s")
-        
-        self._status = "running"
-        
-        for i in range(duration):
-            await asyncio.sleep(1)
-            progress = int((i + 1) / duration * 100)
-            logger.debug(f"Progress: {progress}%")
-            yield {"Progress": progress}
-        
-        self._status = "idle"
-        
-        # Final response
-        yield {"Result": f"Operation completed after {duration} seconds"}
-    
-    async def GetStatus(self) -> str:
-        """
-        Get current instrument status.
-        
-        Returns:
-            Current status (idle, running, error, etc.)
-        """
-        return self._status
-    
-    async def Stop(self) -> bool:
-        """
-        Emergency stop - halt all operations.
-        
-        Returns:
-            Whether stop was successful
-        """
-        logger.warning("STOP command received - halting operations")
-        
-        # TODO: Implement emergency stop
-        # Example:
-        # self._send_command("STOP")
-        # self._abort_current_operation()
-        
+        #     logger.error("Initialization failed: %s", e)
+        #     return Initialize_Responses(Success=False)
+        return Initialize_Responses(Success=True)
+
+    def SetParameter(
+        self, ParameterName: str, Value: str, *, metadata: MetadataDict
+    ) -> SetParameter_Responses:
+        """Set a named instrument parameter."""
+        logger.info("SetParameter: %s = %s", ParameterName, Value)
+        # TODO: send parameter to hardware
+        previous = "(unknown)"
+        return SetParameter_Responses(PreviousValue=previous)
+
+    def GetStatus(self, *, metadata: MetadataDict) -> GetStatus_Responses:
+        """Return current instrument status."""
+        return GetStatus_Responses(Status=self._status)
+
+    def Stop(self, *, metadata: MetadataDict) -> Stop_Responses:
+        """Emergency stop — halt all operations immediately."""
+        logger.warning("STOP command received")
         self._status = "stopped"
-        return True
-    
-    #                           PROPERTY IMPLEMENTATIONS
-    
-    def get_InstrumentName(self) -> str:
-        """Get the instrument name/model."""
-        return self.config.get('sila2', {}).get('server_name', 'New Instrument')
-    
-    def get_IsConnected(self) -> bool:
-        """Get connection status."""
-        return self._connected
-    
-    #                           HELPER METHODS
-    
-    def _send_command(self, command: str) -> str:
+        # TODO: send stop command to hardware
+        return Stop_Responses(Stopped=True)
+
+    def RunOperation(
+        self,
+        Duration: int,
+        *,
+        metadata: MetadataDict,
+        instance: ObservableCommandInstanceWithIntermediateResponses[RunOperation_IntermediateResponses],
+    ) -> RunOperation_Responses:
         """
-        Send a command to the hardware.
-        
-        TODO: Implement for your specific hardware protocol
+        Run a long operation, streaming progress to the client.
+
+        Use instance.send_intermediate_response() to push progress updates.
+        This method runs synchronously in a thread executor — use time.sleep,
+        not asyncio.sleep.
         """
-        if self.simulation:
-            logger.debug(f"[SIM] Command: {command}")
-            return "OK"
-        
-        # Example serial implementation:
-        # self.connection.write(f"{command}\n".encode())
-        # return self.connection.readline().decode().strip()
-        
-        raise NotImplementedError("Hardware communication not implemented")
-    
-    async def close(self):
-        """Clean up resources."""
-        logger.info("Closing servicer")
-        
-        # TODO: Close hardware connections
-        # Example:
-        # if self.connection:
-        #     self.connection.close()
-        
-        self._connected = False
+        logger.info("RunOperation: duration=%ds", Duration)
+        self._status = "running"
+
+        for i in range(Duration):
+            time.sleep(1)
+            pct = int((i + 1) / Duration * 100)
+            instance.send_intermediate_response(RunOperation_IntermediateResponses(Progress=pct))
+
+        self._status = "idle"
+        return RunOperation_Responses(Result=f"Completed after {Duration}s")
+
+    # ── Cleanup ────────────────────────────────────────────────────────────────
+
+    def stop(self):
+        """Called by main() on shutdown. Close hardware connections here."""
+        logger.info("NewInstrumentImpl stopping")
+        self.update_IsConnected(False)
+        # TODO: close self._device or similar

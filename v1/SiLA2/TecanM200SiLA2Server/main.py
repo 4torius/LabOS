@@ -39,6 +39,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sila2.server import SilaServer
 
 from generated.platereaderservice.platereaderservice_feature import PlateReaderServiceFeature
+from generated.laboslibraryprovider import LabOSLibraryProviderFeature
+from src.library_provider_impl import LibraryProviderImpl
 from src.plate_reader_impl import PlateReaderImpl
 from src.bridge_launcher import BridgeLauncher
 
@@ -99,7 +101,14 @@ def main() -> int:
     launcher = BridgeLauncher(bridge_host, bridge_port)
     if not args.no_bridge:
         if not launcher.start():
-            logging.error("C# bridge failed to start — commands requiring hardware will fail")
+            logging.error(
+                "C# bridge failed to start — hardware commands will raise "
+                "NotConnected/ConnectionFailed until it is available"
+            )
+        else:
+            # A mid-session bridge crash otherwise goes unnoticed until the
+            # next command fails against a dead gRPC endpoint.
+            launcher.start_health_monitor()
     else:
         logging.info("Bridge autostart skipped (--no-bridge)")
 
@@ -115,6 +124,7 @@ def main() -> int:
 
     impl = PlateReaderImpl(sila_server, config)
     sila_server.set_feature_implementation(PlateReaderServiceFeature, impl)
+    sila_server.set_feature_implementation(LabOSLibraryProviderFeature, LibraryProviderImpl(sila_server))
 
     # ── Start ──────────────────────────────────────────────────────────────
     enable_discovery = not args.no_discovery
@@ -134,7 +144,17 @@ def main() -> int:
     print("=" * 60)
     print()
 
-    signal.signal(signal.SIGTERM, lambda *_: sila_server.grpc_server.stop(0))
+    shutdown_grace_seconds = 10.0
+
+    def _handle_shutdown_signal(signum, _frame):
+        logging.info(
+            f"Received signal {signum}, stopping server "
+            f"(grace period: {shutdown_grace_seconds}s)..."
+        )
+        sila_server.grpc_server.stop(shutdown_grace_seconds)
+
+    signal.signal(signal.SIGTERM, _handle_shutdown_signal)
+    signal.signal(signal.SIGINT, _handle_shutdown_signal)
 
     try:
         with contextlib.suppress(KeyboardInterrupt):

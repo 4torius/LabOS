@@ -273,9 +273,16 @@ class PnPClient:
         """
         if not server.server_online:
             return CommandResult(success=False, error=f"Server offline: {server.name}")
-        
+
         params = parameters or {}
-        
+
+        # Normalize "no timeout" to the single sentinel used downstream: None.
+        # Callers (workflow.py, lab_core.py) pass 0 to mean "unlimited" (e.g. a
+        # multi-day protocol); without this, a falsy-but-not-None 0 would fall
+        # through to per-path defaults instead of actually waiting forever.
+        if timeout is not None and timeout <= 0:
+            timeout = None
+
         # Find the command definition
         cmd_info = server.find_command(command)
         if not cmd_info:
@@ -302,6 +309,64 @@ class PnPClient:
                   f"Server requires sila2 library or gRPC stubs in pnp_stubs/."
         )
     
+    async def get_property(
+        self,
+        server: PnPServer,
+        feature_name: str,
+        property_name: str,
+    ) -> CommandResult:
+        """
+        Read a SiLA2 (non-observable) property via the sila2 library SilaClient.
+
+        Returns CommandResult(data=<serialized value>) where NamedTuple-like
+        structure responses are converted to dicts (recursively, so a
+        List[Structure] property becomes a list of dicts).
+        """
+        if not server.server_online:
+            return CommandResult(success=False, error=f"Server offline: {server.name}")
+
+        def _serialize(value: Any) -> Any:
+            if hasattr(value, "_asdict"):
+                return {k: _serialize(v) for k, v in value._asdict().items()}
+            if isinstance(value, (list, tuple)):
+                return [_serialize(v) for v in value]
+            return value
+
+        def _run_sync() -> CommandResult:
+            try:
+                from sila2.framework.errors.defined_execution_error import DefinedExecutionError
+            except ImportError:
+                DefinedExecutionError = None
+
+            try:
+                sila_client = self._get_sila_client(server.host, server.port)
+                if sila_client is None:
+                    return CommandResult(success=False, error="Could not connect to sila2 client")
+
+                feature_obj = getattr(sila_client, feature_name, None)
+                if feature_obj is None:
+                    return CommandResult(success=False, error=f"Feature '{feature_name}' not found on {server.name}")
+
+                prop_obj = getattr(feature_obj, property_name, None)
+                if prop_obj is None:
+                    return CommandResult(success=False, error=f"Property '{property_name}' not found on feature '{feature_name}'")
+
+                value = prop_obj.get()
+                return CommandResult(success=True, data=_serialize(value))
+
+            except Exception as exc:
+                if DefinedExecutionError and isinstance(exc, DefinedExecutionError):
+                    return CommandResult(success=False, error=str(exc))
+                logger.warning(
+                    "sila2 client property read (%s.%s) failed: %s", feature_name, property_name, exc, exc_info=True
+                )
+                if isinstance(exc, grpc.RpcError):
+                    self._invalidate_sila_client(server.host, server.port)
+                return CommandResult(success=False, error=str(exc))
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _run_sync)
+
     def _get_sila_client(self, host: str, port: int) -> Any:
         return get_shared_sila_client(host, port)
 
@@ -314,7 +379,7 @@ class PnPClient:
         feature: PnPFeature,
         command: PnPCommand,
         params: Dict[str, Any],
-        timeout: float,
+        timeout: Optional[float],
         on_progress: Optional[Callable],
     ) -> Optional[CommandResult]:
         """
@@ -369,10 +434,11 @@ class PnPClient:
                 if command.observable and ClientObservableCommandInstance and isinstance(result, ClientObservableCommandInstance):
                     # sila2 observable command: poll until done, then fetch responses.
                     # The command is already running on the server at this point.
-                    poll_timeout = timeout if (timeout and timeout > 0) else 14400.0  # 4h default for long-running recipes
-                    deadline = _time.monotonic() + poll_timeout
+                    # timeout is already normalized by execute(): None means poll
+                    # forever (multi-day protocols), otherwise it's a real deadline.
+                    deadline = None if timeout is None else _time.monotonic() + timeout
                     while not result.done:
-                        if _time.monotonic() > deadline:
+                        if deadline is not None and _time.monotonic() > deadline:
                             result.cancel_execution_info_subscription()
                             return CommandResult(
                                 success=True,
@@ -444,7 +510,7 @@ class PnPClient:
         feature: PnPFeature,
         command: PnPCommand,
         params: Dict[str, Any],
-        timeout: float,
+        timeout: Optional[float],
         on_progress: Optional[Callable]
     ) -> Optional[CommandResult]:
         """
@@ -587,7 +653,12 @@ class PnPClient:
                     
                     return self._parse_response(final_result)
                 else:
-                    # Unary response
+                    # Unary response.
+                    # Invariant: `timeout` here is always None or a positive float
+                    # (execute() normalizes <=0 to None before dispatch), so this
+                    # relies on asyncio.wait_for's native None="wait forever"
+                    # semantics. Do not pass a raw 0 through to this call — asyncio
+                    # treats timeout=0 as "cancel almost immediately", not unlimited.
                     response = await asyncio.wait_for(method(request), timeout=timeout)
                     return self._parse_response(response)
                     

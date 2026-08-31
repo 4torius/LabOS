@@ -52,13 +52,9 @@ logger = logging.getLogger(__name__)
 
 def _load_discovery_config() -> Dict[str, Any]:
     """Load discovery configuration from lab_config.yaml."""
-    from src.config_schema import load_lab_config
+    from src.config_schema import DEFAULT_CONFIG, load_lab_config
     config_path = Path(__file__).parent.parent / "lab_config.yaml"
-    defaults = {
-        "enabled": True,
-        "scan_interval": 30,
-        "service_type": "_sila._tcp.local.",  # sila2 library standard (was _sila2._tcp.local.)
-    }
+    defaults = DEFAULT_CONFIG["discovery"]
     try:
         config, _ = load_lab_config(config_path, apply_defaults=False, strict=False)
         return config.get("discovery", defaults)
@@ -81,33 +77,18 @@ class PnPParameter:
     ui_hint: str = ""  # Hint for UI: "recipe", "analysis", "hal_config", "liquid_class", "location", "labware"
     
     def infer_ui_hint(self) -> str:
-        """Infer UI hint from parameter identifier if not explicitly set."""
+        """Infer UI hint from parameter identifier if not explicitly set.
+
+        Library-file hints (recipe, analysis, hal_config, liquid_class, mobile_task)
+        are declared by each server via LabOSLibraryProvider.LibraryCatalog and resolved
+        in lab_core._server_to_instrument() before this method is called.
+        Only structural hints that have no catalog equivalent are handled here.
+        """
         if self.ui_hint:
             return self.ui_hint
-        
+
         name_lower = self.identifier.lower()
-        
-        # Mobile robot task ID (for dropdown from MobileSiLA2Server)
-        # Match TaskId parameter in TaskManagement feature
-        if name_lower in ['taskid', 'task_id'] or name_lower == 'starttaskid':
-            return 'mobile_task'
-        
-        # Recipe files
-        if any(x in name_lower for x in ['recipe', 'recipename', 'recipefile']):
-            return 'recipe'
-        
-        # Analysis/Protocol files (Tecan .mdfx)
-        if any(x in name_lower for x in ['analysis', 'analysisfile', 'protocol', 'measurement']):
-            return 'analysis'
-        
-        # HAL/Hardware config
-        if any(x in name_lower for x in ['configname', 'config', 'halconfig', 'hardwareconfig', 'setup']):
-            return 'hal_config'
-        
-        # Liquid classes
-        if any(x in name_lower for x in ['liquidclass', 'liquid_class']):
-            return 'liquid_class'
-        
+
         # Locations/stations — exclude compound names like "SourceInstrument" that are free-text
         _loc_kw = ['source', 'destination', 'location', 'station', 'from', 'to']
         _loc_excl = ['instrument', 'name', 'type', 'file', 'class', 'id']
@@ -197,6 +178,9 @@ class PnPServer:
     
     # Source info
     server_dir: str = ""                    # Directory path if discovered from filesystem
+
+    # Library catalog (from LabOSLibraryProvider SiLA2 feature, populated at discovery)
+    library_catalog: list = field(default_factory=list)
     discovered_via: str = ""                # "port_scan", "directory", "mdns"
     
     @property
@@ -234,7 +218,18 @@ class SiLAXMLParser:
         # Detect namespace
         ns_match = re.match(r'\{(.+)\}', root.tag)
         prefix = "{" + ns_match.group(1) + "}" if ns_match else ""
-        
+
+        # Index top-level DataTypeDefinitions by identifier so parameters/properties
+        # that reference one via <DataTypeIdentifier> (instead of declaring an inline
+        # type) can still resolve constraints (e.g. a Constrained/Set enum reused
+        # across multiple commands, or a List<Structure> property's element type).
+        self._data_type_defs: Dict[str, ET.Element] = {}
+        for def_elem in root.findall(f"{prefix}DataTypeDefinition"):
+            def_id = self._get_text(def_elem, f"{prefix}Identifier")
+            data_type_elem = def_elem.find(f"{prefix}DataType")
+            if def_id and data_type_elem is not None:
+                self._data_type_defs[def_id] = data_type_elem
+
         identifier = self._get_text(root, f"{prefix}Identifier") or "Unknown"
         
         feature = PnPFeature(
@@ -309,30 +304,51 @@ class SiLAXMLParser:
             observable=self._get_observable(elem, prefix)
         )
     
+    def _resolve_data_type_elem(self, elem: ET.Element, prefix: str) -> ET.Element:
+        """
+        Resolve a Parameter/Property's <DataType> to the element that actually
+        carries the type info. If it's a bare reference to a top-level
+        DataTypeDefinition (<DataTypeIdentifier>Foo</DataTypeIdentifier>), look up
+        that definition's own <DataType> instead — otherwise inline searches for
+        <Basic>/<Set> etc. find nothing, since the real type lives elsewhere in
+        the document.
+        """
+        data_type_elem = elem.find(f"{prefix}DataType")
+        if data_type_elem is None:
+            data_type_elem = elem.find("DataType")
+        if data_type_elem is None:
+            return elem
+        ref_id = self._get_text(data_type_elem, f"{prefix}DataTypeIdentifier") or self._get_text(data_type_elem, "DataTypeIdentifier")
+        if ref_id and ref_id in getattr(self, "_data_type_defs", {}):
+            return self._data_type_defs[ref_id]
+        return data_type_elem
+
     def _parse_data_type(self, elem: ET.Element, prefix: str) -> str:
         """Extract data type from element."""
-        basic = elem.find(f".//{prefix}Basic")
+        resolved = self._resolve_data_type_elem(elem, prefix)
+        basic = resolved.find(f".//{prefix}Basic")
         if basic is not None and basic.text:
             return basic.text
         return "String"
-    
+
     def _parse_constraints(self, elem: ET.Element, prefix: str) -> List[str]:
         """Extract constraint values (Set or Constraints/AllowedValue)."""
+        resolved = self._resolve_data_type_elem(elem, prefix)
         values = []
         # Format 1: Set/Value
-        for value_elem in elem.findall(f".//{prefix}Set/{prefix}Value"):
+        for value_elem in resolved.findall(f".//{prefix}Set/{prefix}Value"):
             if value_elem.text:
                 values.append(value_elem.text)
         # Format 2: Constraints/AllowedValue (SiLA2 FDL)
-        for value_elem in elem.findall(f".//{prefix}Constraints/{prefix}AllowedValue"):
+        for value_elem in resolved.findall(f".//{prefix}Constraints/{prefix}AllowedValue"):
             if value_elem.text:
                 values.append(value_elem.text)
         # Also check without prefix (some implementations)
         if not values:
-            for value_elem in elem.findall(".//Set/Value"):
+            for value_elem in resolved.findall(".//Set/Value"):
                 if value_elem.text:
                     values.append(value_elem.text)
-            for value_elem in elem.findall(".//Constraints/AllowedValue"):
+            for value_elem in resolved.findall(".//Constraints/AllowedValue"):
                 if value_elem.text:
                     values.append(value_elem.text)
         return values
@@ -562,11 +578,13 @@ class PnPDiscovery:
                 if info:
                     discovered.append(info)
         
+        zc = None
+        browser = None
         try:
             zc = Zeroconf()
             listener = SiLA2ServiceListener(zc)
             browser = ServiceBrowser(zc, service_type, listener)
-            
+
             # Wait for discovery
             await asyncio.sleep(timeout)
             
@@ -596,12 +614,34 @@ class PnPDiscovery:
                             properties[key] = value
                     
                     server_key = self._make_server_key(name)
-                    
-                    # Check for duplicate by name key
+
+                    # If this key already exists (typically a bootstrap seed from
+                    # lab_config.yaml), correct it with the live mDNS-observed
+                    # address/state instead of silently discarding the fresh
+                    # discovery. The config entry is only a startup hint and can
+                    # go stale (DHCP IP change, PC swap) without anyone updating
+                    # it — previously that left a real, reachable server stuck
+                    # showing "offline" at its old address forever, because mDNS
+                    # discovery of the same key was unconditionally skipped.
                     if server_key in self.servers:
-                        logger.debug(f"mDNS: Server {name} already discovered by name key, skipping")
+                        existing_server = self.servers[server_key]
+                        if existing_server.host != addr or existing_server.port != port:
+                            logger.info(
+                                f"mDNS: Correcting stale address for {existing_server.name} "
+                                f"({existing_server.host}:{existing_server.port} -> {addr}:{port})"
+                            )
+                            existing_server.host = addr
+                            existing_server.port = port
+                        if properties.get("uuid"):
+                            existing_server.uuid = properties["uuid"]
+                        if properties.get("vendor"):
+                            existing_server.vendor = properties["vendor"]
+                        existing_server.server_online = True
+                        existing_server.hardware_online = True
+                        existing_server.discovered_via = "mdns"
+                        logger.info(f"mDNS: Refreshed {existing_server.name} via name-key match")
                         continue
-                    
+
                     # Check for duplicate by address (host:port)
                     # This catches cases where the same server is discovered via mDNS 
                     # and config but with different names
@@ -646,14 +686,25 @@ class PnPDiscovery:
                 except Exception as e:
                     logger.warning(f"Error processing mDNS service: {e}")
             
-            browser.cancel()
-            zc.close()
-            
             logger.info(f"mDNS discovery found {len(discovered)} SiLA2 servers")
-            
+
         except Exception as e:
             logger.error(f"mDNS discovery error: {e}")
-    
+        finally:
+            # Ensure the Zeroconf socket/thread and browser are released even
+            # if discovery raised partway through — otherwise every failed
+            # scan leaks a socket and a background thread.
+            if browser is not None:
+                try:
+                    browser.cancel()
+                except Exception as e:
+                    logger.warning(f"Error cancelling mDNS browser: {e}")
+            if zc is not None:
+                try:
+                    zc.close()
+                except Exception as e:
+                    logger.warning(f"Error closing Zeroconf instance: {e}")
+
     async def start_continuous_discovery(self) -> bool:
         """
         Start continuous mDNS discovery in the background.
@@ -864,6 +915,19 @@ class PnPDiscovery:
             if server.hardware_status in ("unknown", "offline"):
                 server.hardware_status = "idle"
 
+            # ── LabOS Library Catalog (LabOSLibraryProvider feature, optional) ──
+            try:
+                import json as _json
+                catalog_feature = getattr(client, 'LabOSLibraryProvider', None)
+                if catalog_feature is not None:
+                    catalog_json = str(catalog_feature.LibraryCatalog.get())
+                    server.library_catalog = _json.loads(catalog_json).get("library_types", [])
+                    logger.debug(
+                        "Library catalog loaded for %s: %d type(s)", server.name, len(server.library_catalog)
+                    )
+            except Exception:
+                pass  # Server does not implement LabOSLibraryProvider — fallback to lab_config.yaml
+
             logger.info(
                 "sila2 query OK: %s (%s) — %d feature(s)", server.name, server.server_type, len(sila_features)
             )
@@ -915,10 +979,11 @@ class PnPDiscovery:
         if not GRPC_AVAILABLE:
             # Fall back to port check if gRPC not available
             return self._is_port_open(host, port, timeout)
-        
+
+        channel = None
         try:
             import grpc
-            
+
             # Create a channel with short timeout
             address = f"{host}:{port}"
             channel = grpc.insecure_channel(
@@ -928,24 +993,24 @@ class PnPDiscovery:
                     ('grpc.enable_http_proxy', 0),
                 ]
             )
-            
+
             # Try to check channel connectivity
             # This sends a real gRPC request to verify the server
             try:
                 # Use channel_ready_future with timeout
                 grpc.channel_ready_future(channel).result(timeout=timeout)
-                channel.close()
                 return True
             except grpc.FutureTimeoutError:
-                channel.close()
                 return False
-            except Exception:
-                channel.close()
-                return False
-                
+
         except Exception as e:
             logger.debug(f"gRPC check failed for {host}:{port}: {e}")
             return False
+        finally:
+            # finally (not per-branch close calls) guarantees the channel is
+            # released even if something above raises outside the inner try.
+            if channel is not None:
+                channel.close()
     
     def _make_server_key(self, folder_name: str) -> str:
         """Make a unique key from folder name."""

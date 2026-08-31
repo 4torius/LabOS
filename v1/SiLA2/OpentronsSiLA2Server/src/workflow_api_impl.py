@@ -12,11 +12,14 @@ A dedicated event loop thread bridges the two worlds via _run_async().
 """
 
 import asyncio
+import dataclasses
 import json
 import logging
+import os
 import threading
 import time
 from datetime import timedelta
+from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 from sila2.server import MetadataDict, ObservableCommandInstance
@@ -75,7 +78,12 @@ class WorkflowAPIImpl(WorkflowAPIBase):
         self._loop_thread.start()
 
         self.Home_default_lifetime_of_execution = timedelta(minutes=5)
-        self.ExecuteRecipe_default_lifetime_of_execution = timedelta(hours=2)
+        # Only governs how long a *finished* run's result stays fetchable by a
+        # client that reconnects late — not the run duration itself (that's
+        # config.run_timeout, enforced inside wait_for_run_completion). Generous
+        # so the webapp can resync after losing its poll connection during a
+        # multi-day protocol.
+        self.ExecuteRecipe_default_lifetime_of_execution = timedelta(days=7)
 
     # ─── Lifecycle ───────────────────────────────────────────────────────────
 
@@ -108,8 +116,13 @@ class WorkflowAPIImpl(WorkflowAPIBase):
 
     # ─── Async bridge ────────────────────────────────────────────────────────
 
-    def _run_async(self, coro, timeout: float = 60):
-        """Submit an asyncio coroutine to the dedicated event loop and wait for the result."""
+    def _run_async(self, coro, timeout: Optional[float] = 60):
+        """Submit an asyncio coroutine to the dedicated event loop and wait for the result.
+
+        timeout=None blocks forever (Future.result's native behavior) — used for
+        recipe execution, where the real bound is config.run_timeout enforced
+        deeper in wait_for_run_completion, not this dispatch wrapper.
+        """
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return future.result(timeout=timeout)
 
@@ -157,19 +170,24 @@ class WorkflowAPIImpl(WorkflowAPIBase):
         name = self._ot.get_current_hardware_config() or ""
         config_json = ""
         if name and self._ot.config:
-            config_json = json.dumps(self._ot.config, indent=2)
+            config_json = json.dumps(dataclasses.asdict(self._ot.config), indent=2)
         payload = json.dumps({"name": name, "config": config_json})
         return GetCurrentConfig_Responses(CurrentConfig=payload)
 
     # ─── Recipe Execution ────────────────────────────────────────────────────
 
     def ListRecipes(self, *, metadata: MetadataDict) -> ListRecipes_Responses:
-        recipe_dir = self._ot.base_dir / "Library" / "Recipes"
+        # dir_recipes (config.yaml -> directories.recipes) is now read into
+        # ServerConfig; resolve it the same way the existing legacy fallback
+        # in server.py already does (os.path.abspath), and only fall back to
+        # the old base_dir-relative guess if it's unset.
+        configured = getattr(self._ot.config, "dir_recipes", None) if self._ot.config else None
+        recipe_dir = Path(os.path.abspath(configured)) if configured else self._ot.base_dir / "Library" / "Recipes"
         recipes = []
         if recipe_dir.exists():
             for f in sorted(recipe_dir.glob("*.json")):
                 try:
-                    with open(f) as rf:
+                    with open(f, encoding="utf-8-sig") as rf:
                         data = json.load(rf)
                     recipes.append(
                         {
@@ -179,7 +197,8 @@ class WorkflowAPIImpl(WorkflowAPIBase):
                             "steps": len(data.get("Steps", data.get("commands", []))),
                         }
                     )
-                except Exception:
+                except Exception as exc:
+                    logger.debug("Failed to parse recipe %s: %s", f.name, exc)
                     recipes.append({"filename": f.name, "name": f.stem})
         return ListRecipes_Responses(RecipeList=json.dumps(recipes))
 
@@ -194,9 +213,12 @@ class WorkflowAPIImpl(WorkflowAPIBase):
         instance.progress = 0.05
 
         # cmd_execute_recipe_by_name → cmd_run_protocol waits for full run completion.
-        # Timeout must cover the entire execution (up to 2 hours).
+        # No timeout at this dispatch layer: the one authoritative bound is
+        # config.run_timeout, enforced inside wait_for_run_completion. A second
+        # hardcoded value here was redundant and easy to desync from that one
+        # (e.g. it stayed at 2h even when run_timeout was raised/unlimited).
         run_id, _ = self._run_async(
-            self._ot.cmd_execute_recipe_by_name(RecipeName), timeout=7200
+            self._ot.cmd_execute_recipe_by_name(RecipeName), timeout=None
         )
 
         instance.progress = 1.0
@@ -248,14 +270,17 @@ class WorkflowAPIImpl(WorkflowAPIBase):
 
     def ResetTipTracking(self, *, metadata: MetadataDict) -> ResetTipTracking_Responses:
         count = 0
-        if self._ot.config:
-            for lw in self._ot.config.get("labware", []):
-                if "tiprack" in lw.get("type", "").lower():
-                    try:
-                        self._run_async(self._ot.cmd_refill_tip_rack(lw.get("id", "")))
-                        count += 1
-                    except Exception:
-                        pass
+        if self._ot.hardware:
+            # Tip racks configured in the currently-loaded HAL (same source as
+            # ListTipRacks) — self._ot.config is a ServerConfig dataclass, not
+            # a labware list, and never had the "labware" data this used to read.
+            hal_tips = self._ot.hardware.get_configured_tip_racks()
+            for logical_name, load_name in hal_tips.items():
+                try:
+                    self._run_async(self._ot.cmd_refill_tip_rack(load_name))
+                    count += 1
+                except Exception as exc:
+                    logger.warning("Failed to reset tip tracking for %s: %s", load_name, exc)
         return ResetTipTracking_Responses(ResetResult=f"Reset {count} tip rack(s)")
 
     # ─── Monitoring ──────────────────────────────────────────────────────────
@@ -278,8 +303,8 @@ class WorkflowAPIImpl(WorkflowAPIBase):
                         "api_version": health.get("api_version", "Unknown"),
                         "connected": True,
                     }
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to fetch robot info: %s", exc)
         return GetRobotInfo_Responses(RobotInfo=json.dumps(info))
 
     def GetModulesStatus(self, *, metadata: MetadataDict) -> GetModulesStatus_Responses:
@@ -289,6 +314,6 @@ class WorkflowAPIImpl(WorkflowAPIBase):
                 data = self._run_async(self._ot.robot.get_modules())
                 if data:
                     modules = data
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to fetch module status: %s", exc)
         return GetModulesStatus_Responses(ModulesStatus=json.dumps(modules))

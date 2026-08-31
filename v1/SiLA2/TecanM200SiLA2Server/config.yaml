@@ -10,6 +10,11 @@ logging:
 bridge:
   host: "127.0.0.1"
   port: 50055
+  # Max seconds to wait for a RunMeasurement to finish. 0 = unlimited; the C#
+  # bridge itself is already unbounded internally (appsettings.json
+  # MeasurementTimeoutSeconds: 0), so this Python-side cap can safely be
+  # raised or removed for long kinetic reads without mismatching the bridge.
+  measurement_timeout_seconds: 1200
 
 # Connection string passed to the C# bridge's Connect() command.
 # Supported values (handled by the C# bridge):

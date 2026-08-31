@@ -1,7 +1,10 @@
 """AnIML v0.90 parser — converts Tecan .animl files to structured dicts for the web UI."""
+import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 _NS = 'urn:org:astm:animl:schema:core:draft:0.90'
 
@@ -12,7 +15,11 @@ def _t(name: str) -> str:
 
 def parse_animl(path: Path) -> Dict[str, Any]:
     """Parse an AnIML file and return a structured dict ready for JSON serialization."""
-    tree = ET.parse(str(path))
+    try:
+        tree = ET.parse(str(path))
+    except ET.ParseError as exc:
+        logger.warning("AnIML file %s is malformed: %s", path.name, exc)
+        return {"filename": path.name, "plate_name": "", "plate_type": "", "experiment_steps": [], "parse_error": str(exc)}
     root = tree.getroot()
 
     result: Dict[str, Any] = {
@@ -105,7 +112,20 @@ def _parse_step(step_el) -> Optional[Dict[str, Any]]:
             col = int(col_str)
         except ValueError:
             col = 1
-        row = ord(row_letter) - ord('A') + 1
+
+        # A row letter outside A-Z (or a non-positive column) would otherwise
+        # compute a silently wrong row/col via ord() arithmetic — e.g. a
+        # digit or symbol as row_letter yields a negative row number instead
+        # of an error, corrupting the plate display without any signal.
+        if 'A' <= row_letter <= 'Z':
+            row = ord(row_letter) - ord('A') + 1
+        else:
+            logger.warning("Well '%s': unrecognized row letter %r, defaulting to row 1", well, row_letter)
+            row = 1
+        if col < 1:
+            logger.warning("Well '%s': non-positive column %d, defaulting to column 1", well, col)
+            col = 1
+
         measurements.append({'well': well, 'row': row, 'col': col, 'value': val, 'unit': unit_label})
 
     valid = [v for v in float_values if v is not None]

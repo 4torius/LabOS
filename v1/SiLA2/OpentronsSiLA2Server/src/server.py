@@ -45,7 +45,8 @@ except ImportError:
 from .robot_client import RobotClient
 from .protocol_generator import ProtocolGenerator
 from .hardware_manager import HardwareManager
-from .tip_tracker import TipTracker, calculate_tips_from_recipe
+from .tip_tracker import TipTracker, MountedTipTracker, calculate_tips_from_recipe, reconstruct_tip_mount_state
+from .run_archive import RunArchive
 
 # ManualStation gRPC client for operator interactions
 try:
@@ -457,13 +458,21 @@ class OpentronsSiLA2Server:
         self.generator: Optional[ProtocolGenerator] = None
         self.hardware: Optional[HardwareManager] = None
         self.tip_tracker: Optional[TipTracker] = None
-        
+        self.mounted_tip_tracker: Optional[MountedTipTracker] = None
+        self.run_archive: Optional[RunArchive] = None
+
         # State
         self._current_run_id: Optional[str] = None
         self._is_running = False
         self._status = "disconnected"
         self._lock = asyncio.Lock()
-        
+        # Serializes pause/resume/abort/emergency-stop against each other so
+        # conflicting robot actions (e.g. pause racing abort) can't be sent
+        # concurrently. Deliberately separate from self._lock, which is held
+        # for an entire run's duration — these control commands must be able
+        # to interrupt an in-progress run without waiting for it to finish.
+        self._control_lock = asyncio.Lock()
+
         # gRPC Server
         self._grpc_server = None
         
@@ -541,7 +550,25 @@ class OpentronsSiLA2Server:
         # Initialize tip tracker
         if self.config.tip_tracking_enabled:
             self.tip_tracker = TipTracker(self.config.tip_state_file)
-            
+
+        # Initialize per-mount tip-presence tracker (used by the leftover-tip
+        # pre-flight guard; independent of tip_tracking_enabled, which is
+        # about consumption counts, not mount state)
+        if self.config.check_tip_before_run:
+            self.mounted_tip_tracker = MountedTipTracker(self.config.tip_mount_state_file)
+
+        # Initialize run archive (Fase 6/7): per-run command log + summary,
+        # with rotation - resolved the same way as dir_recipes (relative to
+        # cwd, matching how this server is actually started).
+        if self.config.run_archive_enabled:
+            archive_dir = os.path.abspath(self.config.dir_run_archive)
+            self.run_archive = RunArchive(
+                archive_dir,
+                retention_uncompressed_days=self.config.run_archive_retention_uncompressed_days,
+                retention_compressed_days=self.config.run_archive_retention_compressed_days,
+            )
+            self.logger.info(f"Run archive: {archive_dir}")
+
         # Initialize tip racks from HAL config
         self._initialize_tip_racks_from_hal()
             
@@ -903,23 +930,33 @@ class OpentronsSiLA2Server:
             # Spawn popup
             workspace_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
             popup_script = os.path.join(workspace_root, "operator_popup.py")
-            
+
             task_id = None
             popup_opened = False
-            
+
             async for response in stub.RequestOperatorTask(request):
                 task_id = response.task_id
-                
+
                 # Open popup on first response
                 if not popup_opened and response.status in ["pending", "created"]:
                     popup_opened = True
-                    safe_description = description.replace('"', '\\"').replace('\n', ' ')
-                    subprocess.Popen(
-                        f'start "Refill Tips - {location}" python "{popup_script}" "{task_id}" "tip_refill" "{safe_description}" "Opentrons" "high"',
-                        shell=True,
-                        cwd=workspace_root
-                    )
-                    self.logger.info(f"Opened refill popup for task {task_id}")
+                    if not os.path.exists(popup_script):
+                        self.logger.error(f"Refill popup script not found: {popup_script}")
+                    else:
+                        try:
+                            # No shell=True: args passed as a list avoid shell
+                            # parsing/injection of task_id/description, and
+                            # CREATE_NEW_CONSOLE gives the same "own window" UX
+                            # as the old `start "..."` cmd.exe builtin.
+                            creationflags = subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
+                            subprocess.Popen(
+                                [sys.executable, popup_script, task_id, "tip_refill", description, "Opentrons", "high"],
+                                cwd=workspace_root,
+                                creationflags=creationflags,
+                            )
+                            self.logger.info(f"Opened refill popup for task {task_id}")
+                        except Exception as popup_exc:
+                            self.logger.error(f"Failed to open refill popup: {popup_exc}")
                 
                 if response.status == "completed":
                     self.logger.info(f"Operator confirmed tip refill for {rack_type}")
@@ -969,27 +1006,32 @@ class OpentronsSiLA2Server:
         
     async def cmd_emergency_stop(self) -> str:
         """Emergency stop - abort current run, drop tips, home."""
-        if self._current_run_id:
-            await self.robot.stop_run(self._current_run_id)
-            # Wait for stop to complete
-            for _ in range(10):
-                status = await self.robot.get_run_status(self._current_run_id)
-                if "stopped" in status or "failed" in status or status == "succeeded":
-                    break
-                await asyncio.sleep(0.5)
-            
-        # Run emergency drop sequence
-        await self._run_emergency_drop()
-            
-        self._status = "idle"
-        self._current_run_id = None
-        self._is_running = False
-        return "Emergency stop executed"
-        
-    async def _run_emergency_drop(self):
-        """Execute the emergency drop and home sequence."""
+        async with self._control_lock:
+            if self._current_run_id:
+                await self.robot.stop_run(self._current_run_id)
+                # Wait for stop to complete
+                for _ in range(10):
+                    status = await self.robot.get_run_status(self._current_run_id)
+                    if "stopped" in status or "failed" in status or status == "succeeded":
+                        break
+                    await asyncio.sleep(0.5)
+
+            # Run emergency drop sequence
+            drop_ok, drop_error = await self._run_emergency_drop()
+
+            self._status = "idle"
+            self._current_run_id = None
+            self._is_running = False
+            if drop_ok:
+                return "Emergency stop executed"
+            # Never report full success when the drop/home sequence didn't
+            # actually complete — tips may still be attached, axes un-homed.
+            return f"Emergency stop executed. WARNING: tip drop/home sequence failed ({drop_error}) - verify manually."
+
+    async def _run_emergency_drop(self) -> tuple[bool, Optional[str]]:
+        """Execute the emergency drop and home sequence. Returns (success, error)."""
         self.logger.info("Executing emergency drop sequence...")
-        
+
         drop_recipe = {
             "ProtocolName": "EMERGENCY_DROP",
             "Labware": {},
@@ -1000,26 +1042,223 @@ class OpentronsSiLA2Server:
                 {"Command": "Home"}
             ]
         }
-        
+
         try:
+            if self.mounted_tip_tracker:
+                self.mounted_tip_tracker.mark_unconfirmed(list(drop_recipe["Pipettes"].keys()))
+
             code = self.generator.generate_content(json.dumps(drop_recipe))
             protocol_id = await self.robot.upload_protocol_content(code)
             run_id = await self.robot.create_run(protocol_id)
             await self.robot.play_run(run_id)
-            
+
             # Wait for completion (max 60 seconds)
+            final_status = None
             for _ in range(60):
-                status = await self.robot.get_run_status(run_id)
-                if status in ("succeeded", "failed", "stopped"):
+                final_status = await self.robot.get_run_status(run_id)
+                if final_status in ("succeeded", "failed", "stopped"):
                     break
                 await asyncio.sleep(1)
-                
+
+            # This path (EmergencyStop/AbortRun) bypasses cmd_run_protocol
+            # entirely, so without this the leftover-tip guard would never
+            # learn a drop happened here (confirmed on real hardware: an
+            # emergency drop that clearly succeeded was still followed by the
+            # next run's guard firing again, because nothing told the tracker).
+            await self._reconcile_mounted_tip_state(run_id)
+
             await self.robot.dismiss_run(run_id)
+
+            if final_status != "succeeded":
+                self.logger.warning(f"Emergency drop did not succeed (status: {final_status})")
+                return False, f"drop sequence ended with status '{final_status}'"
+
             self.logger.info("Emergency drop completed")
-            
+            return True, None
+
         except Exception as e:
             self.logger.error(f"Emergency drop failed: {e}")
-        
+            return False, str(e)
+
+    def _prepend_leftover_tip_guard(self, recipe: Dict) -> Dict:
+        """
+        Prepend an unconditional Force DropTip per pipette mount that might
+        still have a tip attached, to the recipe's own Steps - so a tip left
+        mounted from a previous interrupted run is cleared as part of THIS
+        run (one Home, one pipette load, one continuous execution) instead of
+        a separate preliminary robot run.
+
+        This robot's installed robot-server does not implement
+        `detect_tip_presence()` at all (confirmed on hardware: AttributeError,
+        not just an import issue - the tip-presence-sensing feature isn't
+        present regardless of the declared apiLevel, and isn't part of the
+        public Python Protocol API either), so there's no real *on-robot*
+        presence check available (`DropTipIfPresent`, kept in
+        protocol_generator.py for when/if the robot software is upgraded,
+        isn't usable here). Which mounts actually get a guard step is instead
+        decided from `self.mounted_tip_tracker` - our own persisted,
+        command-log-reconstructed record of the last known state (see
+        MountedTipTracker in tip_tracker.py) - so a confidently-clear mount
+        doesn't pay for an unnecessary drop on every single run. Falling back
+        to "assume present" whenever that record is missing or uncertain;
+        the drop itself is the existing `DropTip(Force=True)` path, already
+        safe as a no-op when there's nothing mounted.
+        """
+        mounts = list(recipe.get("Pipettes", {}).keys())
+        if not mounts:
+            return recipe
+
+        if self.mounted_tip_tracker:
+            guard_mounts = [m for m in mounts if self.mounted_tip_tracker.might_have_tip(m)]
+        else:
+            guard_mounts = mounts
+
+        self.logger.info(f"[TIP-GUARD] mounts={mounts} guarded={guard_mounts}")
+
+        guard_steps = [
+            {"Command": "DropTip", "PipetteMount": mount, "Force": True}
+            for mount in guard_mounts
+        ]
+        recipe["Steps"] = guard_steps + recipe.get("Steps", [])
+        return recipe
+
+    async def _reconcile_mounted_tip_state(self, run_id: str) -> None:
+        """
+        After a run (success, failure, or stop), reconstruct each involved
+        mount's real has_tip state from what actually executed - authoritative
+        even for a run that failed partway through - and persist it for the
+        next run's leftover-tip guard. Any failure here just leaves mounts at
+        the pessimistic "assume present" state written by mark_unconfirmed()
+        at run start - never silently assumes "clear".
+        """
+        if not self.mounted_tip_tracker:
+            return
+        try:
+            run_detail = await self.robot.get_run_detail(run_id)
+            pipette_mounts = {
+                p.get("id"): p.get("mount")
+                for p in ((run_detail or {}).get("data", {}).get("pipettes", []) or [])
+                if p.get("id") and p.get("mount")
+            }
+            data = await self.robot.get_run_commands(run_id)
+            commands = data.get("data", []) if data else []
+        except Exception as e:
+            self.logger.warning(f"Could not read run detail/commands for mounted-tip reconciliation: {e}")
+            return
+        if not commands or not pipette_mounts:
+            self.logger.warning(
+                f"[TIP-GUARD] Incomplete data for reconciliation (commands={len(commands)}, "
+                f"pipette_mounts={pipette_mounts}) - mounts stay 'assume present'"
+            )
+            return
+        reconstructed = reconstruct_tip_mount_state(commands, pipette_mounts)
+        self.logger.info(f"[TIP-GUARD] reconciled from run {run_id} commands: {reconstructed}")
+        self.mounted_tip_tracker.mark_from_commands(commands, pipette_mounts)
+
+    def _compute_waste_comparison(self, recipe: Optional[Dict], commands: List[Dict[str, Any]]) -> Optional[Dict]:
+        """
+        Fase 7 part 2: informational estimate-vs-actual liquid waste for this
+        run - no impact on robot behavior, reporting only.
+
+        Aggregate, not per-reagent: the run's command log only carries
+        labwareId/wellName, not reagent identity, so reconstructing which
+        aspirate/dispense belonged to which reagent post-hoc would need a
+        well->reagent map threaded through the recipe just for this purpose.
+        Instead: summing every succeeded aspirate volume minus every
+        succeeded dispense volume across the whole run gives the TOTAL waste
+        actually incurred (anything aspirated but never dispensed into a
+        destination well was disposed of/blown out) - correct regardless of
+        reagent identity - compared against the sum of the recipe's own
+        generation-time per-reagent estimates
+        (Metadata.RequiredVolumes[*].estimated_waste_ul, from Fase 7 part 1
+        in excel_recipe_parser.py).
+        """
+        if not recipe:
+            return None
+        required_volumes = recipe.get("Metadata", {}).get("RequiredVolumes", {})
+        if not isinstance(required_volumes, dict):
+            return None
+        estimated_waste_ul = sum(
+            (v.get("estimated_waste_ul") or 0)
+            for v in required_volumes.values()
+            if isinstance(v, dict)
+        )
+        if not estimated_waste_ul:
+            return None
+
+        total_aspirated = 0.0
+        total_dispensed = 0.0
+        for cmd in commands:
+            if cmd.get("status") != "succeeded":
+                continue
+            volume = cmd.get("params", {}).get("volume")
+            if volume is None:
+                continue
+            command_type = cmd.get("commandType")
+            if command_type == "aspirate":
+                total_aspirated += volume
+            elif command_type == "dispense":
+                total_dispensed += volume
+
+        if total_aspirated <= 0:
+            return None
+
+        actual_waste_ul = round(total_aspirated - total_dispensed, 1)
+        return {
+            "estimated_waste_ul": round(estimated_waste_ul, 1),
+            "actual_waste_ul": actual_waste_ul,
+            "delta_ul": round(actual_waste_ul - estimated_waste_ul, 1),
+            "note": (
+                "Aggregate across the whole run (total aspirated minus total "
+                "dispensed) - not per-reagent, since the run log only has "
+                "labwareId/wellName, not reagent identity."
+            ),
+        }
+
+    async def _archive_run(
+        self,
+        run_id: str,
+        recipe: Optional[Dict],
+        final_status: str,
+        planned_tips: Dict[str, int],
+        duration_seconds: float,
+    ) -> None:
+        """
+        Fase 6: persist this run's command log + a small summary (status,
+        duration, tip usage, estimate-vs-actual waste) to the run archive,
+        then apply retention. Best-effort: archiving must never break or mask
+        the outcome of a real run, so every failure here is caught and logged,
+        never raised.
+        """
+        if not self.run_archive:
+            return
+        try:
+            data = await self.robot.get_run_commands(run_id)
+            commands = data.get("data", []) if data else []
+        except Exception as e:
+            self.logger.warning(f"Could not fetch commands for run archive: {e}")
+            commands = []
+
+        summary = {
+            "run_id": run_id,
+            "recipe_name": (recipe or {}).get("ProtocolName", ""),
+            "status": final_status,
+            "duration_seconds": round(duration_seconds, 1),
+            "planned_tip_usage": planned_tips,
+            "command_count": len(commands),
+        }
+
+        waste_comparison = self._compute_waste_comparison(recipe, commands)
+        if waste_comparison:
+            summary["waste_comparison"] = waste_comparison
+
+        try:
+            path = self.run_archive.save(run_id, summary, commands)
+            if path:
+                self.run_archive.sweep_retention()
+        except Exception as e:
+            self.logger.warning(f"Run archive save/sweep failed: {e}")
+
     async def cmd_run_protocol(
         self, 
         content: str, 
@@ -1037,18 +1276,32 @@ class OpentronsSiLA2Server:
         Returns:
             Result string with run ID and status
         """
+        # Fast-path check before acquiring self._lock: the lock is held for a
+        # run's entire (potentially unbounded) duration, so a check done only
+        # after acquiring it would never actually see _is_running=True — a
+        # concurrent call would just block in queue behind the running protocol
+        # instead of failing fast with "Robot is busy".
+        if self._is_running:
+            raise RuntimeError("Robot is busy")
+
         async with self._lock:
+            # Re-check inside the lock: belt-and-suspenders against two calls
+            # arriving almost simultaneously and both passing the check above.
             if self._is_running:
                 raise RuntimeError("Robot is busy")
-                
+
             self._is_running = True
             self._status = "running"
             planned_tips = {}
-            
+            run_id = None
+            run_start: Optional[float] = None
+            recipe: Optional[Dict] = None
+            guarded_mounts: List[str] = []
+
             try:
                 if protocol_type == "json":
                     recipe = json.loads(content)
-                    
+
                     # Handle Refill command
                     if recipe.get("Command") == "Refill":
                         rack_type = recipe.get("RackType", "")
@@ -1067,7 +1320,19 @@ class OpentronsSiLA2Server:
                     is_valid, error = self.validate_json_recipe(recipe)
                     if not is_valid:
                         raise ValueError(f"Validation error: {error}")
-                        
+
+                    # Pre-flight: catch a tip left mounted from a previous
+                    # interrupted run before it can collide with anything
+                    # this run tries to move. Integrated into this same run
+                    # (see _prepend_leftover_tip_guard), not a separate one.
+                    if self.config.check_tip_before_run:
+                        recipe = self._prepend_leftover_tip_guard(recipe)
+                        guarded_mounts = list(recipe.get("Pipettes", {}).keys())
+                        if self.mounted_tip_tracker:
+                            # Pessimistic default until this run's own log
+                            # confirms otherwise (see _reconcile_mounted_tip_state).
+                            self.mounted_tip_tracker.mark_unconfirmed(guarded_mounts)
+
                     # Calculate tip usage
                     if self.tip_tracker:
                         planned_tips = calculate_tips_from_recipe(recipe)
@@ -1138,17 +1403,29 @@ class OpentronsSiLA2Server:
                     protocol_code = content
                     
                 # Execute
+                run_start = time.time()
                 run_id = await self._execute_protocol(protocol_code)
-                
+
                 # Wait for completion
                 final_status = await self.robot.wait_for_run_completion(
                     run_id,
-                    on_status_change=on_progress
+                    on_status_change=on_progress,
+                    timeout=self.config.run_timeout
                 )
-                
+
                 # Smart tip tracking update
                 await self._update_tracker_smart(run_id, planned_tips, final_status)
-                
+
+                # Reconcile per-mount tip-presence state from what this run
+                # actually did, for next run's leftover-tip guard.
+                if guarded_mounts:
+                    await self._reconcile_mounted_tip_state(run_id)
+
+                # Archive the run log + summary (Fase 6/7) - after
+                # reconciliation so it doesn't compete for the command-log
+                # fetch, before dismiss_run so the run is still queryable.
+                await self._archive_run(run_id, recipe, final_status, planned_tips, time.time() - run_start)
+
                 # Extract images if succeeded
                 if final_status == "succeeded":
                     await self.robot.extract_images_from_log(run_id, self.config.dir_images)
@@ -1162,13 +1439,33 @@ class OpentronsSiLA2Server:
                 return f"Run {run_id}: {final_status}"
                 
             except Exception as e:
+                self._current_run_id = None
                 self._is_running = False
                 self._status = "error"
+                # Best-effort: a run that raised (e.g. timeout) may still have
+                # a readable command log worth reconciling. If this itself
+                # fails, guarded_mounts stays at the pessimistic "assume
+                # present" state already written by mark_unconfirmed().
+                if guarded_mounts and run_id:
+                    try:
+                        await self._reconcile_mounted_tip_state(run_id)
+                    except Exception as track_exc:
+                        self.logger.warning(f"Could not reconcile mounted-tip state after error: {track_exc}")
+                # Same best-effort spirit for the archive: a failed run's log
+                # is often the most useful one to have kept.
+                if run_id:
+                    try:
+                        await self._archive_run(
+                            run_id, recipe, "error", planned_tips,
+                            time.time() - run_start if run_start else 0.0,
+                        )
+                    except Exception as archive_exc:
+                        self.logger.warning(f"Could not archive run after error: {archive_exc}")
                 if self.config.auto_home_on_error:
                     try:
                         await self.robot.home()
-                    except Exception:
-                        pass
+                    except Exception as home_exc:
+                        self.logger.error(f"Auto-home after error also failed: {home_exc}")
                 raise
             
     def _count_racks(self, recipe: Dict, rack_type: str) -> int:
@@ -1247,29 +1544,34 @@ class OpentronsSiLA2Server:
         
     async def cmd_abort_run(self, run_id: str = "") -> str:
         """Abort a running protocol."""
-        target_id = run_id or self._current_run_id
-        if target_id:
-            await self.robot.stop_run(target_id)
-            if self.config.auto_drop_tip_on_abort:
-                await self._run_emergency_drop()
-            return f"Run {target_id} aborted"
-        return "No run to abort"
-        
+        async with self._control_lock:
+            target_id = run_id or self._current_run_id
+            if target_id:
+                await self.robot.stop_run(target_id)
+                if self.config.auto_drop_tip_on_abort:
+                    drop_ok, drop_error = await self._run_emergency_drop()
+                    if not drop_ok:
+                        return f"Run {target_id} aborted. WARNING: tip drop/home sequence failed ({drop_error}) - verify manually."
+                return f"Run {target_id} aborted"
+            return "No run to abort"
+
     async def cmd_pause_run(self) -> str:
         """Pause current run."""
-        if self._current_run_id:
-            await self.robot.pause_run(self._current_run_id)
-            self._status = "paused"
-            return "Run paused"
-        return "No run to pause"
-        
+        async with self._control_lock:
+            if self._current_run_id:
+                await self.robot.pause_run(self._current_run_id)
+                self._status = "paused"
+                return "Run paused"
+            return "No run to pause"
+
     async def cmd_resume_run(self) -> str:
         """Resume paused run."""
-        if self._current_run_id:
-            await self.robot.play_run(self._current_run_id)
-            self._status = "running"
-            return "Run resumed"
-        return "No run to resume"
+        async with self._control_lock:
+            if self._current_run_id:
+                await self.robot.play_run(self._current_run_id)
+                self._status = "running"
+                return "Run resumed"
+            return "No run to resume"
     
     async def cmd_set_lights(self, on: bool) -> str:
         """Set robot deck lights on or off."""
@@ -1301,7 +1603,7 @@ class OpentronsSiLA2Server:
         return self._current_run_id or ""
         
     def is_connected(self) -> bool:
-        """Check if connected to robot."""
+        """Check if the HTTP client exists (shallow check — robot may have gone offline)."""
         return self.robot.is_connected if self.robot else False
         
     # ═══════════════════════════════════════════════════════════════════
@@ -1461,7 +1763,7 @@ class OpentronsSiLA2Server:
         recipes_dir = os.path.abspath(self.config.dir_recipes if hasattr(self.config, 'dir_recipes') else 
                                        os.path.join(os.path.dirname(__file__), "../../../Library/Recipes"))
         if not os.path.exists(recipes_dir):
-            recipes_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../Library/Recipes"))
+            recipes_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../Library/Recipes"))
         if not os.path.exists(recipes_dir):
             self.logger.warning(f"Recipes directory not found: {recipes_dir}")
             return []
@@ -1487,7 +1789,7 @@ class OpentronsSiLA2Server:
         recipes_dir = os.path.abspath(self.config.dir_recipes if hasattr(self.config, 'dir_recipes') else 
                                        os.path.join(os.path.dirname(__file__), "../../../Library/Recipes"))
         if not os.path.exists(recipes_dir):
-            recipes_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../Library/Recipes"))
+            recipes_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../Library/Recipes"))
         
         # Add .json extension if missing
         if not recipe_name.endswith('.json'):
@@ -1572,7 +1874,7 @@ class OpentronsSiLA2Server:
         recipes_dir = os.path.abspath(self.config.dir_recipes if hasattr(self.config, 'dir_recipes') else 
                                        os.path.join(os.path.dirname(__file__), "../../../Library/Recipes"))
         if not os.path.exists(recipes_dir):
-            recipes_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../Library/Recipes"))
+            recipes_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../Library/Recipes"))
         
         # Add .json extension if missing
         if not recipe_name.endswith('.json'):

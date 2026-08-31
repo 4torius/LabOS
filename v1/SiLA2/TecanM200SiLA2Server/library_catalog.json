@@ -1,0 +1,11 @@
+{
+  "library_types": [
+    {
+      "hint": "analysis",
+      "display_name": "Analysis Protocol",
+      "folder": "Library/Analysis",
+      "file_extension": ".mdfx",
+      "parameter_names": ["ProtocolFile", "AnalysisFile"]
+    }
+  ]
+}

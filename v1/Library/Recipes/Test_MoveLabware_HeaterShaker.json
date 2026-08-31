@@ -1,0 +1,38 @@
+{
+  "ProtocolName": "Test_MoveLabware_HeaterShaker",
+  "Description": "Test per esaurimento tip rack - usa 6 tips (1 rack completo)",
+  "Requirements": {
+    "Source_1": "Source_1",
+    "TargetPlate": "TargetPlate",
+    "MyTips": "MyTips",
+    "MyTrash": "MyTrash",
+    "HeaterShaker": "HeaterShaker"
+  },
+  "Steps": [
+    {
+      "Command": "MoveLabware",
+      "Type": "MoveLabware",
+      "LabwareID": "Source_1",
+      "NewLocation": "HeaterShaker",
+      "UseGripper": true
+    },
+    {
+      "Command": "HeaterShaker",
+      "Type": "HeaterShaker",
+      "ModuleID": "HeaterShaker",
+      "CloseLatch": true,
+      "Temperature": 30,
+      "WaitForTemp": true,
+      "RPM": 200,
+      "Duration": 60,
+      "OpenLatch": true
+    },
+    {
+      "Command": "MoveLabware",
+      "Type": "MoveLabware",
+      "LabwareID": "Source_1",
+      "NewLocation": "C2",
+      "UseGripper": true
+    }
+  ]
+}

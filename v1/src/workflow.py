@@ -373,7 +373,14 @@ def _load_executor_config() -> tuple:
     try:
         config, _ = load_lab_config(config_path, apply_defaults=False, strict=False)
         error_cfg = config.get("error_handling", _error_defaults)
-        timeout = float(config.get("workflow", {}).get("default_timeout", 300.0))
+        # workflow.default_timeout: 0 or null in lab_config.yaml means "no default
+        # timeout" for any step that doesn't set its own TimeoutSeconds. Prefer
+        # leaving this finite (it's the safety net that detects a hung/crashed
+        # instrument across all step types) and instead set TimeoutSeconds: 0 on
+        # the one step that's genuinely long-running (e.g. a multi-day
+        # incubation), so other steps keep hang detection.
+        raw_timeout = config.get("workflow", {}).get("default_timeout", 300.0)
+        timeout = 300.0 if raw_timeout is None else float(raw_timeout)
         return error_cfg, timeout
     except Exception:
         return _error_defaults, 300.0
@@ -640,7 +647,7 @@ class PnPWorkflowExecutor:
             recipe_path = self.base_dir / "Library" / "Recipes" / f"{recipe_name}.json"
             if not recipe_path.exists():
                 return errors
-            recipe = _json.loads(recipe_path.read_text(encoding="utf-8"))
+            recipe = _json.loads(recipe_path.read_text(encoding="utf-8-sig"))
 
             # Collect all distinct destination wells per target labware
             wells_by_labware: Dict[str, set] = {}
@@ -667,26 +674,26 @@ class PnPWorkflowExecutor:
                     pj = (self.base_dir / "Library" / "Labware" / "Plates"
                           / f"{load_name}.plate.json")
                     if pj.exists():
-                        meta = _json.loads(pj.read_text(encoding="utf-8"))
+                        meta = _json.loads(pj.read_text(encoding="utf-8-sig"))
                         plate_total_wells[logical] = int(meta.get("total_wells", 0))
 
             # Fall back to active HAL config
             if not plate_total_wells:
                 active_file = self.base_dir / "Library" / "HardwareConfig" / ".active"
                 if active_file.exists():
-                    hal_name = active_file.read_text(encoding="utf-8").strip()
+                    hal_name = active_file.read_text(encoding="utf-8-sig").strip()
                     hal_path = self.base_dir / "Library" / "HardwareConfig" / hal_name
                     if not hal_path.exists():
                         hal_path = hal_path.with_suffix(".json")
                     if hal_path.exists():
-                        hal = _json.loads(hal_path.read_text(encoding="utf-8"))
+                        hal = _json.loads(hal_path.read_text(encoding="utf-8-sig"))
                         for logical, lw_def in hal.get("Labware", {}).items():
                             load_name = lw_def.get("LoadName", "")
                             if "wellplate" in load_name.lower():
                                 pj = (self.base_dir / "Library" / "Labware" / "Plates"
                                       / f"{load_name}.plate.json")
                                 if pj.exists():
-                                    meta = _json.loads(pj.read_text(encoding="utf-8"))
+                                    meta = _json.loads(pj.read_text(encoding="utf-8-sig"))
                                     plate_total_wells[logical] = int(meta.get("total_wells", 0))
 
             for labware, well_set in wells_by_labware.items():
@@ -1094,7 +1101,10 @@ class PnPWorkflowExecutor:
         last_error: Optional[CategorizedError] = None
         retry_count = step.retry_count if step.retry_count is not None else self._error_config.get("max_retries", 3)
         max_attempts = retry_count + 1
-        step_timeout = step.timeout_seconds or self._default_step_timeout
+        # step.timeout_seconds == 0 means "unlimited" and must be respected as-is
+        # (client.py normalizes 0/negative to None downstream) — `or` would wrongly
+        # fall back to the default here since 0 is falsy in Python.
+        step_timeout = step.timeout_seconds if step.timeout_seconds is not None else self._default_step_timeout
         context = f"{step.action} on {step.instrument}"
 
         for attempt in range(max_attempts):

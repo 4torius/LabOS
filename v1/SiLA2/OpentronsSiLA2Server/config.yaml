@@ -11,9 +11,13 @@ server:
 
 robot:
   # Opentrons Flex HTTP API
-  ip: "169.254.161.83"
+  ip: "10.16.0.137"
   port: 31950
   timeout: 30
+  # Max seconds to wait for a recipe/protocol run to finish.
+  # 0 = unlimited (a protocol may legitimately run for hours or days, e.g.
+  # multi-day hydrogel curing with periodic Tecan reads).
+  run_timeout: 7200
   # Local address to bind (needed for link-local routing on Windows with Hyper-V)
   # local_address: "169.254.161.1"
   # Retry settings
@@ -34,20 +38,24 @@ directories:
   output: "./output"
   images: "./images"
   logs: "./logs"
-  # Shared directories (relative to BicoccaLab root)
-  library: "../../../Library"
-  recipes: "../../../Library/Recipes"
-  results: "../../../Results"
-  protocols: "../../../Protocols"
+  # Shared directories (relative to OpentronsSiLA2Server folder, same depth as hardware.config_folder)
+  library: "../../Library"
+  recipes: "../../Library/Recipes"
+  results: "../../Results"
+  protocols: "../../Protocols"
 
 tip_tracking:
   enabled: true
   state_file: "./tip_state.json"
-  
+  # Per-mount "does it still have a tip attached" state, reconstructed from
+  # each run's command log. Used by safety.check_tip_before_run.
+  mount_state_file: "./tip_mount_state.json"
+
 safety:
   emergency_protocol: "../000_EMERGENCY_RESET.json"
   auto_home_on_error: true
   auto_drop_tip_on_abort: true
+  check_tip_before_run: true
 
 logging:
   level: "INFO"
@@ -55,3 +63,17 @@ logging:
   console_enabled: true
   max_file_size_mb: 10
   backup_count: 5
+
+run_archive:
+  # Local copy of each run's command log + summary (status, duration, tip
+  # usage, estimate-vs-actual waste). A convenience supplement for debugging
+  # and reconciliation - NOT the sole historical record: the originals stay
+  # recoverable from the Opentrons App/API until the run is removed there -
+  # so retention here is deliberately kept short.
+  enabled: true
+  dir: "./run_archive"
+  # Days to keep the raw JSON uncompressed before gzip'ing it.
+  retention_uncompressed_days: 3
+  # Total days (from original run time, not from compression time) before a
+  # compressed archive is deleted.
+  retention_compressed_days: 30

@@ -1,0 +1,93 @@
+{
+  "WorkflowName": "NewWorkflow",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "GoFaGo Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "ExecutionMode": "Normal",
+        "TaskId": "uecexrkwddbbvxsbgiqfakfhtskmahbz"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "GoFaGo Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "ExecutionMode": "Normal",
+        "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 3,
+      "Instrument": "TecanM200Pro",
+      "Action": "PlateOut",
+      "Parameters": {},
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 4,
+      "Instrument": "GoFaGo Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "ExecutionMode": "Normal",
+        "TaskId": "rxzeeofvewbamneadgvdafucvefidfgb"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 5,
+      "Instrument": "TecanM200Pro",
+      "Action": "PlateIn",
+      "Parameters": {},
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 6,
+      "Instrument": "TecanM200Pro",
+      "Action": "RunMeasurement",
+      "Parameters": {
+        "ProtocolFile": "Script1"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 7,
+      "Instrument": "TecanM200Pro",
+      "Action": "PlateOut",
+      "Parameters": {},
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 8,
+      "Instrument": "GoFaGo Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "ExecutionMode": "Normal",
+        "TaskId": "nnegfohactaltbahtxfnejaaycafskaq"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 9,
+      "Instrument": "TecanM200Pro",
+      "Action": "PlateIn",
+      "Parameters": {},
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 10,
+      "Instrument": "GoFaGo Mobile Robot",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "ExecutionMode": "Normal",
+        "TaskId": "obwlfxkzdevvwcueaeekddafeaabccyb"
+      },
+      "DependsOn": []
+    }
+  ],
+  "CreatedAt": "2026-08-05T13:35:16.988753"
+}

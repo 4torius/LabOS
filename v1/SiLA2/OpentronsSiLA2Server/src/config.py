@@ -131,14 +131,21 @@ class ServerConfig:
     # Robot settings
     robot_ip: str = "169.254.161.83"
     robot_port: int = 31950
+    # Per-HTTP-call timeout to the Opentrons robot API (detects a genuinely
+    # unresponsive robot, e.g. powered off/unreachable) — a different concern
+    # from run_timeout (protocol-duration limit) and deliberately kept finite,
+    # not subject to the "0 = unlimited" convention used for run_timeout.
     robot_timeout: float = 30.0
     robot_local_address: Optional[str] = None
     connection_retry_count: int = 3
     connection_retry_delay: float = 2.0
     robot_discovered_via: str = "default"  # "env", "config", "mdns", "default"
+    # Max seconds to wait for a run to reach a terminal state.
+    # 0 or null in config.yaml means unlimited (for multi-day protocols).
+    run_timeout: Optional[float] = 7200.0
     
     # Hardware config
-    hardware_config_folder: str = "../../../Library/HardwareConfig"
+    hardware_config_folder: str = "../../Library/HardwareConfig"
     hardware_default_config: str = "HardwareConfig.json"
     
     # Directories
@@ -149,15 +156,18 @@ class ServerConfig:
     dir_images: str = "./images"
     dir_logs: str = "./logs"
     dir_temp: str = "./temp"
+    dir_recipes: str = "../../Library/Recipes"
     
     # Tip tracking
     tip_tracking_enabled: bool = True
     tip_state_file: str = "./tip_state.json"
+    tip_mount_state_file: str = "./tip_mount_state.json"
     
     # Safety
     emergency_protocol: str = "../000_EMERGENCY_RESET.json"
     auto_home_on_error: bool = True
     auto_drop_tip_on_abort: bool = True
+    check_tip_before_run: bool = True
     
     # Logging
     log_level: str = "INFO"
@@ -165,7 +175,14 @@ class ServerConfig:
     log_console_enabled: bool = True
     log_max_file_size_mb: int = 10
     log_backup_count: int = 5
-    
+
+    # Run archive (Fase 6/7): local run log + summary with rotation
+    run_archive_enabled: bool = True
+    dir_run_archive: str = "./run_archive"
+    run_archive_retention_uncompressed_days: float = 3
+    run_archive_retention_compressed_days: float = 30
+
+
     def __init__(self, config_path: Optional[str] = None, use_mdns: bool = True):
         """
         Load configuration from YAML file with env var overrides and mDNS fallback.
@@ -243,6 +260,9 @@ class ServerConfig:
         self.robot_ip = robot.get("ip", self.robot_ip)
         self.robot_port = robot.get("port", self.robot_port)
         self.robot_timeout = robot.get("timeout", self.robot_timeout)
+        self.run_timeout = robot.get("run_timeout", self.run_timeout)
+        if self.run_timeout is not None and self.run_timeout <= 0:
+            self.run_timeout = None  # 0 = unlimited
         self.robot_local_address = robot.get("local_address", self.robot_local_address)
         self.connection_retry_count = robot.get("connection_retry_count", self.connection_retry_count)
         self.connection_retry_delay = robot.get("connection_retry_delay", self.connection_retry_delay)
@@ -261,17 +281,20 @@ class ServerConfig:
         self.dir_output = dirs.get("output", self.dir_output)
         self.dir_images = dirs.get("images", self.dir_images)
         self.dir_logs = dirs.get("logs", self.dir_logs)
+        self.dir_recipes = dirs.get("recipes", self.dir_recipes)
         
         # Tip tracking section
         tip = cfg.get("tip_tracking", {})
         self.tip_tracking_enabled = tip.get("enabled", self.tip_tracking_enabled)
         self.tip_state_file = tip.get("state_file", self.tip_state_file)
+        self.tip_mount_state_file = tip.get("mount_state_file", self.tip_mount_state_file)
         
         # Safety section
         safety = cfg.get("safety", {})
         self.emergency_protocol = safety.get("emergency_protocol", self.emergency_protocol)
         self.auto_home_on_error = safety.get("auto_home_on_error", self.auto_home_on_error)
         self.auto_drop_tip_on_abort = safety.get("auto_drop_tip_on_abort", self.auto_drop_tip_on_abort)
+        self.check_tip_before_run = safety.get("check_tip_before_run", self.check_tip_before_run)
         
         # Logging section
         log = cfg.get("logging", {})
@@ -280,7 +303,18 @@ class ServerConfig:
         self.log_console_enabled = log.get("console_enabled", self.log_console_enabled)
         self.log_max_file_size_mb = log.get("max_file_size_mb", self.log_max_file_size_mb)
         self.log_backup_count = log.get("backup_count", self.log_backup_count)
-    
+
+        # Run archive section
+        archive = cfg.get("run_archive", {})
+        self.run_archive_enabled = archive.get("enabled", self.run_archive_enabled)
+        self.dir_run_archive = archive.get("dir", self.dir_run_archive)
+        self.run_archive_retention_uncompressed_days = archive.get(
+            "retention_uncompressed_days", self.run_archive_retention_uncompressed_days
+        )
+        self.run_archive_retention_compressed_days = archive.get(
+            "retention_compressed_days", self.run_archive_retention_compressed_days
+        )
+
     def validate(self) -> tuple[bool, str]:
         """Validate configuration. Returns (is_valid, error_message)."""
         if self.port < 1 or self.port > 65535:
@@ -289,6 +323,10 @@ class ServerConfig:
             return False, f"Invalid robot port: {self.robot_port}"
         if self.robot_timeout <= 0:
             return False, f"Invalid robot timeout: {self.robot_timeout}"
+        # run_timeout is normalized to None ("unlimited") by _load_from_yaml
+        # before this runs, so a non-None value here is always meant to be finite.
+        if self.run_timeout is not None and self.run_timeout <= 0:
+            return False, f"Invalid run timeout: {self.run_timeout}"
         return True, ""
 
 

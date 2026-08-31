@@ -45,7 +45,7 @@ import logging
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Awaitable
+from typing import Any, Callable, Dict, List, Optional, Awaitable, Tuple
 
 # Local imports
 try:
@@ -231,7 +231,27 @@ class LabCore:
             )
         except Exception as e:
             logger.warning(f"Error loading config: {e}")
-    
+
+    def _command_timeout(self) -> Optional[float]:
+        """Max seconds to wait for a single command/step to finish.
+
+        Reuses workflow.default_timeout — the same "how long do we wait for
+        one hardware operation" knob already used by the workflow executor —
+        rather than introducing a second, easy-to-desync config value. 0 or
+        null means unlimited (client.execute() normalizes it to None, which
+        every timeout call site below treats as "wait forever") — useful for
+        an ad-hoc single-command run of a long protocol from the UI, though
+        the per-step TimeoutSeconds override on a saved workflow step is the
+        recommended way to do this for most cases.
+        """
+        try:
+            from src.config_schema import load_lab_config
+            config, _ = load_lab_config(self.base_dir / "lab_config.yaml", apply_defaults=False, strict=False)
+            raw_timeout = config.get("workflow", {}).get("default_timeout", 300.0)
+            return 300.0 if raw_timeout is None else float(raw_timeout)
+        except Exception:
+            return 300.0
+
     def _get_options_for_hint(self, ui_hint: str) -> List[str]:
         """
         Get dynamic options based on UI hint from lab_config.yaml.
@@ -254,7 +274,7 @@ class LabCore:
             plates_dir = self.base_dir / "Library" / "Labware" / "Plates"
             try:
                 return sorted(
-                    _json.loads(f.read_text(encoding="utf-8"))["id"]
+                    _json.loads(f.read_text(encoding="utf-8-sig"))["id"]
                     for f in plates_dir.glob("*.plate.json")
                 )
             except Exception:
@@ -262,12 +282,12 @@ class LabCore:
         if ui_hint == "tiprack":
             idx = self.base_dir / "Library" / "Labware" / "TipRacks" / "index.json"
             if idx.exists():
-                return _json.loads(idx.read_text(encoding="utf-8")).get("load_names", [])
+                return _json.loads(idx.read_text(encoding="utf-8-sig")).get("load_names", [])
             return []
         if ui_hint == "pipette":
             idx = self.base_dir / "Library" / "Labware" / "Pipettes" / "index.json"
             if idx.exists():
-                data = _json.loads(idx.read_text(encoding="utf-8"))
+                data = _json.loads(idx.read_text(encoding="utf-8-sig"))
                 seen: set = set()
                 result = []
                 for d in data.get("definitions", []):
@@ -384,7 +404,7 @@ class LabCore:
         options = []
         for task_file in tasks_dir.glob("*.json"):
             try:
-                with open(task_file, 'r', encoding='utf-8') as f:
+                with open(task_file, 'r', encoding='utf-8-sig') as f:
                     task = json.load(f)
                     options.append({
                         "id": task.get("id", task_file.stem),
@@ -475,13 +495,18 @@ class LabCore:
             if not server:
                 return 0
             
-            await self._client.connect(server)
-            
+            try:
+                await self._client.connect(server)
+            except (ConnectionError, OSError, TimeoutError, asyncio.TimeoutError) as e:
+                logger.warning(f"Mobile server unreachable at {server.host}:{server.port}: {e}")
+                return 0
+
             result = await self._client.execute(
                 server,
                 "Get_AvailableTasks",
                 {},
-                feature="TaskManagement"
+                feature="TaskManagement",
+                timeout=self._command_timeout()
             )
             
             if not result.success:
@@ -498,7 +523,8 @@ class LabCore:
                 if isinstance(tasks_raw, str):
                     try:
                         tasks = json.loads(tasks_raw)
-                    except:
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Malformed tasks payload from mobile server: {e}")
                         tasks = []
                 else:
                     tasks = tasks_raw
@@ -519,34 +545,83 @@ class LabCore:
             saved = await self._save_mobile_tasks_to_library(normalized_tasks)
             return saved
             
-        except Exception as e:
-            logger.error(f"Error refreshing mobile tasks: {e}")
+        except (ConnectionError, OSError, TimeoutError, asyncio.TimeoutError) as e:
+            logger.warning(f"Mobile server connection error during task refresh: {e}")
             return 0
-    
+        except Exception as e:
+            logger.error(f"Error refreshing mobile tasks (malformed response or bug): {e}")
+            return 0
+
     #                           DISCOVERY
 
-    def _build_port_to_key(self) -> Dict[int, str]:
-        """Build port → lab_config key map for stable instrument IDs."""
-        result: Dict[int, str] = {}
+    def _build_port_to_key(self) -> Tuple[Dict[int, str], Dict[int, str]]:
+        """Build port → lab_config key and port → configured host maps for stable instrument IDs."""
+        port_to_key: Dict[int, str] = {}
+        port_to_host: Dict[int, str] = {}
         try:
             import yaml as _yaml
             raw = _yaml.safe_load((self.base_dir / "lab_config.yaml").read_text())
             for k, v in (raw or {}).get("servers", {}).items():
                 p = int((v or {}).get("port", 0))
                 if p:
-                    result[p] = k
+                    port_to_key[p] = k
+                    h = (v or {}).get("host")
+                    if h:
+                        port_to_host[p] = h
         except Exception:
             pass
-        return result
+        return port_to_key, port_to_host
 
-    def _server_to_instrument(self, server: PnPServer, port_to_key: Dict[int, str]) -> Instrument:
+    def _server_to_instrument(
+        self,
+        server: PnPServer,
+        port_to_key: Dict[int, str],
+        port_to_host: Dict[int, str],
+    ) -> Instrument:
         """Convert a PnPServer (with populated features) to an Instrument."""
-        inst_id = port_to_key.get(server.port) or server.name.lower().replace(" ", "_")
+        candidate_id = port_to_key.get(server.port)
+        if candidate_id:
+            # A configured port can be shared by a stale/foreign server (e.g. an
+            # old instance left running on a different host after a redeploy).
+            # Only claim the configured instrument ID if the announcing host
+            # matches the configured host, or the host of whatever instance is
+            # already registered under that ID — otherwise treat it as a
+            # distinct instrument instead of clobbering the existing slot.
+            configured_host = port_to_host.get(server.port)
+            existing = self._instruments.get(candidate_id)
+            existing_host = existing.host if existing else None
+            host_ok = (
+                not configured_host
+                or configured_host in ("localhost", "127.0.0.1")
+                or server.host == configured_host
+                or (existing_host is not None and server.host == existing_host)
+            )
+            inst_id = candidate_id if host_ok else server.name.lower().replace(" ", "_")
+        else:
+            inst_id = server.name.lower().replace(" ", "_")
+
+        # Build param→hint lookup from server's LabOSLibraryProvider catalog.
+        # Takes priority over keyword inference in infer_ui_hint().
+        param_hint_lookup: Dict[str, str] = {}
+        for lib_type in server.library_catalog:
+            for pname in lib_type.get("parameter_names", []):
+                param_hint_lookup[pname] = lib_type["hint"]
+
+        # Merge catalog folder/extension into _ui_dropdowns for _get_options_for_hint().
+        # Only adds new entries; static lab_config.yaml entries take precedence.
+        for lib_type in server.library_catalog:
+            hint = lib_type["hint"]
+            if hint not in self._ui_dropdowns and not lib_type.get("dynamic"):
+                self._ui_dropdowns[hint] = {
+                    "folder": lib_type["folder"],
+                    "file_extension": lib_type["file_extension"],
+                }
+
         commands = []
         for feature_id, cmd_id, cmd in server.get_all_commands():
             params = []
             for p in cmd.parameters:
-                ui_hint = p.infer_ui_hint()
+                ui_hint = param_hint_lookup.get(p.identifier) or p.infer_ui_hint()
                 options = p.constraints if p.constraints else []
                 if not options and ui_hint:
                     options = self._get_options_for_hint(ui_hint)
@@ -594,8 +669,8 @@ class LabCore:
         await loop.run_in_executor(
             None, self._discovery._try_sila2_client_query, server.host, server.port, server
         )
-        port_to_key = self._build_port_to_key()
-        instrument = self._server_to_instrument(server, port_to_key)
+        port_to_key, port_to_host = self._build_port_to_key()
+        instrument = self._server_to_instrument(server, port_to_key, port_to_host)
         self._instruments[instrument.id] = instrument
         logger.info(f"mDNS push: registered new instrument '{instrument.name}'")
         if self._on_discovery_update:
@@ -625,11 +700,11 @@ class LabCore:
         self._discovery.set_discovery_callback(self._on_mdns_server_discovered)
         await self._discovery.discover_all(timeout=timeout)
 
-        port_to_key = self._build_port_to_key()
+        port_to_key, port_to_host = self._build_port_to_key()
         self._instruments = {
             inst.id: inst
             for inst in (
-                self._server_to_instrument(s, port_to_key)
+                self._server_to_instrument(s, port_to_key, port_to_host)
                 for s in self._discovery.list_servers()
             )
         }
@@ -667,8 +742,37 @@ class LabCore:
         
         return None
     
+    #                           PROPERTY ACCESS
+
+    async def get_property(
+        self,
+        instrument_id: str,
+        feature: str,
+        property_name: str,
+    ) -> ExecutionResult:
+        """Read a SiLA2 (non-observable) property on an instrument."""
+        instrument = self.get_instrument(instrument_id)
+        if not instrument:
+            return ExecutionResult(success=False, error=f"Instrument '{instrument_id}' not found")
+
+        if instrument.status != "online":
+            return ExecutionResult(success=False, error=f"Instrument '{instrument.name}' is offline")
+
+        server = instrument._server
+        if not server:
+            return ExecutionResult(success=False, error=f"No server reference for {instrument.name}")
+
+        if self._client is None:
+            self._client = PnPClient()
+        await self._client.connect(server)
+
+        result = await self._client.get_property(server, feature, property_name)
+        if not result.success:
+            return ExecutionResult(success=False, error=result.error or "Unknown error")
+        return ExecutionResult(success=True, data=result.data)
+
     #                           COMMAND EXECUTION
-    
+
     async def execute_command(
         self, 
         instrument_id: str, 
@@ -736,12 +840,16 @@ class LabCore:
                     error=f"Command '{command_id}' not found on {instrument.name}"
                 )
             
-            # Execute via PnPClient (Strategy 0: sila2 SilaClient)
+            # Execute via PnPClient (Strategy 0: sila2 SilaClient).
+            # A bounded timeout is required here: without one, a hardware
+            # command that never returns would hang this coroutine (and any
+            # caller awaiting it) forever.
             result = await self._client.execute(
-                server, 
-                command_id, 
+                server,
+                command_id,
                 parameters,
-                feature=cmd.feature
+                feature=cmd.feature,
+                timeout=self._command_timeout()
             )
             
             # Check result
@@ -752,16 +860,25 @@ class LabCore:
                     error=result.error or "Unknown error"
                 )
             
-            # Special handling: after RefreshTasks, save tasks from response to Library
-            if command_id == "RefreshTasks" and result.data:
-                tasks_json = result.data.get("tasks", "[]")
+            # Special handling: after RefreshTasks, pull the real task list from the
+            # AvailableTasks property (RefreshTasks itself only returns a TaskCount)
+            # and save it to Library/MobileTasks/ for the mobile_task dropdown.
+            if command_id == "RefreshTasks":
                 try:
-                    if isinstance(tasks_json, str):
-                        tasks = json.loads(tasks_json)
+                    prop_result = await self.get_property(instrument_id, cmd.feature, "AvailableTasks")
+                    if prop_result.success and isinstance(prop_result.data, list):
+                        tasks = [
+                            {
+                                "id": t.get("TaskId", ""),
+                                "name": t.get("TaskName", ""),
+                                "subtask_count": t.get("SubtaskCount", 0),
+                            }
+                            for t in prop_result.data
+                        ]
+                        saved = await self._save_mobile_tasks_to_library(tasks)
+                        self._log("info", f"Saved {saved} tasks to Library/MobileTasks/")
                     else:
-                        tasks = tasks_json
-                    saved = await self._save_mobile_tasks_to_library(tasks)
-                    self._log("info", f"Saved {saved} tasks to Library/MobileTasks/")
+                        self._log("warning", f"Could not read AvailableTasks: {prop_result.error}")
                 except Exception as e:
                     self._log("warning", f"Failed to save tasks: {e}")
             
@@ -855,7 +972,7 @@ class LabCore:
             return None
         
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, 'r', encoding='utf-8-sig') as f:
                 return json.load(f)
         except Exception as e:
             logger.error(f"Error loading {filename}: {e}")

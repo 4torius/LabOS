@@ -52,7 +52,7 @@ servers:
   mobile:
     name: Mobile Robot
     enabled: true
-    host: 10.16.0.114      # Robot PC WiFi IP — update if different
+    host: 192.168.11.22    # zbox — Docker-based deployment (see SiLA2/MobileSiLA2Server/MIGRATION_AND_AUTOSTART.md)
     port: 50053            # on a different subnet; mDNS multicast cannot reach it
     remote: true           # Runs on external Linux PC, not started locally
     network:
@@ -81,6 +81,11 @@ discovery:
   bootstrap_timeout_s: 5            # per-server gRPC check timeout at startup
 workflow:
   parallel_execution: false
+  # Fallback timeout (seconds) for any workflow step that doesn't set its own
+  # TimeoutSeconds. 600s covers quick instrument calls; 0 or null means no
+  # global fallback (not recommended — steps that hang go undetected). For a
+  # genuinely long-running step (e.g. a multi-day incubation), prefer setting
+  # TimeoutSeconds: 0 on that one step instead of raising/removing this default.
   default_timeout: 600
   retry_on_failure: false
   max_retries: 3
@@ -91,18 +96,10 @@ error_handling:
   max_retries: 3
   enable_human_intervention: true
 ui_dropdowns:
-  recipe:
-    folder: Library/Recipes
-    file_extension: .json
-  analysis:
-    folder: Library/Analysis
-    file_extension: .mdfx
-  hal_config:
-    folder: Library/HardwareConfig
-    file_extension: .json
-  liquid_class:
-    folder: Library/LiquidClasses
-    file_extension: .json
+  # recipe, analysis, hal_config, liquid_class, mobile_task are declared by each
+  # server via LabOSLibraryProvider.LibraryCatalog — no static entries needed here.
+
+  # Labware catalogs use index.json with special parsing — kept here.
   pipette:
     folder: Library/Labware/Pipettes
     file_extension: .json
@@ -112,6 +109,7 @@ ui_dropdowns:
   tiprack:
     folder: Library/Labware/TipRacks
     file_extension: .json
+  # mobile_task is dynamic (fetched from server at runtime) — kept here.
   mobile_task:
     dynamic: true
     server: mobile
@@ -122,7 +120,7 @@ webapp:
     intervention_timeout: 3600
     manual_action_timeout: 600
     tip_refill_timeout: 600
-    discovery_timeout: 1
+    discovery_timeout: 3
   ui:
     auto_refresh_interval: 3
     toast_duration: 15

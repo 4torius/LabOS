@@ -18,7 +18,7 @@
 <Feature xmlns="http://www.sila-standard.org"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          Category="instruments"
-         FeatureVersion="1.0.0"
+         FeatureVersion="1.0"
          Originator="org.silastandard"
          SiLA2Version="1.1"
          xsi:schemaLocation="http://www.sila-standard.org https://gitlab.com/SiLA2/sila_base/-/raw/master/schema/FeatureDefinition.xsd"
@@ -98,14 +98,6 @@
                 <Basic>Integer</Basic>
             </DataType>
         </Parameter>
-        <IntermediateResponse>
-            <Identifier>Progress</Identifier>
-            <DisplayName>Progress</DisplayName>
-            <Description>Current progress percentage (0-100)</Description>
-            <DataType>
-                <Basic>Integer</Basic>
-            </DataType>
-        </IntermediateResponse>
         <Response>
             <Identifier>Result</Identifier>
             <DisplayName>Result</DisplayName>
@@ -114,6 +106,14 @@
                 <Basic>String</Basic>
             </DataType>
         </Response>
+        <IntermediateResponse>
+            <Identifier>Progress</Identifier>
+            <DisplayName>Progress</DisplayName>
+            <Description>Current progress percentage (0-100)</Description>
+            <DataType>
+                <Basic>Integer</Basic>
+            </DataType>
+        </IntermediateResponse>
     </Command>
 
     <!-- Basic utility commands (recommended for all instruments) -->

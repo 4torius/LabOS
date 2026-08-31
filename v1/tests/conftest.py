@@ -1,7 +1,6 @@
 ﻿"""
 Shared pytest fixtures for LabOS test suite.
 """
-import asyncio
 import sys
 from pathlib import Path
 
@@ -17,11 +16,6 @@ if str(V1_DIR) not in sys.path:
 @pytest.fixture(scope="session")
 def base_dir() -> Path:
     return V1_DIR
-
-
-@pytest.fixture(scope="session")
-def event_loop_policy():
-    return asyncio.DefaultEventLoopPolicy()
 
 
 @pytest.fixture
@@ -42,8 +36,9 @@ def sila2_dir(base_dir):
 def pytest_configure(config):
     config.addinivalue_line("markers", "integration: requires running SiLA2 servers")
     config.addinivalue_line("markers", "tecan: requires Tecan server on port 50051")
-    config.addinivalue_line("markers", "opentrons: requires Opentrons server on port 50057")
+    config.addinivalue_line("markers", "opentrons: requires Opentrons server on port 50302")
     config.addinivalue_line("markers", "manual_station: requires ManualStation server on port 50360")
+    config.addinivalue_line("markers", "mobile: requires the remote MobileSiLA2Server reachable on the network")
 
 
 def is_port_open(host: str, port: int, timeout: float = 1.0) -> bool:
@@ -57,7 +52,7 @@ def is_port_open(host: str, port: int, timeout: float = 1.0) -> bool:
 
 @pytest.fixture(scope="session")
 def opentrons_available():
-    return is_port_open("localhost", 50057)
+    return is_port_open("localhost", 50302)
 
 
 @pytest.fixture(scope="session")
@@ -68,6 +63,18 @@ def tecan_available():
 @pytest.fixture(scope="session")
 def manual_station_available():
     return is_port_open("localhost", 50360)
+
+
+@pytest.fixture(scope="session")
+def mobile_available(lab_config):
+    """Reachability of the remote MobileSiLA2Server (runs on a separate Ubuntu
+    PC, not on this machine — see servers.mobile in lab_config.yaml)."""
+    mobile_cfg = lab_config.get("servers", {}).get("mobile", {})
+    host = mobile_cfg.get("host")
+    port = mobile_cfg.get("port")
+    if not host or not port:
+        return False
+    return is_port_open(host, int(port), timeout=2.0)
 
 
 @pytest.fixture(scope="session")

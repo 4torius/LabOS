@@ -29,6 +29,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sila2.server import SilaServer
 
 from generated.workflowapi import WorkflowAPIFeature
+from generated.laboslibraryprovider import LabOSLibraryProviderFeature
+from src.library_provider_impl import LibraryProviderImpl
 
 
 def _get_persistent_uuid(server_dir: str) -> UUID:
@@ -110,6 +112,7 @@ def main() -> int:
 
     impl = WorkflowAPIImpl(sila_server, config)
     sila_server.set_feature_implementation(WorkflowAPIFeature, impl)
+    sila_server.set_feature_implementation(LabOSLibraryProviderFeature, LibraryProviderImpl(sila_server))
 
     # ── Start ─────────────────────────────────────────────────────────────────
     enable_discovery = not args.no_discovery
@@ -130,7 +133,20 @@ def main() -> int:
     print()
 
     # ── Graceful shutdown ─────────────────────────────────────────────────────
-    signal.signal(signal.SIGTERM, lambda *_: sila_server.grpc_server.stop(0))
+    # A nonzero grace period gives an in-flight command (e.g. ExecuteRecipe)
+    # a chance to return normally instead of the gRPC channel dying mid-call
+    # while the robot is still physically moving.
+    shutdown_grace_seconds = 10.0
+
+    def _handle_shutdown_signal(signum, _frame):
+        logging.getLogger(__name__).info(
+            f"Received signal {signum}, stopping server "
+            f"(grace period: {shutdown_grace_seconds}s)..."
+        )
+        sila_server.grpc_server.stop(shutdown_grace_seconds)
+
+    signal.signal(signal.SIGTERM, _handle_shutdown_signal)
+    signal.signal(signal.SIGINT, _handle_shutdown_signal)
 
     try:
         with contextlib.suppress(KeyboardInterrupt):

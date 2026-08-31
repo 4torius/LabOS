@@ -1,0 +1,25 @@
+{
+  "library_types": [
+    {
+      "hint": "recipe",
+      "display_name": "Recipe",
+      "folder": "Library/Recipes",
+      "file_extension": ".json",
+      "parameter_names": ["RecipeName", "RecipeFile"]
+    },
+    {
+      "hint": "hal_config",
+      "display_name": "Hardware Config",
+      "folder": "Library/HardwareConfig",
+      "file_extension": ".json",
+      "parameter_names": ["ConfigName"]
+    },
+    {
+      "hint": "liquid_class",
+      "display_name": "Liquid Class",
+      "folder": "Library/LiquidClasses",
+      "file_extension": ".json",
+      "parameter_names": ["LiquidClass"]
+    }
+  ]
+}

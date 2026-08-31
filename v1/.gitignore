@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════
-#                     BicoccaLab v7 - .gitignore
+#                     LabOS - .gitignore
 # ═══════════════════════════════════════════════════════════════════
 
 # ───────────────────────────────────────────────────────────────────
@@ -120,14 +120,15 @@ secrets.yaml
 # ───────────────────────────────────────────────────────────────────
 #                     GENERATED FILES
 # ───────────────────────────────────────────────────────────────────
-# gRPC generated stubs (can be regenerated)
-src/grpc/*_pb2.py
-src/grpc/*_pb2_grpc.py
+# gRPC / protobuf generated stubs (can be regenerated from .proto files)
+**/*_pb2.py
+**/*_pb2_grpc.py
 !src/grpc/.gitkeep
 
 # Tip tracker state (machine-specific)
 tip_state.json
 *.tip_state.json
+tip_mount_state.json
 
 # ───────────────────────────────────────────────────────────────────
 #                     OS SPECIFIC

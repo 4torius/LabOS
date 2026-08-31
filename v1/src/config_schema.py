@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -49,6 +50,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     },
     "workflow": {
         "parallel_execution": True,
+        # Fallback timeout (seconds) for any step that doesn't set its own
+        # TimeoutSeconds. 0 or null means unlimited for ALL such steps — prefer
+        # keeping this finite (it's the safety net that detects a hung/crashed
+        # instrument) and instead set TimeoutSeconds: 0 on the one step that's
+        # genuinely long-running (e.g. a multi-day incubation).
         "default_timeout": 600,
         "retry_on_failure": False,
         "max_retries": 3,
@@ -66,7 +72,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             "intervention_timeout": 3600,
             "manual_action_timeout": 300,
             "tip_refill_timeout": 600,
-            "discovery_timeout": 1.0,
+            "discovery_timeout": 3.0,
         },
     },
     "paths": {
@@ -81,7 +87,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-    result: Dict[str, Any] = dict(base)
+    # Deep copy, not dict(base): a shallow copy would leave sections absent
+    # from `override` sharing the exact same nested dict object as `base`
+    # (typically the module-level DEFAULT_CONFIG) — any later in-place mutation
+    # of the merged result would silently corrupt the shared default too.
+    result: Dict[str, Any] = copy.deepcopy(base)
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(result.get(key), dict):
             result[key] = _deep_merge(result[key], value)
@@ -147,6 +157,16 @@ def validate_lab_config(config: Dict[str, Any]) -> ConfigValidationResult:
                     f"servers.{server_key} is remote: local startup commands will be ignored"
                 )
 
+    workflow_cfg = config.get("workflow")
+    default_timeout = workflow_cfg.get("default_timeout") if isinstance(workflow_cfg, dict) else None
+    if not default_timeout:
+        result.warnings.append(
+            "workflow.default_timeout is unlimited (0/null): steps that hang or "
+            "crash will not be auto-detected unless they set their own "
+            "TimeoutSeconds. Prefer a finite global default and an explicit "
+            "TimeoutSeconds: 0 override on individual long-running steps."
+        )
+
     return result
 
 
@@ -157,13 +177,16 @@ def load_lab_config(
     strict: bool = False,
 ) -> Tuple[Dict[str, Any], ConfigValidationResult]:
     if not config_path.exists():
-        fallback = dict(DEFAULT_CONFIG) if apply_defaults else {}
+        # deepcopy, not dict(): same identity-sharing bug as _deep_merge (see
+        # its comment) — a shallow copy here would let a caller's mutation of
+        # the returned fallback corrupt the shared module-level DEFAULT_CONFIG.
+        fallback = copy.deepcopy(DEFAULT_CONFIG) if apply_defaults else {}
         validation = validate_lab_config(fallback)
         if strict and not validation.ok:
             raise ValueError("lab_config.yaml missing and fallback config is invalid")
         return fallback, validation
 
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(config_path, "r", encoding="utf-8-sig") as f:
         raw = yaml.safe_load(f) or {}
 
     if not isinstance(raw, dict):
