@@ -1,336 +1,135 @@
 # LabOS — API Reference
 
-The LabOS web server (FastAPI) runs on **http://localhost:8000**. Interactive documentation is available at `/docs` (Swagger UI) and `/redoc`.
+The LabOS web server (FastAPI) runs on **http://localhost:5000** by default (`python launcher.py --webapp`, or `--all`). Interactive Swagger docs are available at `/docs`.
 
-Real-time events are delivered via WebSocket at `ws://localhost:8000/ws`.
+Real-time events are delivered via a **single** WebSocket at `ws://localhost:5000/ws` — every event type (workflow progress, device status, operator notifications) is broadcast on this one connection.
 
----
-
-## REST Endpoints
-
-### System Status
-
-#### `GET /api/status`
-Returns overall system status.
-
-**Response**
-```json
-{
-  "status": "online",
-  "instruments": {
-    "opentrons": { "status": "idle", "version": "1.0.0" },
-    "tecan":     { "status": "idle", "version": "1.0.0" },
-    "mobile_robot": { "status": "idle", "version": "1.0.0" },
-    "manual_station": { "status": "idle", "version": "1.0.0" }
-  },
-  "active_workflow": null,
-  "uptime_seconds": 3600
-}
-```
+This reference is organized by page/feature area, matching how the webapp routes are actually organized in `webapp/routes/`. It is not exhaustive of every parameter — check the route source or `/docs` for full request/response schemas.
 
 ---
 
-### Instrument Discovery
+## System / Config
 
-#### `GET /api/instruments`
-Returns all discovered instruments with their connection info.
+| Method | Path | Purpose |
+|---|---|---|
+| GET/POST | `/api/config` | Read / write `lab_config.yaml` (deep-merged, atomic write) |
+| POST | `/api/network/test` | TCP/gRPC reachability probe for a given host:port |
+| GET/DELETE | `/api/logs` | In-memory application log buffer |
+| GET/DELETE | `/api/history` | In-memory command history (ephemeral — separate from the persistent Run History / `/api/db/runs`) |
 
-#### `GET /api/instruments/commands`
-Returns all instruments with their available commands (from FDL). Used by the visual designer to populate the toolbox.
+## Instruments (`routes/instruments.py`)
 
-**Response**
-```json
-{
-  "opentrons": {
-    "status": "online",
-    "feature": "WorkflowAPI",
-    "commands": [
-      {
-        "id": "ExecuteRecipe",
-        "display_name": "Execute Recipe",
-        "description": "Run a liquid handling recipe",
-        "parameters": [
-          { "id": "recipe", "type": "string", "required": true, "hint": "recipe" },
-          { "id": "hal_config", "type": "string", "required": true, "hint": "hal_config" }
-        ],
-        "important": true
-      }
-    ]
-  }
-}
-```
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/devices` | All discovered instruments |
+| GET | `/api/devices/{id}` | One instrument's detail |
+| GET | `/api/devices/{id}/property/{feature}/{prop}` | Read a live SiLA2 property |
+| POST | `/api/devices/{device_id}/command` | Execute any command on any discovered instrument — this is what the Dashboard's command modals call |
+| GET | `/api/instruments/commands` | Instrument + command catalog (feeds the Workflow Builder toolbox) |
+| GET | `/api/dynamic-options/{ui_hint}` | Dropdown options for a parameter hint (`recipe`, `hal_config`, `liquid_class`, `protocol`, …) — driven by each server's `LabOSLibraryProvider` catalog |
+| GET | `/api/files/hal\|recipes\|protocols\|analyses\|workflows\|liquidclasses` | Raw file listings from the matching `Library/` subfolder |
+| POST | `/api/opentrons/refill-tips` | Mark a tip rack refilled |
+| GET | `/api/opentrons/tip-status` | Current tip consumption |
 
-The `"hint"` field drives auto-population of dropdowns in the UI (`"recipe"` → lists from `Library/Recipes/`, `"task"` → queries mobile server, etc.).
+## Workflows (`routes/workflows.py`)
 
----
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/workflows` / `/api/workflows/{id}` | List / load workflow files |
+| POST | `/api/workflows/save` | Save a workflow |
+| POST | `/api/workflows/scan-variables` | Detect `${var}` placeholders in a workflow |
+| POST | `/api/workflows/execute` | Start execution (single global lock — a second call while one is running returns `{"status": "busy"}`) |
+| POST | `/api/workflows/pause` \| `/resume` \| `/abort` | Live control of the currently running workflow |
+| POST | `/api/workflows/batch-execute` | Run the same workflow N times with per-sample variable substitution (API-only, see [WORKFLOW_SYSTEM.md](WORKFLOW_SYSTEM.md)) |
+| POST | `/api/intervention/respond` / GET `/api/intervention/pending` | Retry/Skip/Abort response to a failed-step intervention prompt |
+| GET | `/api/templates` / `/{id}`, POST `/save`, POST `/{id}/instantiate`, DELETE `/{id}` | Workflow templates with variables |
+| GET | `/{id}/export`, POST `/import`, GET `/{id}/versions`, POST `/{id}/versions/snapshot`, POST `/{id}/versions/{vid}/restore` | Import/export and version history per workflow |
 
-### Workflows
+## Recipe Generator (`routes/batch.py`, prefix `/api/batch`)
 
-#### `GET /api/workflows`
-List all workflow files in `Library/Workflows/`.
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/parse-chemical-excel` | Parse an uploaded Excel pipetting plan |
+| GET | `/step-schema` | Module-treatment catalog for the "+ Add step" UI |
+| GET | `/library-excel-files` | List `.xlsx` files already in `Library/Recipes/excel/` |
+| POST | `/generate-recipe-with-config` | Generate a recipe JSON from the configured phases/reservoirs/treatments |
+| POST | `/generate-workflow` | Generate a chaining workflow for multi-recipe output |
+| POST | `/generate-hal` | Generate a matching generic HAL config |
 
-**Response**: `[{ "name": "ELISA_Complete", "file": "ELISA_Complete.workflow.json" }, ...]`
+## Hardware / HAL (`routes/hardware.py`)
 
-#### `GET /api/workflows/{name}`
-Load a specific workflow file.
+| Method | Path | Purpose |
+|---|---|---|
+| GET/PUT | `/api/hardware/active` | Read / set the active HAL config. Writing persists to `Library/HardwareConfig/.active` and best-effort pushes it to the robot via `apply: {attempted, applied, message}`. The Hardware page surfaces this: a warning toast appears if `applied` is `false` even though the HTTP request itself succeeded |
+| GET/POST | `/api/hardware/configs`, GET/DELETE `/api/hardware/configs/{filename}` | CRUD for HAL config files |
+| GET | `/api/hardware/catalog/pipettes\|modules\|slots\|labware` | Reference catalogs for building a new HAL config |
 
-#### `POST /api/workflows`
-Save a new workflow.
+## Operator (`routes/operator.py`)
 
-**Body**: Workflow JSON object (see [WORKFLOW_SYSTEM.md](WORKFLOW_SYSTEM.md)).
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/operator/pending` | Pending manual-intervention / notification queue |
+| POST | `/api/operator/notify` | Push a notification |
+| POST | `/api/operator/acknowledge` | Confirm a pending action (manual step, refill, etc.) |
+| POST | `/api/operator/manual-step` | "Add Log Note" on the Operator page. Writes a free-text entry (type/description/value) to the session log only — does not create a tracked workflow step or pending action. |
+| POST | `/api/emergency/stop` | Broadcast a stop attempt (tries `EmergencyStop`/`Stop`/`Abort`/`Cancel`/`Halt`, whichever the instrument exposes) to **every** discovered instrument |
 
-#### `PUT /api/workflows/{name}`
-Update an existing workflow.
+## Database — Plates & Run History (`routes/db.py`, prefix `/api/db`)
 
-#### `DELETE /api/workflows/{name}`
-Delete a workflow file.
+This is the SQLite-backed store actually used by the **Plates** and **Run History** pages (an older, unused in-memory/JSON plate-tracking mechanism was removed in this documentation pass — `_wf_track_tecan`/`_wf_track_opentrons` in `routes/workflows.py` now write directly here).
 
-#### `POST /api/workflows/execute`
-Start workflow execution.
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/plates`, `/plates/{id}`, `/plates/{id}/heatmap` | Plate search, detail, well-value heatmap |
+| PUT/PATCH/DELETE | `/plates/{id}` | Status update, edit, delete |
+| GET | `/runs` | Search/filter runs (status, date, text) |
+| GET/PATCH/DELETE | `/runs/{id}` | Run detail; rename/notes edit; delete (removes measurements, preserves plate data) |
+| GET | `/export/plate/{id}.csv`, `/export/run/{id}.json`, `/export/ai-context.json` | AI-context export, used by the Run History page's export links |
+| GET | `/stats` | Summary counters |
 
-**Body**
-```json
-{
-  "workflow_name": "ELISA_Complete",
-  "dry_run": false
-}
-```
+## Results
 
-**Response**
-```json
-{
-  "execution_id": "exec-2025-05-15-001",
-  "status": "started",
-  "message": "Workflow execution started"
-}
-```
-
-#### `POST /api/workflows/stop`
-Stop the currently running workflow.
-
-#### `GET /api/workflows/status`
-Get current workflow execution status.
-
-**Response**
-```json
-{
-  "execution_id": "exec-2025-05-15-001",
-  "workflow_name": "ELISA_Complete",
-  "status": "running",
-  "current_step": 3,
-  "total_steps": 7,
-  "steps": [
-    { "id": 1, "status": "success", "duration_seconds": 245 },
-    { "id": 2, "status": "success", "duration_seconds": 35 },
-    { "id": 3, "status": "running",  "elapsed_seconds": 12 }
-  ],
-  "elapsed_seconds": 292
-}
-```
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/results/{fmt}/{filename}` | Download a raw result file |
+| GET | `/api/results/{fmt}/{filename}/view` | Inline text view |
+| GET | `/api/files/animl_results` | List `.animl` files |
+| GET | `/api/results/animl/{filename}/parse` | Parse an AnIML file into plate-heatmap data |
 
 ---
 
-### Dynamic Options (UI Dropdowns)
+## WebSocket Events (`ws://localhost:5000/ws`)
 
-#### `GET /api/dynamic-options/{hint}`
-Returns dropdown options for a parameter type. Called by the properties panel in the visual designer.
+All messages are JSON with a `type` field.
 
-| Hint | Returns |
-|------|---------|
-| `recipe` | Files from `Library/Recipes/` |
-| `hal_config` | Files from `Library/HardwareConfig/` |
-| `protocol` | `.mdfx` files from `Library/Analysis/` |
-| `task` | Tasks from Mobile SiLA2 Server (live query) |
-| `location` | Named map locations from ROS |
-| `liquid_class` | Files from `Library/LiquidClasses/` |
-
----
-
-### Recipes
-
-#### `GET /api/recipes`
-List all recipe files.
-
-#### `GET /api/recipes/{name}`
-Load a recipe file.
-
-#### `POST /api/recipes`
-Save a new recipe.
-
-#### `POST /api/recipes/validate`
-Validate a recipe against a HAL config without running it.
-
-**Body**: `{ "recipe": "elisa_coating.json", "hal_config": "deck_config_A.json" }`
-
-#### `POST /api/recipes/batch-import`
-Upload an Excel file and generate a recipe automatically (Excel-to-recipe converter).
-
----
-
-### Results
-
-#### `GET /api/results`
-List all result files.
-
-#### `GET /api/results/{filename}`
-Download a result file (Excel or AnIML).
-
-#### `GET /api/plate-tracking`
-Return the full plate tracking log.
-
----
-
-### Manual Station
-
-#### `POST /api/manual-station/confirm`
-Confirm completion of the current manual step (equivalent to clicking "Confirm" in the web UI).
-
-#### `GET /api/manual-station/status`
-Get current manual station state.
-
----
-
-### Library
-
-#### `GET /api/library/workflows`
-#### `GET /api/library/recipes`
-#### `GET /api/library/hal-configs`
-#### `GET /api/library/protocols`
-#### `GET /api/library/mobile-tasks`
-
-All return file lists from the corresponding `Library/` subdirectory.
-
-#### `POST /api/library/mobile-tasks/refresh`
-Query the Mobile SiLA2 Server for registered tasks and update `Library/MobileTasks/`.
-
----
-
-## WebSocket Events
-
-Connect to `ws://localhost:8000/ws` to receive real-time events. All messages are JSON.
-
-### Workflow Progress
-
-Sent whenever a workflow step changes state:
-
+**`workflow_progress`** — sent on every step-state change:
 ```json
-{
-  "type": "workflow_progress",
-  "execution_id": "exec-2025-05-15-001",
-  "step_id": 3,
-  "step_status": "success",
-  "instrument": "mobile_robot",
-  "action": "execute_task",
-  "duration_seconds": 35,
-  "total_steps": 7,
-  "completed_steps": 3
-}
+{ "type": "workflow_progress", "step_id": 3, "step_status": "success",
+  "instrument": "tecan", "action": "RunMeasurement",
+  "total_steps": 7, "completed_steps": 3 }
 ```
 
-### Device Update
+**`workflow_complete`** / **`workflow_error`** — terminal events with `steps_completed`/`steps_failed` and, on error, `failed_step`/`error`.
 
-Sent when an instrument changes status (idle/busy/error/offline):
+**`device_update`** — instrument status change (`idle`/`running`/`error`/`offline`).
 
-```json
-{
-  "type": "device_update",
-  "instrument": "opentrons",
-  "status": "running",
-  "detail": "Executing protocol step 45/96"
-}
-```
+**`manual_intervention`** — a `RequestOperatorTask`-style step is waiting; drives both the Operator page's Pending Actions list and any active notification toast.
 
-### Workflow Complete
-
-```json
-{
-  "type": "workflow_complete",
-  "execution_id": "exec-2025-05-15-001",
-  "success": true,
-  "steps_completed": 7,
-  "steps_failed": 0,
-  "duration_seconds": 1845,
-  "result_files": ["results/elisa_result.xlsx"]
-}
-```
-
-### Workflow Error
-
-```json
-{
-  "type": "workflow_error",
-  "execution_id": "exec-2025-05-15-001",
-  "failed_step": 4,
-  "instrument": "tecan",
-  "action": "RunMeasurement",
-  "error": "Tecan server unavailable",
-  "steps_completed": 3
-}
-```
-
-### Manual Intervention Required
-
-```json
-{
-  "type": "manual_intervention",
-  "step_id": 5,
-  "task_description": "Replenish tip rack in slot A1",
-  "timeout_minutes": 60
-}
-```
+**`intervention_required`** — a step failed and is waiting for a Retry/Skip/Abort decision (full-screen modal).
 
 ---
 
-## gRPC (SiLA2)
+## gRPC (SiLA2) — direct access, bypassing the webapp
 
-Each server exposes a standard SiLA2 gRPC endpoint on its configured port.
-
-### Connecting via `sila2` library (Strategy 0 — preferred)
+Each server exposes a standard SiLA2 gRPC endpoint on its configured port (see [SERVERS.md](SERVERS.md) for the current list: Opentrons 50302, Tecan 50051, Manual Station 50500).
 
 ```python
 from sila2.client import SilaClient
 
-client = SilaClient("localhost", 50052, insecure=True)
-
-# Access features by name (from FDL Identifier)
-result = client.WorkflowAPI.ExecuteRecipe(
-    recipe="my_recipe.json",
-    hal_config="deck_config_A.json"
-)
+client = SilaClient("localhost", 50302, insecure=True)
+result = client.WorkflowAPI.ExecuteRecipe(RecipeName="my_recipe.json")
 print(result)
-
-# Read a property
-status = client.WorkflowAPI.RobotStatus.get()
-print(status)
-
 client.close()
 ```
 
-### Connecting via legacy SiLA2Common stubs (Strategy 1 — fallback only)
-
-Only needed for old servers that do not use the `sila2` library:
-
-```python
-import grpc
-import json
-from src.pnp_stubs import SiLA2Common_pb2 as pb2
-from src.pnp_stubs import SiLA2Common_pb2_grpc as pb2_grpc
-
-channel = grpc.insecure_channel("localhost:50052")
-stub = pb2_grpc.SiLA2ServerInfoStub(channel)
-
-response_stream = stub.ExecuteCommand(pb2.ExecuteCommandRequest(
-    feature="WorkflowAPI",
-    command="ExecuteRecipe",
-    parameters={"recipe": "my_recipe.json", "hal_config": "deck_config_A.json"}
-))
-for response in response_stream:
-    if not response.is_intermediate:
-        print(response.success, dict(response.result))
-        break
-```
-
-### Error Handling
-
-- **Strategy 0**: instrument-level errors raise `DefinedExecutionError`; network errors raise `grpc.RpcError`
-- **Strategy 1**: final `CommandResponse` carries `success=False` and `error` string for instrument errors; `grpc.RpcError` for transport errors
+Instrument-level errors raise `DefinedExecutionError` subclasses (see each server's FDL for its declared error identifiers); transport errors raise `grpc.RpcError`.

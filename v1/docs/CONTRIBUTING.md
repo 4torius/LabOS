@@ -9,10 +9,13 @@ The fastest path to integrating a new instrument is the server template. See [AD
 ```
 v1/src/              Core orchestration — touch carefully, changes affect everything
 v1/SiLA2/            Instrument servers — each is self-contained, safe to modify
+v1/webapp/           FastAPI web app — page routes in webapp/routes/
 v1/Library/          User-editable assets — no Python code here
 v1/docs/             This documentation
-ext/                 External integrations (Mobile SiLA2 server for Linux)
+v1/tests/            pytest suite (unit/ + integration)
 ```
+
+The mobile robot's SiLA2 server is **not part of this repository** — its real deployment lives entirely on the remote Linux host. See [ARCHITECTURE.md](ARCHITECTURE.md#mobile-robot-current-status).
 
 ## Submitting Changes
 
@@ -27,28 +30,20 @@ ext/                 External integrations (Mobile SiLA2 server for Linux)
 
 ```bash
 cd v1
-python -m pytest src/tests/ -v
+python -m pytest tests/ -m "not integration" -v
 ```
 
-This runs unit tests for:
-- Workflow JSON parsing and validation
-- HAL recipe translation (with mock deck config)
-- SiLA2Common proto serialization
-- Discovery engine (with mock servers)
+This runs the unit suite under `tests/unit/` (config schema, discovery/port-collision, client timeout handling, bridge launcher, etc.) plus the top-level `tests/test_*.py` files (workflow/recipe parsing, discovery, stub loading). See `tests/unit/_pkg_loader.py` if you need to import server-side `src/` packages under a private module name — both `OpentronsSiLA2Server` and `TecanM200SiLA2Server` ship a package literally named `src`, which would otherwise collide with `v1`'s own top-level `src` package.
 
 ### Integration test (hardware required)
 
 With all SiLA2 servers running:
 
 ```bash
-python -m pytest src/tests/integration/ -v
+python -m pytest tests/ -m integration -v
 ```
 
-Runs:
-- `test_discovery.py` — verifies all expected servers are discovered
-- `test_workflow_opentrons.py` — executes a short 2-step recipe on a scrap plate
-- `test_manual_station.py` — verifies pause/confirm cycle
-- `test_fault_injection.py` — stops a server mid-workflow and verifies error propagation
+Check `tests/test_integration.py` and `tests/test_commands.py` for what's currently covered — commands that cause real physical motion are gated behind an explicit opt-in environment variable; never set it without confirming a human is present to supervise the hardware.
 
 ### Manual validation
 

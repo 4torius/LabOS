@@ -2,245 +2,160 @@
 
 ## First-Time Setup
 
-### Prerequisites
+See [SETUP.md](SETUP.md) for a full new-PC deployment guide. Summary of prerequisites:
 
-**Windows orchestrator computer:**
-- Python 3.10+
-- Required packages: `pip install -r v1/requirements.txt`
-- Tecan iControl software installed (for SDK access)
-- TecanBridge.exe compiled and accessible in PATH
+- Windows 10/11, Python 3.10/3.11
+- Tecan iControl SDK installed (for the C# bridge)
+- Opentrons Flex reachable on the network
+- `pip install -r v1/requirements.txt`
 
-**Linux robotics computer:**
-- ROS Noetic installed and sourced
-- Python 3.8+
-- Exsensia Robotics platform installed and configured
-- Robotnik RB-Kairos driver package installed
+### Server Ports
 
-### Network Configuration
+| Component | Port |
+|-----------|------|
+| Web interface | 5000 |
+| Tecan SiLA2 Server | 50051 |
+| Opentrons SiLA2 Server | 50302 |
+| Manual Station SiLA2 Server | 50500 |
+| Tecan bridge (internal only, not exposed) | 50055 |
+| Mobile Robot (remote, hosted on its own Linux host) | 50053 |
 
-All components communicate over the laboratory LAN:
-
-| Component | IP | Port |
-|-----------|-----|------|
-| Orchestrator (Windows) | `192.168.x.10` | 8000 (web), 50054 (manual station) |
-| Opentrons Flex | `169.254.69.185` | 31950 (HTTP API) |
-| Opentrons SiLA2 Server | `192.168.x.10` | 50052 |
-| Tecan SiLA2 Server | `192.168.x.10` | 50051 |
-| Mobile SiLA2 Server (Linux) | `192.168.x.20` | 50053 |
-| Manual Station Server | `192.168.x.10` | 50054 |
-
-Update `v1/SiLA2/servers_config.yaml` with the actual IP addresses of your deployment.
-
-### Server Configuration
-
-Edit `v1/SiLA2/servers_config.yaml`:
-
-```yaml
-servers:
-  - name: "opentrons"
-    host: "localhost"
-    port: 50052
-  - name: "tecan"
-    host: "localhost"
-    port: 50051
-  - name: "mobile_robot"
-    host: "192.168.1.20"   # Linux computer IP
-    port: 50053
-  - name: "manual_station"
-    host: "localhost"
-    port: 50054
-```
+All configured in `v1/lab_config.yaml` (bootstrap seeds) and each server's own `config.yaml`.
 
 ---
 
 ## Starting the System
 
-### Option A: START.bat (Windows, all servers)
+### Option A — Launcher (recommended)
 
+```powershell
+cd C:\LabOS\v1
+python launcher.py --all      # start every server + the webapp
 ```
-v1/START.bat
-```
 
-This script starts all Windows-hosted servers and the orchestrator in sequence. Check the console windows for any startup errors.
+or double-click `LabOS_launcher.bat` (Windows).
 
-### Option B: Manual start (for debugging)
+Other launcher modes: `--servers` (SiLA2 servers only), `--webapp` (web app only), `--status` (check what's running), `--stop` (stop everything the launcher started).
 
-Open separate terminal windows for each component:
+### Option B — Manual start (for debugging one component)
 
-**Terminal 1 — Tecan server**
 ```bash
-cd v1/SiLA2/TecanSiLA2Server
-python main.py
+# Terminal 1
+cd v1/SiLA2/TecanM200SiLA2Server && python main.py
+# Terminal 2
+cd v1/SiLA2/OpentronsSiLA2Server && python main.py
+# Terminal 3
+cd v1/SiLA2/ManualStationSiLA2Server && python main.py
+# Terminal 4 — webapp
+cd v1 && python webapp/app.py
 ```
 
-**Terminal 2 — Opentrons server**
-```bash
-cd v1/SiLA2/OpentronsSiLA2Server
-python main.py
-```
-
-**Terminal 3 — Manual station server**
-```bash
-cd v1/SiLA2/ManualStationSiLA2Server
-python main.py
-```
-
-**Terminal 4 (Linux) — Mobile robot server**
-```bash
-source /opt/ros/noetic/setup.bash
-cd v1/SiLA2/MobileSiLA2Server
-python main.py
-```
-
-**Terminal 5 — Orchestrator (start last)**
-```bash
-cd v1
-python src/lab_core.py
-```
-
-Open the web interface at **http://localhost:8000**.
+Open **http://localhost:5000**.
 
 ---
 
 ## Commissioning Checklist
 
-Run this checklist before the first workflow execution in a new environment.
+Run this before the first workflow execution in a new environment or after any hardware change.
 
 ### Hardware
-- [ ] Opentrons Flex powered on, connected via USB, IP `169.254.69.185` reachable
-- [ ] Tecan M200 Pro powered on and USB-connected to the Windows computer
-- [ ] GoFaGo powered on: base booted (Ubuntu), arm powered, gripper cable connected
-- [ ] All ArUco markers mounted rigidly at their workstation positions (slots A, B, C)
-- [ ] Deck loaded per the selected HAL config (tip racks, labware in correct slots)
+- [ ] Opentrons Flex powered on, network-reachable at the IP in `SiLA2/OpentronsSiLA2Server/config.yaml`
+- [ ] Tecan M200 Pro powered on and USB-connected
+- [ ] Tecan iControl software is **closed** (it locks the USB connection the bridge needs)
+- [ ] Deck loaded per the HAL config you intend to select (tip racks, labware in the correct slots)
+- [ ] If using the mobile robot: GoFaGo base booted, arm powered, gripper connected; ArUco markers mounted and unobstructed at each workstation
 
 ### Software
-- [ ] All four SiLA2 servers started without errors
-- [ ] Dashboard shows all instruments as "online" (green dots)
-- [ ] `GET /api/instruments` returns all four servers
-- [ ] Opentrons: run `GET /api/instruments` and verify `RobotStatus = idle`
-- [ ] Tecan: run `RunMeasurement` with a short test protocol and verify Excel output
-- [ ] Mobile robot: run `list_tasks` and verify the 7 expected tasks appear
-- [ ] Manual station: run a manual intervention test workflow and confirm it pauses/resumes correctly
-
-### HAL Validation
-- [ ] Select the HAL config matching the current deck layout
-- [ ] Run `POST /api/recipes/validate` with a test recipe — verify no errors
-- [ ] Run a short `Opentrons_Only_Test.workflow.json` with a scrap plate
+- [ ] All four servers (Opentrons, Tecan, Manual Station, Mobile Robot) start without errors / show reachable
+- [ ] Dashboard (`/dashboard`) shows all four as online
+- [ ] Hardware page: select the correct HAL config, confirm "Set Active" reports the config was actually applied to the robot (a warning toast appears if it wasn't — see below)
+- [ ] Recipe Generator: generate or load a small test recipe
+- [ ] Run `Opentrons_Only_Test.workflow.json` from the Workflow Builder with a scrap plate
+- [ ] Tecan: `RunMeasurement` with a short test protocol, verify an AnIML result appears in Run History
+- [ ] Mobile robot: `list_tasks` returns the expected task set
 
 ---
 
 ## Day-to-Day Operations
 
 ### Before Each Experiment
+1. Confirm all instruments in use (Opentrons, Tecan, Manual Station, Mobile Robot) show online on the Dashboard
+2. Confirm the correct HAL config is active on the Hardware page
+3. Confirm tip racks and reagents match the active HAL config
+4. If Tecan will be used, confirm iControl software is closed
+5. If the mobile robot will move plates between instruments, confirm ArUco markers are clean and unobstructed
 
-1. Verify all instruments show "online" in the dashboard
-2. Confirm tip racks are loaded correctly for the selected HAL config
-3. Confirm reagents are loaded in the correct reservoirs
-4. If using the mobile robot, confirm the ArUco markers are clean and undamaged
+### Running an Experiment (Golden Path)
 
-### Running a Workflow
-
-1. Open the web interface at http://localhost:8000
-2. Go to **Workflow Builder**, select or create a workflow
-3. Click **Run** — the executor validates the workflow before dispatching any commands
-4. Monitor progress in the dashboard's real-time step tracker
-5. For manual steps: a notification appears with the task description; click **Confirm** when done
-6. Download results from the **Results** tab when complete
+1. **Recipe Generator** (`/batch`) — upload/select an Excel pipetting plan, configure phases/reservoirs/treatments/liquid classes, generate the recipe (+ workflow if multi-phase, + HAL if needed)
+2. **Hardware** (`/hardware`) — select and activate the matching HAL config
+3. **Workflow Builder** (`/workflows`) — load the generated workflow (add mobile-robot transport steps between instrument steps if plates need to move), click **Execute**
+4. **Monitor** — the global status bar at the bottom of every page shows live progress; Pause/Resume/Abort are available there
+5. **Manual steps** — if the workflow includes one, respond via the **Operator** page's Pending Actions
+6. **Review results** — **Run History** (`/runs`) for the persistent record (searchable, renamable, exportable), **Results** (`/results`) for raw output files, **Plates** (`/plates`) for well-level data
 
 ### After Each Experiment
-
-1. Home the GoFaGo arm if it was used (run the `Home` task from the dashboard or a manual command)
-2. Clear completed plates from the deck
-3. Note tip state — the system tracks consumption automatically, but verify the displayed count is correct
+1. Clear completed plates from the deck
+2. Check tip consumption on the Operator page; use "Refill Tips" if racks were physically replaced
+3. If anything looked wrong mid-run, check **Run History** for that run's step timeline before assuming it's a hardware fault
 
 ---
 
 ## Troubleshooting
 
 ### Server shows "offline" in the dashboard
-
-1. Check if the server process is still running (look for error in its terminal window)
-2. Check port availability: `netstat -an | grep 5005`
-3. Check the server's `config.yaml` for correct host/port
-4. Try restarting the server; the PnP discovery engine reconnects automatically within ~10 seconds
+1. Check the server's terminal/process is still running
+2. Check the port isn't taken by something else: `netstat -an | findstr 50302` (or 50051/50500)
+3. Check `config.yaml` host/port match `lab_config.yaml`
+4. Restart the server — discovery reconnects automatically within ~10 seconds
+5. If a stale server on a *different* host was previously using the same configured port, this used to cause the wrong instrument to appear under a given name — that specific bug is fixed (host-aware instrument-ID resolution), but if you ever see an instrument's identity look wrong after a network change, that's the first thing to double-check.
 
 ### Opentrons: "Could not connect to robot"
+1. Verify the robot is powered and reachable: `ping <robot_ip from config.yaml>`
+2. Check `SiLA2/OpentronsSiLA2Server/config.yaml` → `robot.ip`
+3. Check the robot's own touchscreen for an error state
 
-1. Verify the robot is powered and the USB cable is connected
-2. Verify the robot IP: `ping 169.254.69.185`
-3. Check the Opentrons app on the touchscreen — if it shows an error, restart the robot
-4. Check `config.yaml` for correct `robot_ip`
+### Tecan: bridge not responding
+1. Check Task Manager for `TecanSiLA2Server.exe` — if absent, the Python server's health monitor should auto-restart it within seconds (with backoff)
+2. Confirm Tecan iControl software is closed (it locks the USB connection)
+3. `Connect()` always re-validates against the real hardware state now (fixed) — it will no longer report "connected" after a silent USB drop. If you ever rebuild `TecanBridge.cs` in the future, remember the launcher prefers the **Release** build over Debug — rebuild Release too, or the fix you just made won't actually run (see [SERVERS.md](SERVERS.md#bridge-binary-is-up-to-date)).
 
-### Tecan: "Bridge process not responding"
+### Mobile robot: task fails or "Server offline" despite discovery showing it online
+1. Verify the remote Docker container is up: `docker ps` / `docker logs` on `192.168.11.22`
+2. Confirm the ArUco marker at the target workstation is clean, lit, and unobstructed
+3. Re-run `list_tasks` to confirm the task registry is intact before assuming a connectivity fault
 
-1. Look for `TecanBridge.exe` in Task Manager — if absent, the bridge crashed
-2. The Python server will attempt to restart the bridge automatically; wait 15 seconds
-3. If repeated failures: check the Tecan iControl software is not open (it locks the USB connection)
-4. Verify the Tecan USB driver is installed: Device Manager should show "Tecan USB Device"
+### Workflow validation error: "Instrument(s) not found: X"
+The instrument name doesn't match a currently discovered server — check spelling and that the server is online. (The old Loop/IF/Note toolbox blocks that used to trigger this error have been removed from the Workflow Builder entirely.)
 
-### Mobile robot: "ROS action server not reachable"
+### Workflow validation error: "Missing labware mapping" / recipe fails against the active HAL
+The recipe references a logical labware/slot the active HAL config doesn't define.
+1. Confirm the correct HAL is active on the Hardware page — a warning toast now appears automatically if "Set Active" didn't actually reach the robot, so absence of a warning is a reasonable (not absolute) signal it applied correctly
+2. Regenerate the HAL config from the Recipe Generator, or edit it directly in `Library/HardwareConfig/`
 
-1. Verify the Linux workstation is powered and ROS is running: `rostopic list` should not hang
-2. Verify the Mobile SiLA2 Server is running on the Linux machine: `ps aux | grep main.py`
-3. Check the IP in `config.yaml` matches the current Linux machine IP
-4. If the ROS master restarted, the action server may need a restart: `roslaunch robot_tasks robot_tasks.launch`
+### Tip count or tip-guard behavior looks wrong
+1. The Opentrons server automatically force-drops any tip it isn't sure is clear before a run — this is expected and not a bug; check the run's archived log if you want to confirm what happened
+2. To reset tip consumption counts: `ResetTipTracking` (SiLA2 command) or the Operator page's refill flow
+3. Physically verify racks match the displayed count before resetting — resetting doesn't check reality, it just clears the counter
 
-### Workflow fails at a robot step
-
-Most robot task failures are physical (positioning or grasp), not software. Check:
-1. Dashboard error detail for the failed step
-2. ArUco marker visibility — is it lit, unobstructed, not deformed?
-3. Plate position on the deck — was it placed correctly by the previous step?
-4. Re-run the failing step individually from the Manual Robot Control panel
-5. If the failure is repeatable, the task may need to be re-taught (see Teaching New Tasks below)
-
-### Workflow validation error: "Missing labware mapping"
-
-The recipe references a logical labware name that is not defined in the selected HAL config.
-1. Open the HAL config file from `Library/HardwareConfig/`
-2. Add the missing labware entry (see [HAL_SYSTEM.md](HAL_SYSTEM.md))
-3. Re-run validation
-
-### Tip count mismatch
-
-If the tip state file is out of sync with reality:
-1. Run `POST /api/instruments` → `opentrons` → `ResetTipState` to reset to full racks
-2. Physically verify all tip racks are full before resetting
-
----
-
-## Teaching New Robot Tasks (LfD)
-
-New manipulation tasks are taught using the Exsensia Robotics LfD platform:
-
-1. **Position the robot** at the target workstation. The arm camera must have a clear, unobstructed view of the workstation's ArUco marker.
-2. **Open the Exsensia app** on the Linux workstation.
-3. **Enable compliant mode** — the ABB GoFa arm becomes backdrivable.
-4. **Physically guide the arm** through the complete task: approach object → close gripper → perform manipulation → open gripper → retract to safe position. All poses are recorded relative to the ArUco marker.
-5. **Validate** — the Exsensia platform replays the recording. If execution is correct, confirm; otherwise delete and re-record.
-6. **Register** under a name (e.g., `PickFromIncubator`). The task is published to the ROS action server.
-7. **Refresh** the task library in LabOS: `POST /api/library/mobile-tasks/refresh`. The new task appears in the workflow designer's toolbox immediately.
-
-**Key teaching tips:**
-- Anticipate the RG6 gripper's forward-push displacement during closure: pre-position the gripper slightly back before the final grasp to compensate
-- Record all poses in the ArUco marker frame (Exsensia default after marker detection)
-- Verify the task with at least 3 successful replays before using it in production workflows
+### "Add Log Note" on the Operator page didn't do anything visible
+It writes a free-text entry to the session log (now including what you typed, not just the note type) — it is not a tracked workflow step or pending action, by design. Use `RequestOperatorTask` (via a workflow step) for anything that needs to actually gate execution.
 
 ---
 
 ## Maintenance
 
 ### Weekly
-- Visually inspect ArUco markers for deformation or damage; replace paper-printed markers if warped
-- Check tip rack consumption and restock as needed
-- Archive or delete old result files from `Results/` to free disk space
+- Check tip rack consumption; restock as needed
+- Archive or delete old files from `Results/` and the Opentrons server's `run_archive/` if disk space is a concern (the run archive already auto-compresses after 3 days and deletes after 30 by default)
 
 ### Monthly
 - Run the commissioning checklist to verify all instrument connections are stable
-- Check for updates to the Opentrons Flex firmware (robot touchscreen → Settings → Update)
-- Review the plate tracking log for any anomalies
-- Camera recalibration for the Intel RealSense (run `rs-calibration` on the Linux workstation)
+- Check for Opentrons Flex firmware updates (robot touchscreen → Settings → Update)
+- Visually inspect ArUco markers for deformation or damage if the mobile robot is in regular use
+- Confirm the Tecan bridge binary in use is up to date with the latest `TecanBridge.cs` source — after any bridge source change, rebuild **Release**, not just Debug (see [SERVERS.md](SERVERS.md#bridge-binary-is-up-to-date))
 
 ### As Needed
-- When switching deck configurations: update the HAL config and run a validation workflow with a scrap plate before starting real experiments
+- When switching deck configurations: update/generate the HAL config and validate with a scrap plate before real experiments
 - When adding a new instrument: follow [ADDING_NEW_INSTRUMENT.md](ADDING_NEW_INSTRUMENT.md)
+- When teaching the mobile robot a new manipulation task: see [SERVERS.md](SERVERS.md#teaching-new-tasks-learning-from-demonstration)

@@ -2,7 +2,7 @@
 
 ## Quick Start
 
-**Windows:** double-click `START.bat`
+**Windows:** double-click `LabOS_launcher.bat`
 
 **Terminal:**
 ```bash
@@ -16,7 +16,7 @@ Web interface: **http://localhost:5000**
 
 ```
 v1/
-├── START.bat               Windows quick start
+├── LabOS_launcher.bat      Windows quick start
 ├── launcher.py             main entry point
 ├── lab_config.yaml         centralized configuration
 ├── requirements.txt        Python dependencies
@@ -35,7 +35,7 @@ v1/
 
 ## Documentation
 
-See [docs/README.md](docs/README.md) for the full documentation index.
+See [docs/README.md](docs/README.md) for the full documentation index — or start with [docs/TRAINING_GUIDE.md](docs/TRAINING_GUIDE.md) if you're onboarding a new operator.
 
 ## Adding a New Instrument
 

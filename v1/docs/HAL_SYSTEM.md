@@ -1,217 +1,113 @@
-# LabOS — Hardware Abstraction Layer (HAL)
+# LabOS — Hardware Abstraction Layer (HAL) & Recipes
 
 ## What the HAL Does
 
-The Hardware Abstraction Layer separates the **logical description** of a liquid handling operation (the recipe) from the **physical implementation** (which deck slot, which pipette, how many tips). The same recipe JSON runs correctly on any compatible Opentrons Flex deck configuration without modification.
+The Hardware Abstraction Layer separates a recipe's **liquid handling steps** from the **physical deck layout** (which slot holds which labware, which pipette is mounted where). A HAL config is selected once (it persists across restarts via `Library/HardwareConfig/.active`), and every subsequent `ExecuteRecipe` call runs against whatever HAL is currently active — recipes and HAL configs are not paired per-call.
 
 ```
-Recipe JSON          +   HAL Config JSON     →   Opentrons Python protocol
-(what to do)             (where things are)      (how to do it on this deck)
+Recipe JSON (Steps)   +   Active HAL Config   →   Generated Opentrons Python protocol
 ```
 
----
-
-## Recipe Format
-
-A recipe defines logical liquid handling without referencing physical positions:
-
-```json
-{
-  "id": "elisa_coating",
-  "name": "ELISA Coating Step",
-  "description": "Distribute coating antibody to all wells",
-  "inputs": {
-    "source_plate": { "type": "reservoir", "wells": ["A1"] },
-    "dest_plate":   { "type": "96_well_plate" }
-  },
-  "tip_strategy": "new_tip_per_source",
-  "operations": [
-    {
-      "command": "Distribute",
-      "source": "source_plate.A1",
-      "destinations": "dest_plate.all",
-      "volume": 100,
-      "liquid_class": "Aqueous"
-    }
-  ]
-}
-```
-
-### What a recipe specifies
-- Source and destination **labware roles** (not deck slots)
-- **Volumes** and **well addresses**
-- **Tip strategy** (new tip per source, reuse, etc.)
-- **Liquid class** reference (for viscous, volatile, foaming liquids)
-- **Operation sequence**
-
-### What a recipe does NOT specify
-- Which deck slot holds the source plate
-- Which pipette to use
-- Exact tip rack positions
-- Number of tips available
+Most recipes in this project are **generated**, not hand-written — normally via the web UI's **Recipe Generator** (`/batch` or `/recipes`), which converts an Excel pipetting plan into a recipe JSON automatically. This document describes the underlying format for anyone who needs to hand-edit a recipe or understand what the generator produces.
 
 ---
 
 ## HAL Configuration Format
 
-A HAL config maps logical labware names to physical deck positions:
+A HAL config (`Library/HardwareConfig/*.json`) declares the pipettes mounted and the labware loaded on each deck slot. Real examples ship in the repo (`Standard_Flex_Setup.json`, `SerialDilution_Setup.json`, and several auto-generated `Generic_HAL_*.json` files from past Recipe Generator sessions) — inspect one of those directly for the exact current schema rather than relying on a hand-written example here, since the generator's HAL output evolves alongside the recipe format.
 
-```json
-{
-  "id": "deck_config_A",
-  "name": "Standard Screening Deck",
-  "pipettes": {
-    "left":  { "type": "flex_1channel_1000", "mount": "left" },
-    "right": { "type": "flex_8channel_50",  "mount": "right" }
-  },
-  "labware": {
-    "source_plate": {
-      "type":  "opentrons_1_reservoir_290ml",
-      "slot":  "D1"
-    },
-    "dest_plate": {
-      "type":  "opentrons_96_wellplate_200ul_pcr_full_skirt",
-      "slot":  "C2"
-    },
-    "tip_rack_1000": {
-      "type":  "opentrons_flex_96_tiprack_1000ul",
-      "slot":  "A1"
-    },
-    "tip_rack_50": {
-      "type":  "opentrons_flex_96_tiprack_50ul",
-      "slot":  "B1"
-    }
-  },
-  "tip_state_file": "Library/TipState/deck_config_A_tips.json"
-}
-```
+The active config is tracked in a plain-text marker file, `Library/HardwareConfig/.active`, containing just the filename of the currently selected config. This is written whenever you click "Set Active" on the **Hardware** page, and read by the Opentrons server at startup (overriding `config.yaml`'s static `hardware.default_config`) — so a HAL switch survives a server restart.
 
-HAL configs are stored in `Library/HardwareConfig/`.
+**Caution**: setting a HAL config "active" from the webapp succeeds even if the Opentrons server or robot is offline at that moment — the webapp best-effort pushes the change live via `LoadHardwareConfig`, and reports `applied: false` in that case without failing the whole request. If you switch HAL while the robot is offline, re-apply it (or restart the Opentrons server) once it's back online, rather than assuming the deck state matches the webapp.
 
 ---
 
-## Translation Pipeline
+## Recipe Format
 
-When `ExecuteRecipe` is called, the `RecipeTranslator` performs three steps:
+A recipe is a JSON file (`Library/Recipes/*.json`) with a `Steps` array of Opentrons commands, plus optional `Metadata` (produced automatically by the Recipe Generator — required volumes, waste estimates, notes).
 
-### Step 1: Labware Resolution
-Each logical name in the recipe (`"source_plate"`, `"dest_plate"`) is looked up in the HAL config. If any logical name is missing from the config, execution is blocked with an explicit error identifying the missing element.
+### Supported Step Commands
 
-### Step 2: Pipette Selection
-The translator selects the appropriate pipette based on the requested volume range:
-- Single-channel 1000 µL → volumes 20–1000 µL, single-well operations
-- 8-channel 50 µL → volumes 1–50 µL, column-wise operations
-- Selection falls back to the left pipette if volume fits both
-
-### Step 3: Protocol Generation
-An executable Opentrons Python protocol is generated and uploaded to the robot via its HTTP API on port 31950. The generated protocol includes:
-- All `load_labware()` calls with resolved deck slots
-- All `pick_up_tip()` / `drop_tip()` calls based on tip strategy
-- All `aspirate()` / `dispense()` / `mix()` calls with volumes and positions
-- All `delay()` calls for liquid class timing
-
----
-
-## Supported Recipe Commands
-
-### High-Level (automatic tip management)
+**High-level (automatic tip management)**
 | Command | Description |
 |---------|-------------|
-| `Transfer` | Single source → single destination, one-to-one |
+| `Transfer` | Single source → single destination |
 | `Distribute` | Single source → multiple destinations |
 | `Consolidate` | Multiple sources → single destination |
 
-### Low-Level (explicit control)
+**Low-level (explicit control)**
 | Command | Description |
 |---------|-------------|
-| `Aspirate` | Draw liquid from a well |
+| `Aspirate` | Draw liquid from a well. Optional `"VerifyLiquid": true` calls the robot's liquid-presence sensor first and aborts with a clean error if no liquid is detected — **no webapp UI control for this, JSON-only** |
 | `Dispense` | Deliver liquid to a well |
 | `Mix` | Aspirate+dispense N times in place |
-| `BlowOut` | Expel remaining volume |
-| `TouchTip` | Touch tip to well wall after dispense |
-| `AirGap` | Draw air into tip to prevent dripping |
+| `BlowOut`, `TouchTip`, `AirGap` | Standard liquid-handling refinements |
 
-### Tip Management
+**Tip Management**
 | Command | Description |
 |---------|-------------|
-| `PickUpTip` | Pick tip from specified rack position |
-| `DropTip` | Drop tip to trash |
-| `DropTipInPlace` | Drop tip without moving to trash |
-| `ReturnTip` | Return tip to its original position |
-| `ConsumeTips` | Mark tips as used (update tip state) |
-| `VerifyTipPresence` | Assert tip is attached |
+| `PickUpTip`, `DropTip`, `DropTipInPlace`, `ReturnTip`, `ConsumeTips` | Standard tip lifecycle. `DropTip` also accepts `"Force": true` (used internally by the server's automatic leftover-tip guard — see [SERVERS.md](SERVERS.md)) |
 
-### Control
+**Module & Deck Control**
 | Command | Description |
 |---------|-------------|
-| `Delay` | Wait N seconds (fixed or LfD-linked) |
-| `Comment` | Insert a comment in the protocol |
-| `Pause` | Pause protocol and wait for manual resume |
-| `MoveLabware` | Move a plate within the deck (gripper) |
+| `MoveLabware` | Move a plate within the deck via the gripper. Accepts optional `PickUpOffset`/`DropOffset` (`{"x":.., "y":.., "z":..}`, millimeters, additive on top of the labware's own calibrated default) — **JSON-only, no webapp UI control** to set these. **Default when omitted**: the code doesn't send an explicit `(0,0,0)` — it simply omits the kwarg entirely, which is functionally equivalent to zero *additional* offset. The labware's own built-in `gripperOffsets.default` (from its Opentrons labware definition) always applies regardless, on top of nothing extra. |
+| `Delay`, `Comment`, `Pause` | Control/annotation steps |
+| Heater-shaker / temperature module steps | Emitted automatically by the Recipe Generator's module-treatment engine when a treatment is configured — see below |
 
----
+### Module Treatments (Recipe Generator feature)
 
-## Liquid Classes
+The Recipe Generator's "+ Add step" UI lets you insert a module treatment (e.g. heater-shaker mix, temperature hold) before the first phase, after any phase, or after the last. This is backed by a treatment catalog in `src/excel_recipe_parser.py` and is **fully wired into the UI** — this is the one advanced feature that's genuinely easy to use without editing JSON by hand.
 
-Liquid classes define aspiration and dispense parameters for non-aqueous liquids. They are stored in `Library/LiquidClasses/` as JSON files.
+### Reservoir Sharing
 
-Pre-defined classes:
+When multiple reagents share a physical reservoir type, the Recipe Generator's `reservoirType`/`numReservoirs` controls (also UI-wired) split reagent distribution into per-reservoir chunks automatically, inserting a module treatment between chunks if configured.
 
-| Class | Use Case | Modifications |
-|-------|----------|---------------|
-| `Aqueous` | Default for water-like liquids | Standard rates |
-| `Viscous` | Glycerol, PEG, hydrogels | Reduced speeds, extra blowout |
-| `HighlyViscous` | Gels, pastes | Very slow speeds, multiple mixes |
-| `Volatile` | Ethanol, acetone, DMSO | Faster aspiration, air gap |
-| `Foaming` | Detergents, SDS | Slow dispense, no mix |
+### Liquid Classes
 
-Custom classes can be added by creating a new JSON file in `Library/LiquidClasses/`. The visual designer auto-populates the liquid class dropdown from this directory.
+Liquid classes define aspiration/dispense parameters for non-aqueous liquids, stored in `Library/LiquidClasses/*.json`:
+
+| Class | Use Case |
+|-------|----------|
+| `Aqueous` | Default, water-like liquids |
+| `Viscous` | Glycerol, PEG, hydrogels |
+| `HighlyViscous` | Gels, pastes |
+| `Volatile` | Ethanol, acetone, DMSO |
+| `Foaming` | Detergents, SDS |
+
+Selectable per-reagent in the Recipe Generator UI, along with advanced per-reagent options (air gap, blow-out, mix-after cycles/volume).
+
+### Waste Estimates
+
+The Recipe Generator estimates per-reagent disposal waste (based on Opentrons' documented `distribute()` behavior) and folds it into `Metadata.RequiredVolumes[reagent].estimated_waste_ul` plus a plain-text line in `Metadata.Notes`. **This is surfaced in the UI only as a line inside the collapsible "Notes" section** — there is no dedicated waste widget, so remember to expand Notes rather than assume there's no output. After a real run, the Opentrons server's run archive compares this estimate against actual aspirate/dispense volumes from the run log.
+
+### Tip-Presence Safety (fully automatic, no UI)
+
+Because the installed robot firmware has no real tip-presence sensor, the Opentrons server maintains its own persisted per-mount tip-tracking state and automatically prepends a forced drop-tip step to any recipe run if it can't confirm a mount is clear. This happens transparently — you will not see it in the recipe JSON you generated, only in the executed protocol's log.
 
 ---
 
 ## Tip State Persistence
 
-To recover from crashes mid-protocol, tip consumption is persisted after each protocol execution:
+Two independent, automatically-maintained files track tip state (both under the Opentrons server's directory, not in `Library/`):
 
-```json
-{
-  "tip_rack_1000": {
-    "A1": false, "B1": false, "C1": false,
-    "D1": true, "E1": true, ...
-  },
-  "tip_rack_50": { ... },
-  "last_updated": "2025-05-15T14:23:01"
-}
-```
+- `tip_state.json` — how many tips remain per rack (drives the Operator page's refill prompts)
+- `tip_mount_state.json` — per-mount "might still have a tip" state (drives the safety guard above)
 
-`false` = tip already consumed. On restart, the `RecipeTranslator` reads this file and skips consumed positions rather than re-picking used tips.
+Both survive a server restart (atomic writes) and are reconciled automatically from the robot's own command log after every run, including aborted/emergency-stopped ones.
 
 ---
 
-## Plate Tracking
+## Excel-to-Recipe Converter (Recipe Generator)
 
-Every recipe execution is logged with a `plate_id`:
+The primary way to create recipes. From the **Recipe Generator** page (`/batch` or `/recipes` — same page, two URLs):
 
-```json
-{
-  "plate_id": "P2025-05-15-001",
-  "recipe": "elisa_coating.json",
-  "hal_config": "deck_config_A.json",
-  "timestamp": "2025-05-15T14:20:00",
-  "wells_dispensed": 96,
-  "operator": "workflow_executor"
-}
-```
+1. Pick an existing `.xlsx` from `Library/Recipes/excel/`, or upload one. Expected format: one column identifies wells, other columns are reagents with volumes (column header contains a volume unit, e.g. "µL").
+2. Group reagent columns into **Phases**, optionally with a delay between phases.
+3. Configure per-reagent liquid class and advanced aspirate/dispense options.
+4. Configure reservoir sharing (type + count) if reagents share physical reservoirs.
+5. Insert module treatments (heater-shaker, temperature) between phases if needed.
+6. Generate — choose "Multi-Recipe + Workflow" (one recipe per phase, chained by an auto-generated workflow) or "Single Recipe with Delays" (one recipe, `Delay` steps between phases).
+7. The generator can also produce a matching generic HAL config alongside the recipe.
 
-This record is stored in `Results/plate_tracking.json` and links to the Tecan measurement output that references the same `plate_id`, enabling full traceability from pipetting to result.
-
----
-
-## Excel-to-Recipe Converter
-
-For researchers who design experiments in spreadsheets, the converter at `/batch` auto-generates recipes from pipetting plans:
-
-1. Upload an Excel file where rows = wells and columns = reagents with volumes
-2. The parser detects well columns (header contains "Well") and reagent columns (header contains µL or uL)
-3. Optionally group columns into phases with inter-phase delays
-4. Download the generated recipe JSON ready for use in any workflow
+Two features from this pipeline exist only in the generated JSON, with **no corresponding webapp control**: gripper offsets (`MoveLabware.PickUpOffset`/`DropOffset`) and `Aspirate.VerifyLiquid`. Set these by hand-editing the generated recipe if needed.

@@ -49,16 +49,17 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ---
 
-## 3 — Compile TecanBridge.exe
+## 3 — Compile the Tecan bridge
 
-TecanBridge is a C# console application that wraps the Tecan iControl SDK.
+The bridge is a C# console application (`TecanSiLA2Server.exe`) that wraps the Tecan iControl SDK.
 
-1. Open `v1/SiLA2/TecanM200SiLA2Server/TecanBridge/TecanBridge.csproj` in Visual Studio (any edition, including Community).
+1. Open `v1/SiLA2/TecanM200SiLA2Server/bridge/TecanSiLA2Server.sln` in Visual Studio (any edition, including Community).
 2. Set build configuration to **Release**.
-3. Build → the output is `bin/Release/net48/TecanBridge.exe`.
-4. Copy `TecanBridge.exe` (and its adjacent DLLs) to `v1/SiLA2/TecanM200SiLA2Server/` so that `main.py` can find it.
+3. Build → the output is `bridge/bin/Release/net48/TecanSiLA2Server.exe`.
 
 TecanBridge requires `Tecan.iControl.SDK.dll` installed with iControl. If it is not in the GAC, copy it into the project directory alongside the exe.
+
+**Important**: `src/bridge_launcher.py` always prefers the **Release** build over Debug if both exist. If you rebuild only in Debug configuration while an older Release exe is still present, your changes will silently not run — either rebuild Release too, or delete the stale Release build. See [SERVERS.md](SERVERS.md#bridge-binary-is-up-to-date) for a concrete case of this happening.
 
 ---
 
@@ -66,20 +67,21 @@ TecanBridge requires `Tecan.iControl.SDK.dll` installed with iControl. If it is 
 
 Everything is in **`v1/lab_config.yaml`** and individual server `config.yaml` files.
 
-### 4.1 — Mobile robot IP (most commonly changes)
+### 4.1 — Mobile robot IP (deployed and maintained remotely)
 
 ```yaml
 # v1/lab_config.yaml
 servers:
   mobile:
-    host: 10.16.0.114      # ← change to the actual IP of the Linux robot PC
+    host: 192.168.11.22    # ← the Linux/Docker host running GoFaGo's SiLA2 server
     port: 50053
+    remote: true            # runs on external Linux PC, never started locally
     network:
-      ros_master_uri: http://localhost:11311   # ← change if ROS master is on a different host
-      ros_namespace: /setup1                  # ← change if your ROS namespace differs
+      ros_master_uri: http://localhost:11311
+      ros_namespace: /setup1
 ```
 
-The mobile server runs on the Linux computer. Set `remote: true` (already default) — the launcher will not try to start it locally, it only connects.
+The mobile robot's SiLA2 server runs entirely on this remote host (Docker deployment) — there is nothing to install locally for it beyond this bootstrap entry. Set `enabled: false` here only if you're deploying LabOS somewhere that genuinely doesn't have a GoFaGo unit. See [ARCHITECTURE.md](ARCHITECTURE.md#mobile-robot-current-status) and [SERVERS.md](SERVERS.md#mobile-robot-sila2-server).
 
 ### 4.2 — Opentrons robot IP
 
@@ -144,32 +146,24 @@ If the mobile robot is not yet running (Linux PC not set up), its indicator will
 
 ---
 
-## 6 — Linux robot PC setup
+## 6 — Mobile robot (GoFaGo) — deployed remotely, nothing to set up here
 
-The mobile robot server runs on the Linux computer alongside ROS.
+The mobile robot's SiLA2 server is **not part of this repository's checkout** — it runs entirely from its own deployment on the remote Linux/Docker host (see [ARCHITECTURE.md](ARCHITECTURE.md#mobile-robot-current-status)). As long as `lab_config.yaml`'s `mobile` entry points at the right host/port (step 4.1), the orchestrator will discover and use it automatically. Confirm reachability from Windows if you want to double-check before a session:
 
-```bash
-# On the Linux PC
-source /opt/ros/noetic/setup.bash
-cd /path/to/LabOS/ext/MobileSiLA2Server
-pip install -r requirements.txt
-python main.py
-```
-
-Verify gRPC is reachable from the Windows PC:
 ```powershell
-# From Windows
-python -c "import grpc; ch = grpc.insecure_channel('10.16.0.114:50053'); print(grpc.channel_ready_future(ch).result(timeout=5))"
+python -c "import grpc; ch = grpc.insecure_channel('192.168.11.22:50053'); print(grpc.channel_ready_future(ch).result(timeout=5))"
 ```
+
+If it doesn't connect on a given day (network issue, remote host down), LabOS still operates fully with Opentrons + Tecan + Manual Station — the mobile robot just shows offline on the Dashboard.
 
 ---
 
 ## 7 — Verify the installation
 
 From the dashboard:
-1. All four instruments show "online" (or "offline" for intentionally disabled ones)
-2. Go to **Workflow Builder** → load `example_no_robot.workflow.json` → click **Validate** — should pass with no errors
-3. Run `Opentrons_Only_Test.workflow.json` with a scrap plate to confirm liquid handling is functional
+1. Opentrons, Tecan, Manual Station, and Mobile Robot all show "online"
+2. Go to **Workflow Builder** → load `Opentrons_Only_Test.workflow.json` → click **Validate** — should pass with no errors
+3. Run it with a scrap plate to confirm liquid handling is functional
 
 From the API:
 ```powershell
@@ -213,4 +207,4 @@ The launcher is still starting up (takes ~10 seconds for all servers). Refresh a
 The orchestrator uses Strategy 0 (sila2 SilaClient) for all current servers. If a server was recently rebuilt, the cached SilaClient may be stale. Restart the orchestrator to invalidate the client cache.
 
 **"Strategy 0 failed, trying Strategy 1" in logs**
-This means the sila2 library could not connect to the server. Check that the server is a modern `sila2`-library server (has `generated/` directory with codegen output). If it is a legacy custom server, Strategy 1 (SiLA2Common fallback) will be used instead — this is expected behaviour for old servers.
+This means the sila2 library could not connect to the server. Check that the server is a modern `sila2`-library server (has `generated/` directory with codegen output). If it is a non-sila2 custom server, Strategy 1 (dynamic stub loading from `src/pnp_stubs/`) is used instead — this is expected behaviour, not an error, for that kind of server. No current LabOS instrument actually needs this fallback.

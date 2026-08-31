@@ -107,12 +107,11 @@ All current LabOS servers are built with the **`sila2` Python library** (v0.14).
 ```python
 from sila2.client import SilaClient
 
-client = SilaClient("localhost", 50052, insecure=True)
+client = SilaClient("localhost", 50302, insecure=True)
 # Feature and command names come from the live descriptor:
-result = client.WorkflowAPI.ExecuteRecipe(
-    recipe="my_recipe.json",
-    hal_config="deck_config_A.json"
-)
+result = client.WorkflowAPI.ExecuteRecipe(RecipeName="my_recipe.json")
+# HAL config is not a per-call parameter — set it once via LoadHardwareConfig,
+# it persists across restarts. See ARCHITECTURE.md / HAL_SYSTEM.md.
 ```
 
 **Why this is preferred over SiLA2Common**: it uses the standard SiLA2 protocol (no custom extension), descriptors are typed and versioned, and any SiLA2-compliant client (not just LabOS) can interact with the server.
@@ -298,12 +297,12 @@ This regenerates the `generated/yourinstrument/` directory. Do not edit generate
 
 | Server | Default Port | Protocol | Strategy |
 |--------|-------------|----------|----------|
-| Opentrons SiLA2 Server | 50052 | `sila2` library | **0** |
+| Opentrons SiLA2 Server | 50302 | `sila2` library | **0** |
 | Tecan SiLA2 Server | 50051 | `sila2` library | **0** |
-| Mobile SiLA2 Server | 50053 | `sila2` library | **0** |
 | Manual Station SiLA2 Server | 50500 | `sila2` library | **0** |
+| Mobile SiLA2 Server (remote, hosted on its own Linux/Docker host — see [ARCHITECTURE.md](ARCHITECTURE.md#mobile-robot-current-status)) | 50053 | `sila2` library | **0** |
 | Tecan C# bridge (internal) | 50055 | custom gRPC | — (not a SiLA2 server) |
-| New instruments | 50056–50099 | `sila2` library | **0** |
+| New instruments | 50061–50099 | `sila2` library | **0** |
 
 Ports are configured in each server's `config.yaml`.
 
