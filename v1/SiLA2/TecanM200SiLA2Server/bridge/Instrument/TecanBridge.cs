@@ -50,6 +50,11 @@ namespace TecanSiLA2Server.Instrument
         private readonly string _protocolsPath;
         private readonly string _resultsPath;
 
+        // PlateType override lookup (see PlateTypeLibrary.cs) -- empty
+        // dictionary if PlateTypesPath is unset or unreadable, in which case
+        // RunMeasurement's PlateType parameter stays a documented no-op.
+        private readonly Dictionary<string, PlateTypeDefinition> _plateTypes;
+
         public TecanBridge(ILogger<TecanBridge> logger, ServerConfiguration config)
         {
             _logger = logger;
@@ -57,6 +62,7 @@ namespace TecanSiLA2Server.Instrument
             _rootPath = Path.GetDirectoryName(config.ProtocolsPath) ?? AppDomain.CurrentDomain.BaseDirectory;
             _protocolsPath = config.ProtocolsPath;
             _resultsPath = config.ResultsPath;
+            _plateTypes = PlateTypeLibrary.Load(config.PlateTypesPath, _logger);
 
             // Ensure directories exist
             Directory.CreateDirectory(_protocolsPath);
@@ -453,7 +459,8 @@ namespace TecanSiLA2Server.Instrument
             string protocolFile,
             string plateId,
             IProgress<MeasurementProgress>? progress = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            string? plateType = null)
         {
             _logger.LogInformation("[TecanBridge] RunMeasurementAsync STARTED - Protocol='{Protocol}', PlateId='{PlateId}'", 
                 protocolFile, plateId);
@@ -538,7 +545,7 @@ namespace TecanSiLA2Server.Instrument
             {
                 try
                 {
-                    RunMeasurementWorker(fullPath, result, progress);
+                    RunMeasurementWorker(fullPath, result, progress, plateType);
                     tcs.SetResult(true);
                 }
                 catch (Exception ex)
@@ -555,10 +562,43 @@ namespace TecanSiLA2Server.Instrument
             return result;
         }
 
+        /// <summary>
+        /// Riscrive gli attributi file/range di ogni &lt;CyclePlate&gt;/&lt;PlateRange&gt;
+        /// nel contenuto XML di un .mdfx, per usare una piastra diversa da
+        /// quella con cui il protocollo e' stato creato nel Reader Editor.
+        /// I due attributi vengono sempre cambiati insieme (sono accoppiati:
+        /// il range dipende dalla piastra). Se il .mdfx non contiene nessun
+        /// nodo CyclePlate/PlateRange (formato inatteso), lancia un'eccezione
+        /// invece di restituire il file invariato senza avvisare nessuno.
+        /// </summary>
+        private static string RewritePlateType(string xmlContent, PlateTypeDefinition plateDef)
+        {
+            XNamespace ns = "tecan.at.schema.documents";
+            var doc = XDocument.Parse(xmlContent);
+
+            var cyclePlates = doc.Descendants(ns + "CyclePlate").ToList();
+            var plateRanges = doc.Descendants(ns + "PlateRange").ToList();
+            if (cyclePlates.Count == 0 || plateRanges.Count == 0)
+            {
+                throw new Exception(
+                    "Impossibile applicare PlateType: nessun nodo <CyclePlate>/<PlateRange> trovato nel file .mdfx (formato inatteso).");
+            }
+
+            foreach (var cp in cyclePlates)
+                cp.SetAttributeValue("file", plateDef.File);
+            foreach (var pr in plateRanges)
+                pr.SetAttributeValue("range", plateDef.Range);
+
+            return doc.Declaration != null
+                ? doc.Declaration + Environment.NewLine + doc.ToString(SaveOptions.DisableFormatting)
+                : doc.ToString(SaveOptions.DisableFormatting);
+        }
+
         private void RunMeasurementWorker(
             string protocolPath,
             MeasurementResult result,
-            IProgress<MeasurementProgress>? progress)
+            IProgress<MeasurementProgress>? progress,
+            string? plateType = null)
         {
             UpdateStatus("Busy", "Starting measurement...");
             progress?.Report(new MeasurementProgress { Percentage = 0, Message = "Initializing..." });
@@ -571,6 +611,26 @@ namespace TecanSiLA2Server.Instrument
                 dummyForm = new Form();
 
                 string fileContent = File.ReadAllText(protocolPath);
+                if (!string.IsNullOrEmpty(plateType))
+                {
+                    // Explicit request to override the .mdfx's hardcoded
+                    // plate -- fail loudly if we don't have a definition for
+                    // it rather than silently keeping the .mdfx default,
+                    // which would look successful while measuring the wrong
+                    // geometry.
+                    string plateTypeKey = plateType!;
+                    if (!_plateTypes.TryGetValue(plateTypeKey, out var plateDef))
+                    {
+                        var known = _plateTypes.Count > 0 ? string.Join(", ", _plateTypes.Keys) : "(nessuna)";
+                        throw new Exception(
+                            $"PlateType '{plateTypeKey}' non trovato in PlateTypes.json. Piastre note: {known}. " +
+                            "Lascia PlateType vuoto per usare il default del protocollo.");
+                    }
+                    fileContent = RewritePlateType(fileContent, plateDef);
+                    _logger.LogInformation(
+                        "[TecanBridge] PlateType override applicato: '{PlateType}' -> file={File}, range={Range}",
+                        plateTypeKey, plateDef.File, plateDef.Range);
+                }
                 var scriptToRun = Tecan.At.Common.FileManagement.FileHandling.LoadXml(fileContent) as TecanFile;
                 
                 if (scriptToRun == null)

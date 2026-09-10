@@ -81,6 +81,14 @@ Results/opentrons/*
 !Results/opentrons/.gitkeep
 Results/runs/*
 !Results/runs/.gitkeep
+Results/Plots/*
+!Results/Plots/.gitkeep
+Results/Images/*
+!Results/Images/.gitkeep
+
+# Per-run command-log archive written by the Opentrons server (rotating,
+# machine-specific; the durable record is Results/labos.db + the robot itself)
+SiLA2/OpentronsSiLA2Server/run_archive/
 
 # Runtime database and tracking state (machine-specific)
 Results/labos.db

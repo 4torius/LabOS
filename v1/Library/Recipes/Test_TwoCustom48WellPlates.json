@@ -1,0 +1,24 @@
+{
+  "ProtocolName": "Test_TwoCustom48WellPlates",
+  "Description": "Smoke test: load EuroClone 48-well custom plate (D1) + Corning 48-well standard plate (D2), no liquid handling. Verifies (1) Fase B custom-labware auto-registration actually works on real hardware, (2) corning_48_wellplate_1.6ml_flat loads correctly as standard Opentrons labware.",
+  "Requirements": {
+    "PlateD1_EuroCloneCustom": "PlateD1_EuroCloneCustom",
+    "PlateD2_Corning48": "PlateD2_Corning48",
+    "MyTrash": "MyTrash"
+  },
+  "Steps": [
+    {
+      "Command": "Comment",
+      "Text": "=== Smoke test: loading EuroClone 48-well (D1, custom) + Corning 48-well (D2, standard) - no liquid handling ==="
+    },
+    {
+      "Command": "Home",
+      "Axes": [],
+      "SkipIfHomed": false
+    },
+    {
+      "Command": "Comment",
+      "Text": "=== Both plates loaded successfully if this run completes without error ==="
+    }
+  ]
+}

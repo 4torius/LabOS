@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -320,17 +320,20 @@ def create_app() -> "FastAPI":
     async def recipe_generator_page(request: Request):
         return templates.TemplateResponse(request, "recipe_generator.html", {"request": request, "title": "Recipe Generator"})
 
-    @app.get("/plates", response_class=HTMLResponse)
-    async def plates_page(request: Request):
-        return templates.TemplateResponse(request, "plates.html", {"request": request, "title": "Plates"})
+    # "Database" page: unified Plates (chemical record) + Runs & Log
+    # (automation/execution log) view with tabs. /plates and /runs are kept
+    # as redirects so any saved links/bookmarks still work.
+    @app.get("/database", response_class=HTMLResponse)
+    async def database_page(request: Request):
+        return templates.TemplateResponse(request, "database.html", {"request": request, "title": "Database"})
 
-    @app.get("/history", response_class=HTMLResponse)
-    async def history_page(request: Request):
-        return templates.TemplateResponse(request, "history.html", {"request": request, "title": "History"})
+    @app.get("/plates")
+    async def plates_page_redirect():
+        return RedirectResponse(url="/database#plates")
 
-    @app.get("/runs", response_class=HTMLResponse)
-    async def runs_page(request: Request):
-        return templates.TemplateResponse(request, "runs.html", {"request": request, "title": "Run History"})
+    @app.get("/runs")
+    async def runs_page_redirect():
+        return RedirectResponse(url="/database#runs")
 
     # --------------------------------------------------------------------------
     # Settings API
@@ -433,27 +436,12 @@ def create_app() -> "FastAPI":
             pass
         return result
 
-    # --------------------------------------------------------------------------
-    # Logs and history
-    # --------------------------------------------------------------------------
-
-    @app.get("/api/logs")
-    async def get_logs(limit: int = 100):
-        return state.logs[-limit:]
-
-    @app.get("/api/history")
-    async def get_command_history(limit: int = 100):
-        return state.command_history[-limit:][::-1]
-
-    @app.delete("/api/history")
-    async def clear_history():
-        state.command_history = []
-        return {"status": "ok"}
-
-    @app.delete("/api/logs")
-    async def clear_logs():
-        state.logs = []
-        return {"status": "ok"}
+    # Note: the dedicated History page/API (/history, /api/logs, /api/history)
+    # was removed - it was a pure viewer over ephemeral in-memory AppState
+    # logs/command_history with no other consumer. state.add_log()/
+    # add_command() themselves are kept (used ~79 places for their side
+    # effect: in-memory ring buffer + WebSocket broadcast for live dashboard
+    # updates), only the browsing UI/API surface is gone.
 
     # --------------------------------------------------------------------------
     # Routers (extracted modules)
@@ -476,7 +464,7 @@ def create_app() -> "FastAPI":
     app.include_router(create_operator_router(state, ws_manager, lab_core, pending_operator_actions, pending_operator_actions_lock, BASE_DIR, WEBAPP_CONFIG))
     app.include_router(create_hardware_router(BASE_DIR, LIBRARY_DIR, lab_core))
     if _DB_AVAILABLE:
-        app.include_router(create_db_router(_db))
+        app.include_router(create_db_router(_db, RESULTS_DIR, state))
 
     # --------------------------------------------------------------------------
     # WebSocket

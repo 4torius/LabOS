@@ -128,44 +128,6 @@ def create_operator_router(
         state.add_log("info", message, "operator")
         return {"success": True, "step_id": step_id}
 
-    @router.post("/api/operator/test-notification")
-    async def create_test_notification():
-        notification_id = int(datetime.now().timestamp() * 1000)
-        notification = {
-            "id": notification_id, "type": "operator_notification",
-            "title": "Test Notification",
-            "message": "This is a test notification. Click Confirm to dismiss it.",
-            "priority": "warning", "requires_action": True,
-            "timestamp": datetime.now().isoformat(), "action": "test", "params": {}
-        }
-        async with pending_operator_actions_lock:
-            pending_operator_actions.append(notification)
-        await ws_manager.broadcast(notification)
-        state.add_log("info", "Test notification created", "operator")
-        return {"status": "ok", "notification_id": notification_id}
-
-    @router.post("/api/operator/test-tip-refill")
-    async def create_tip_refill_notification():
-        notification_id = int(datetime.now().timestamp() * 1000)
-        notification = {
-            "id": notification_id, "type": "operator_notification",
-            "title": "Refill Tip Rack (TEST)",
-            "message": (
-                "REFILL TIPRACK RICHIESTO\n\n"
-                "Tipo: opentrons_flex_96_tiprack_1000ul\n"
-                "Posizione: C3\nTips necessari: 48\nTips disponibili: 12\n\n"
-                "Sostituire il tiprack con uno pieno e confermare."
-            ),
-            "priority": "urgent", "requires_action": True,
-            "timestamp": datetime.now().isoformat(), "action": "RefillTipRack",
-            "params": {"rack_type": "opentrons_flex_96_tiprack_1000ul", "location": "C3", "needed": 48, "available": 12}
-        }
-        async with pending_operator_actions_lock:
-            pending_operator_actions.append(notification)
-        await ws_manager.broadcast(notification)
-        state.add_log("info", "Test tip refill notification created", "operator")
-        return {"status": "ok", "notification_id": notification_id}
-
     # Emergency / control
 
     @router.post("/api/emergency/stop")

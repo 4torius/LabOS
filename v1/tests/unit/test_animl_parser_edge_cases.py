@@ -63,6 +63,7 @@ class TestWellIdBounds:
     def test_normal_well_parses_correctly(self):
         step_el = _make_step_el(["A1", "B12"])
         data = _parse_step(step_el)
+        assert data is not None
         assert data["measurements"][0] == {"well": "A1", "row": 1, "col": 1, "value": 1.0, "unit": "AU"}
         assert data["measurements"][1]["row"] == 2
         assert data["measurements"][1]["col"] == 12
@@ -70,25 +71,30 @@ class TestWellIdBounds:
     def test_lowercase_row_letter_is_normalized(self):
         step_el = _make_step_el(["a1"])
         data = _parse_step(step_el)
+        assert data is not None
         assert data["measurements"][0]["row"] == 1
 
     def test_row_letter_outside_a_z_defaults_to_row_one_without_raising(self):
         step_el = _make_step_el(["1A"])  # well[0] == '1', not a letter
         data = _parse_step(step_el)  # must not raise
+        assert data is not None
         assert data["measurements"][0]["row"] == 1
 
     def test_non_positive_column_defaults_to_one_without_raising(self):
         step_el = _make_step_el(["A0"])
         data = _parse_step(step_el)
+        assert data is not None
         assert data["measurements"][0]["col"] == 1
 
     def test_non_numeric_column_defaults_to_one(self):
         step_el = _make_step_el(["AX"])
         data = _parse_step(step_el)
+        assert data is not None
         assert data["measurements"][0]["col"] == 1
 
     def test_empty_well_string_does_not_raise(self):
         step_el = _make_step_el([""])
         data = _parse_step(step_el)
+        assert data is not None
         assert data["measurements"][0]["row"] == 1
         assert data["measurements"][0]["col"] == 1

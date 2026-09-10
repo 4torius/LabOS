@@ -71,7 +71,7 @@ Run this before the first workflow execution in a new environment or after any h
 - [ ] Hardware page: select the correct HAL config, confirm "Set Active" reports the config was actually applied to the robot (a warning toast appears if it wasn't — see below)
 - [ ] Recipe Generator: generate or load a small test recipe
 - [ ] Run `Opentrons_Only_Test.workflow.json` from the Workflow Builder with a scrap plate
-- [ ] Tecan: `RunMeasurement` with a short test protocol, verify an AnIML result appears in Run History
+- [ ] Tecan: `RunMeasurement` with a short test protocol, verify an AnIML result appears on the Database page's Plates tab
 - [ ] Mobile robot: `RefreshTasks` populates `AvailableTasks` with the expected task set
 
 ---
@@ -92,12 +92,12 @@ Run this before the first workflow execution in a new environment or after any h
 3. **Workflow Builder** (`/workflows`) — load the generated workflow (add mobile-robot transport steps between instrument steps if plates need to move), click **Execute**
 4. **Monitor** — the global status bar at the bottom of every page shows live progress; Pause/Resume/Abort are available there
 5. **Manual steps** — if the workflow includes one, respond via the **Operator** page's Pending Actions
-6. **Review results** — **Run History** (`/runs`) for the persistent record (searchable, renamable, exportable), **Results** (`/results`) for raw output files, **Plates** (`/plates`) for well-level data
+6. **Review results** — **Database** (`/database`) for the persistent record: **Runs & Log** tab for the searchable/renamable/exportable step timeline, **Plates** tab for well-level content and linked measurements; **Results** (`/results`) for raw output files
 
 ### After Each Experiment
 1. Clear completed plates from the deck
 2. Check tip consumption on the Operator page; use "Refill Tips" if racks were physically replaced
-3. If anything looked wrong mid-run, check **Run History** for that run's step timeline before assuming it's a hardware fault
+3. If anything looked wrong mid-run, check the **Database** page's **Runs & Log** tab for that run's step timeline before assuming it's a hardware fault
 
 ---
 
@@ -119,6 +119,9 @@ Run this before the first workflow execution in a new environment or after any h
 1. Check Task Manager for `TecanSiLA2Server.exe` — if absent, the Python server's health monitor should auto-restart it within seconds (with backoff)
 2. Confirm Tecan iControl software is closed (it locks the USB connection)
 3. `Connect()` always re-validates against the real hardware state now (fixed) — it will no longer report "connected" after a silent USB drop. If you ever rebuild `TecanBridge.cs` in the future, remember the launcher prefers the **Release** build over Debug — rebuild Release too, or the fix you just made won't actually run (see [SERVERS.md](SERVERS.md#bridge-binary-is-up-to-date)).
+
+### Tecan: `RunMeasurement` fails with "PlateType 'X' not found in PlateTypes.json"
+This is intentional — you asked for a plate override that isn't registered yet, and the bridge refuses to silently fall back to the `.mdfx`'s own default plate (that would look like success while reading the wrong geometry). Either leave `PlateType` empty to use the protocol's default plate, or register the plate first — see [SERVERS.md](SERVERS.md#mdfx-protocol-files). Remember to restart the Tecan server after editing `PlateTypes.json` — it's loaded once at bridge startup.
 
 ### Mobile robot: task fails or "Server offline" despite discovery showing it online
 1. Verify the remote Docker container is up: `docker ps` / `docker logs mobile-sila2` on `192.168.11.22`

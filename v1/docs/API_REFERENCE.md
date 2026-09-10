@@ -14,8 +14,8 @@ This reference is organized by page/feature area, matching how the webapp routes
 |---|---|---|
 | GET/POST | `/api/config` | Read / write `lab_config.yaml` (deep-merged, atomic write) |
 | POST | `/api/network/test` | TCP/gRPC reachability probe for a given host:port |
-| GET/DELETE | `/api/logs` | In-memory application log buffer |
-| GET/DELETE | `/api/history` | In-memory command history (ephemeral — separate from the persistent Run History / `/api/db/runs`) |
+
+The old ephemeral `/api/logs` and `/api/history` endpoints (backing the removed **History** page) were dropped — `state.add_log`/`add_command` still exist and broadcast over the WebSocket for their side effects, there's just no page/endpoint reading them back anymore. Persistent records live at `/api/db/*` (below).
 
 ## Instruments (`routes/instruments.py`)
 
@@ -74,17 +74,18 @@ This reference is organized by page/feature area, matching how the webapp routes
 | POST | `/api/operator/manual-step` | "Add Log Note" on the Operator page. Writes a free-text entry (type/description/value) to the session log only — does not create a tracked workflow step or pending action. |
 | POST | `/api/emergency/stop` | Broadcast a stop attempt (tries `EmergencyStop`/`Stop`/`Abort`/`Cancel`/`Halt`, whichever the instrument exposes) to **every** discovered instrument |
 
-## Database — Plates & Run History (`routes/db.py`, prefix `/api/db`)
+## Database — Plates & Runs & Log (`routes/db.py`, prefix `/api/db`)
 
-This is the SQLite-backed store actually used by the **Plates** and **Run History** pages (an older, unused in-memory/JSON plate-tracking mechanism was removed in this documentation pass — `_wf_track_tecan`/`_wf_track_opentrons` in `routes/workflows.py` now write directly here).
+This is the SQLite-backed store behind the unified **Database** page (`/database`, tabs: Plates | Runs & Log — `/plates` and `/runs` are kept as redirects for old bookmarks). `src/plate_tracking.py` writes here from both the workflow-execution path and manual Dashboard commands (see [ARCHITECTURE.md](ARCHITECTURE.md#layer-35-persistence)).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/plates`, `/plates/{id}`, `/plates/{id}/heatmap` | Plate search, detail, well-value heatmap |
+| GET | `/plates`, `/plates/{id}` | Plate search, detail (wells, measurements, linked raw AnIML results) |
+| GET | `/plates/{id}/heatmap` | Well-value grid for one plate. Optional `?measurement_type=...` — required to get a sane result on a plate measured with more than one technique (otherwise unfiltered wells with 2+ techniques get averaged together); the Database page's UI always passes this once a plate has more than one technique |
 | PUT/PATCH/DELETE | `/plates/{id}` | Status update, edit, delete |
 | GET | `/runs` | Search/filter runs (status, date, text) |
 | GET/PATCH/DELETE | `/runs/{id}` | Run detail; rename/notes edit; delete (removes measurements, preserves plate data) |
-| GET | `/export/plate/{id}.csv`, `/export/run/{id}.json`, `/export/ai-context.json` | AI-context export, used by the Run History page's export links |
+| GET | `/export/plate/{id}.csv`, `/export/run/{id}.json`, `/export/ai-context.json` | AI-context export, used by the Database page's export links |
 | GET | `/stats` | Summary counters |
 
 ## Results

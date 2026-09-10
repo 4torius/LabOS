@@ -65,8 +65,13 @@ def _load_reservoir_catalog(library_dir: Optional[Path] = None) -> Dict[str, Dic
     for f in reservoirs_dir.glob("*.json"):
         try:
             data = json.loads(f.read_text(encoding='utf-8-sig'))
-            load_name = data.get("parameters", {}).get("loadName", f.stem)
-            _RESERVOIR_CACHE[load_name] = data
+            # Keyed by filename (f.stem), matching webapp/routes/hardware.py's
+            # catalog/labware endpoint - that's what actually ends up as
+            # `reservoir_type` (HAL LoadName / Configuration.reservoir_type)
+            # via the UI dropdown. Falling back to the internal
+            # parameters.loadName here would silently break lookups the
+            # moment a file gets renamed without its internal field updated.
+            _RESERVOIR_CACHE[f.stem] = data
         except Exception:
             pass
     return _RESERVOIR_CACHE
@@ -85,7 +90,55 @@ def get_reservoir_wells(reservoir_type: str, library_dir: Optional[Path] = None)
 
 
 def get_reservoir_well_capacity(reservoir_type: str, well_id: str, library_dir: Optional[Path] = None) -> Optional[float]:
-    """Max liquid volume (uL) of a single well in a reservoir labware, or None if unknown."""
+    """Planning ceiling (uL) for a single well in a reservoir labware - the
+    volume the loading-plan math (_claim_wells_for_volume) should fill it
+    to, not necessarily its true physical brim.
+
+    Prefers an explicit `workingVolume` on the well if the labware file
+    defines one - a deliberate safety margin below `totalLiquidVolume`
+    reserving headroom for real per-well dead volume (liquid at the very
+    bottom the pipette tip can never reach), so a plan can't put "up to the
+    physical max, minus whatever margin happens to survive an uneven split"
+    into a well the way `_claim_wells_for_volume` did before this field
+    existed (confirmed on real hardware: a well filled to instructed
+    capacity ran dry on its last, small reload, well before the physically
+    poured volume should have been exhausted).
+
+    Falls back to `totalLiquidVolume` when `workingVolume` isn't set -
+    every reservoir file in the library today has no such field, so this is
+    the same number this function has always returned for them; opting a
+    labware into a working-volume margin is a per-file addition, not a
+    behavior change nobody asked for.
+    """
+    data = _load_reservoir_catalog(library_dir).get(reservoir_type)
+    if not data:
+        return None
+    well = data.get("wells", {}).get(well_id)
+    if not well:
+        return None
+    return well.get("workingVolume", well.get("totalLiquidVolume"))
+
+
+def _get_explicit_working_volume(reservoir_type: str, well_id: str, library_dir: Optional[Path] = None) -> Optional[float]:
+    """The well's `workingVolume` ONLY if the labware file actually sets one
+    - unlike get_reservoir_well_capacity(), does NOT fall back to
+    totalLiquidVolume when absent. Needed because that fallback makes the
+    *effective* capacity trivially equal to the max whenever workingVolume
+    is unset, which would make a naive `capacity >= max` check misfire on
+    every ordinary reservoir with no working-volume margin at all."""
+    data = _load_reservoir_catalog(library_dir).get(reservoir_type)
+    if not data:
+        return None
+    well = data.get("wells", {}).get(well_id)
+    return well.get("workingVolume") if well else None
+
+
+def get_reservoir_well_max_volume(reservoir_type: str, well_id: str, library_dir: Optional[Path] = None) -> Optional[float]:
+    """The well's true physical brim (`totalLiquidVolume`), unconditionally -
+    ignores `workingVolume` even when the labware file sets one. Used only
+    to validate that a labware's `workingVolume` (if present) is actually
+    below this, never as a planning ceiling itself (use
+    get_reservoir_well_capacity() for that)."""
     data = _load_reservoir_catalog(library_dir).get(reservoir_type)
     if not data:
         return None
@@ -333,7 +386,7 @@ def _parse_sheet_columns(ws, sheet_name: str) -> Dict[str, Any]:
 
 MODULE_TREATMENT_CATALOG: Dict[str, Dict] = {
     "HeaterShaker": {
-        "label": "Heater-Shaker (scalda / agita)",
+        "label": "Heater-Shaker (heat / shake)",
         "module_type": "heaterShakerModuleV1",
         "requirement_key": "HeaterShaker",
         "command": "HeaterShaker",
@@ -343,63 +396,63 @@ MODULE_TREATMENT_CATALOG: Dict[str, Dict] = {
         # "close/open latch" checkboxes someone could forget to tick.
         "release_field": "OpenLatch",
         "fields": [
-            {"name": "Temperature", "label": "Temperatura", "type": "number", "unit": "°C", "min": 4, "max": 95},
-            {"name": "RPM", "label": "Velocita'", "type": "number", "unit": "rpm", "min": 200, "max": 3000},
-            {"name": "Duration", "label": "Durata agitazione", "type": "number", "unit": "s", "min": 0},
-            {"name": "WaitForTemp", "label": "Attendi il raggiungimento della temperatura", "type": "bool", "default": True},
-            {"name": "KeepShaking", "label": "Continua ad agitare anche dopo questo step", "type": "bool", "default": False},
-            {"name": "DeactivateHeater", "label": "Spegni il riscaldamento", "type": "bool", "default": False},
+            {"name": "Temperature", "label": "Temperature", "type": "number", "unit": "°C", "min": 4, "max": 95},
+            {"name": "RPM", "label": "Speed", "type": "number", "unit": "rpm", "min": 200, "max": 3000},
+            {"name": "Duration", "label": "Shake duration", "type": "number", "unit": "s", "min": 0},
+            {"name": "WaitForTemp", "label": "Wait until temperature is reached", "type": "bool", "default": True},
+            {"name": "KeepShaking", "label": "Keep shaking after this step", "type": "bool", "default": False},
+            {"name": "DeactivateHeater", "label": "Turn off heating", "type": "bool", "default": False},
         ],
     },
     "TemperatureModule": {
-        "label": "Modulo Temperatura",
+        "label": "Temperature Module",
         "module_type": "temperatureModuleV2",
         "requirement_key": "TemperatureModule",
         "command": "TemperatureModule",
         "release_field": None,  # flat block, no clamp/lid over the labware
         "fields": [
-            {"name": "Temperature", "label": "Temperatura", "type": "number", "unit": "°C", "min": -10, "max": 99},
-            {"name": "WaitForTemp", "label": "Attendi il raggiungimento della temperatura", "type": "bool", "default": True},
-            {"name": "Deactivate", "label": "Spegni il modulo", "type": "bool", "default": False},
+            {"name": "Temperature", "label": "Temperature", "type": "number", "unit": "°C", "min": -10, "max": 99},
+            {"name": "WaitForTemp", "label": "Wait until temperature is reached", "type": "bool", "default": True},
+            {"name": "Deactivate", "label": "Turn off the module", "type": "bool", "default": False},
         ],
     },
     "Thermocycler": {
-        "label": "Termociclatore",
+        "label": "Thermocycler",
         "module_type": "thermocyclerModuleV2",
         "requirement_key": "Thermocycler",
         "command": "Thermocycler",
         "release_field": "OpenLid",  # closed lid blocks the gripper the same way a HeaterShaker latch does
         "fields": [
-            {"name": "CloseLid", "label": "Chiudi coperchio", "type": "bool", "default": False},
-            {"name": "LidTemperature", "label": "Temperatura coperchio", "type": "number", "unit": "°C"},
-            {"name": "BlockTemperature", "label": "Temperatura blocco", "type": "number", "unit": "°C"},
-            {"name": "HoldTime", "label": "Tempo di mantenimento", "type": "number", "unit": "s"},
-            {"name": "DeactivateLid", "label": "Spegni coperchio", "type": "bool", "default": False},
-            {"name": "DeactivateBlock", "label": "Spegni blocco", "type": "bool", "default": False},
+            {"name": "CloseLid", "label": "Close lid", "type": "bool", "default": False},
+            {"name": "LidTemperature", "label": "Lid temperature", "type": "number", "unit": "°C"},
+            {"name": "BlockTemperature", "label": "Block temperature", "type": "number", "unit": "°C"},
+            {"name": "HoldTime", "label": "Hold time", "type": "number", "unit": "s"},
+            {"name": "DeactivateLid", "label": "Turn off lid", "type": "bool", "default": False},
+            {"name": "DeactivateBlock", "label": "Turn off block", "type": "bool", "default": False},
         ],
     },
     "MagneticModule": {
-        "label": "Modulo Magnetico",
+        "label": "Magnetic Module",
         "module_type": "magneticModuleV2",
         "requirement_key": "MagneticModule",
         "command": "MagneticModule",
         "release_field": None,  # no clamp/lid over the labware
         "fields": [
-            {"name": "Engage", "label": "Attiva magnete", "type": "bool", "default": True},
-            {"name": "Disengage", "label": "Disattiva magnete", "type": "bool", "default": False},
-            {"name": "Height", "label": "Altezza", "type": "number", "unit": "mm"},
+            {"name": "Engage", "label": "Engage magnet", "type": "bool", "default": True},
+            {"name": "Disengage", "label": "Disengage magnet", "type": "bool", "default": False},
+            {"name": "Height", "label": "Height", "type": "number", "unit": "mm"},
         ],
     },
     "AbsorbanceReader": {
-        "label": "Lettore di Assorbanza",
+        "label": "Absorbance Reader",
         "module_type": "absorbanceReaderV1",
         "requirement_key": "AbsorbanceReader",
         "command": "AbsorbanceReader",
         "release_field": "OpenLid",
         "fields": [
-            {"name": "Initialize", "label": "Inizializza", "type": "bool", "default": True},
-            {"name": "Read", "label": "Esegui lettura", "type": "bool", "default": True},
-            {"name": "CloseLid", "label": "Chiudi coperchio", "type": "bool", "default": False},
+            {"name": "Initialize", "label": "Initialize", "type": "bool", "default": True},
+            {"name": "Read", "label": "Run reading", "type": "bool", "default": True},
+            {"name": "CloseLid", "label": "Close lid", "type": "bool", "default": False},
         ],
     },
 }
@@ -408,14 +461,14 @@ MODULE_TREATMENT_CATALOG: Dict[str, Dict] = {
 # separate implementation) - they just pre-fill common field combinations.
 TREATMENT_PRESETS: Dict[str, Dict] = {
     "heat_shake": {
-        "label": "Scalda e agita",
+        "label": "Heat and shake",
         "kind": "HeaterShaker",
         "target": "TargetPlate",
         "params": {"Temperature": 37, "RPM": 300, "Duration": 300, "WaitForTemp": True},
         "return_after": True,  # latch opens automatically before the return move
     },
     "keep_warm": {
-        "label": "Mantieni caldo",
+        "label": "Keep warm",
         "kind": "HeaterShaker",
         "target": None,  # user must pick which reagent/source stays warm
         "params": {"Temperature": 37, "WaitForTemp": True},
@@ -451,6 +504,17 @@ MODULE_SLOT_POOL = ['A1', 'D1', 'C1', 'B1']
 RESERVOIR_SLOT_POOL = ['A2', 'B2', 'C2', 'D3', 'D1', 'C1', 'B1', 'C3']
 TARGET_PLATE_SLOT = 'D2'
 
+# Every plain deck slot generate_generic_hal() can hand out for tip racks or
+# reservoirs once A3 (trash) and D2 (target plate) are fixed - the Flex deck
+# has no more free slots than this, so this is the real ceiling on how many
+# simultaneous tip sizes (or reservoirs) a generated HAL can carry, not an
+# arbitrary "2" picked in code. Ordered by tip-rack preference: B3/C3 first
+# (today's established default location for 1-2 sizes), then A1 (otherwise
+# entirely unused by this generator), then the reservoir pool's own
+# lowest-priority slots first - so extra tip sizes eat into the reservoir
+# slots reservoirs would have wanted least, for as long as possible.
+GENERIC_TIP_SLOT_PREFERENCE = ['B3', 'C3', 'A1', 'B1', 'C1', 'D1', 'D3', 'C2', 'B2', 'A2']
+
 
 def _compute_home_slots(all_treatments: List[Dict], num_sources: int) -> Dict[str, str]:
     """Predict the deck slot each treatable labware (TargetPlate / Source_N) will be
@@ -458,7 +522,8 @@ def _compute_home_slots(all_treatments: List[Dict], num_sources: int) -> Dict[st
     generate_hal_config_from_recipe(), so MoveLabware-back steps target a real slot."""
     distinct_modules: List[str] = []
     for t in all_treatments:
-        entry = MODULE_TREATMENT_CATALOG.get(t.get("kind"))
+        kind = t.get("kind")
+        entry = MODULE_TREATMENT_CATALOG.get(kind) if kind else None
         if entry and entry["requirement_key"] not in distinct_modules:
             distinct_modules.append(entry["requirement_key"])
 
@@ -484,7 +549,8 @@ def _emit_treatment(
     """Emit MoveLabware -> module command -> (optional) MoveLabware-back for one
     configured treatment. Adds the module to `requirements`/`modules_used` only
     when it is actually used by at least one treatment."""
-    catalog_entry = MODULE_TREATMENT_CATALOG.get(treatment.get("kind"))
+    treatment_kind = treatment.get("kind")
+    catalog_entry = MODULE_TREATMENT_CATALOG.get(treatment_kind) if treatment_kind else None
     raw_target = treatment.get("target")
     if not catalog_entry or not raw_target:
         return
@@ -553,6 +619,35 @@ def _emit_treatment(
         current_location[target_key] = home_slot
 
 
+def _claim_wells_for_volume(volume_ul: float, capacity: Optional[float],
+                             reservoir_wells: List[str], used: set
+                             ) -> Tuple[List[Tuple[str, float]], int]:
+    """Claim as many free wells (in reservoir_wells order, so consecutive
+    claims stay physically adjacent within a reservoir's own layout) as
+    needed to hold volume_ul, filling each one toward `capacity` before
+    moving to the next ("load until exhausted", not split evenly). Mutates
+    `used`. Returns (fill_plan, wells_needed): fill_plan is
+    [(well, volume_to_load_ul), ...], shorter than wells_needed if the
+    reservoir ran out of free wells - the caller must warn about that.
+    Unknown/zero capacity means "can't tell how many wells this needs" -
+    treated as a single well holding the whole volume."""
+    if capacity and capacity > 0:
+        wells_needed = max(1, -(-int(volume_ul) // int(capacity)))
+    else:
+        wells_needed = 1
+    free = [w for w in reservoir_wells if w not in used]
+    claimed = free[:wells_needed]
+    used.update(claimed)
+
+    fill_plan: List[Tuple[str, float]] = []
+    remaining = volume_ul
+    for well in claimed:
+        amount = min(capacity, remaining) if capacity else remaining
+        fill_plan.append((well, round(amount, 1)))
+        remaining -= amount
+    return fill_plan, wells_needed
+
+
 def _bucket_transfers_by_capacity(transfers: List[Dict], capacity: float) -> List[List[Dict]]:
     """Greedily group destination transfers so each bucket's total volume stays
     within a single source well's capacity (used for the Fase-3 auto-split when a
@@ -591,31 +686,142 @@ FLEX_PIPETTE_VOLUMES = {
     "flex_96channel_1000": {"min": 5, "max": 1000},
 }
 
+# Real Opentrons Flex tip catalog - optimal pipetting range per tip size,
+# straight from Opentrons' own "Opentrons Flex Tips" brochure. Deliberately
+# OVERLAPPING (e.g. both the 50uL and 200uL tip cover 5-50uL) so
+# select_tip_for_volume() below can always prefer the smallest/most precise
+# tip that still covers a given volume, rather than a single non-overlapping
+# partition that would force a coarser tip than necessary near the edges.
+FLEX_TIP_RANGES = {
+    20: {"min": 1, "max": 20, "load_name": "opentrons_flex_96_tiprack_20ul"},
+    50: {"min": 1, "max": 50, "load_name": "opentrons_flex_96_tiprack_50ul"},
+    200: {"min": 5, "max": 200, "load_name": "opentrons_flex_96_tiprack_200ul"},
+    1000: {"min": 5, "max": 1000, "load_name": "opentrons_flex_96_tiprack_1000ul"},
+}
 
-def _estimate_distribute_waste(volumes: List[float], tip_capacity: float, disposal_volume: float) -> float:
-    """Approximate the liquid Opentrons' distribute() blows to trash as "disposal
-    volume": by default it aspirates enough for several destination wells plus one
-    disposal_volume per aspirate trip, then blows that extra out after dispensing
-    all wells in that trip (docs.opentrons.com, distribute() disposal_volume).
-    This mirrors that greedy per-trip chunking to estimate total waste - the real
-    Opentrons algorithm may batch slightly differently, so treat this as a ballpark."""
-    if disposal_volume <= 0 or not volumes:
-        return 0.0
+
+def select_tip_for_volume(volume_ul: float, available_sizes: List[int]) -> Optional[int]:
+    """Pick the smallest/most precise tip (from `available_sizes`, e.g. the
+    tip sizes the user has actually loaded on the deck for this HAL) whose
+    range covers `volume_ul`. Ranges overlap on purpose (see FLEX_TIP_RANGES)
+    so "smallest size whose max covers the volume, among those that also
+    cover the volume's min" is well-defined and always the most precise
+    valid choice - never a wrong-but-technically-fitting compromise.
+
+    Returns None if no available size covers the volume (e.g. asked to
+    pipette 0.5uL, or 1500uL, with only 1000uL tips on hand) - the caller
+    must treat that as a hard error, not silently fall back to an imprecise
+    or physically impossible tip.
+    """
+    candidates = [
+        size for size in available_sizes
+        if size in FLEX_TIP_RANGES
+        and FLEX_TIP_RANGES[size]["min"] <= volume_ul <= FLEX_TIP_RANGES[size]["max"]
+    ]
+    return min(candidates) if candidates else None
+
+
+def select_tip_for_volume_range(min_volume_ul: float, max_volume_ul: float,
+                                 available_sizes: List[int]) -> Optional[int]:
+    """Like select_tip_for_volume(), but for a whole reagent's worth of
+    per-destination volumes at once: the smallest available tip size whose
+    range covers EVERY individual dispense from min_volume_ul to
+    max_volume_ul, not just the largest one - a tip whose max covers the
+    biggest transfer but whose min is above the smallest one would still be
+    physically unable to draw that smallest amount precisely.
+
+    Returns None if no single available size covers the whole range (e.g. a
+    reagent going from 2uL to 900uL with only 20uL+1000uL tips on hand - no
+    single tip does both) - the caller must raise a clear error rather than
+    pick two different tips mid-reagent, which the generator doesn't support.
+    """
+    candidates = [
+        size for size in available_sizes
+        if size in FLEX_TIP_RANGES
+        and FLEX_TIP_RANGES[size]["min"] <= min_volume_ul
+        and FLEX_TIP_RANGES[size]["max"] >= max_volume_ul
+    ]
+    return min(candidates) if candidates else None
+
+
+def _partition_transfers_by_tip(transfers: List[Dict], tip_sizes_ul: Optional[List[int]]
+                                 ) -> Tuple[List[Tuple[Optional[int], List[Dict]]], List[Dict]]:
+    """Group a reagent's per-destination transfers by which available tip
+    size EACH INDIVIDUAL transfer's volume needs (select_tip_for_volume, not
+    the whole-reagent-range version) - so a reagent spanning e.g. 2-900uL
+    with both a 50uL and a 1000uL tip loaded gets the 50uL tip for its small
+    destinations and the 1000uL tip for its large ones, instead of either
+    picking one tip for everything or refusing the whole reagent because no
+    single tip covers the full range.
+
+    Returns (groups, unfit): `groups` is an ordered list of
+    (tip_size, transfers_needing_that_size) pairs, LARGEST tip first (coarse
+    bulk volume goes down before the fine top-up, and it means whichever
+    physical rack the pipette is already holding tends to be the one that
+    still has more wells left to serve) - each entry only present if at
+    least one transfer needs it. `unfit` holds any
+    transfer whose volume no available size covers at all - the caller must
+    surface these (e.g. as a per-well note) rather than silently drop them;
+    every OTHER well for the same reagent still gets generated normally.
+
+    No `tip_sizes_ul` configured at all (None/empty) means "not opted into
+    per-volume tip selection" - returns a single group keyed `None`
+    (the caller's sentinel for "use the global pipette_max/min default and
+    the plain 'MyTips' rack", today's exact behavior) with everything in it,
+    and no unfit transfers.
+    """
+    if not tip_sizes_ul:
+        return [(None, list(transfers))], []
+    groups: Dict[int, List[Dict]] = {}
+    unfit: List[Dict] = []
+    for t in transfers:
+        chosen = select_tip_for_volume(t['volume'], tip_sizes_ul)
+        if chosen is None:
+            unfit.append(t)
+        else:
+            groups.setdefault(chosen, []).append(t)
+    return sorted(groups.items(), reverse=True), unfit
+
+
+def _split_into_trips(volumes: List[float], dest_wells: List[str],
+                       tip_capacity: float, disposal_volume: float
+                       ) -> List[Tuple[List[float], List[str]]]:
+    """Greedily group a reagent's (volume, destination) pairs into the same
+    per-trip batches Opentrons' distribute() forms internally: aspirate enough
+    for several destinations plus one disposal_volume, dispense to all of them,
+    reload, repeat (docs.opentrons.com, distribute() disposal_volume). The real
+    Opentrons algorithm may batch slightly differently, so treat trip boundaries
+    as a ballpark - but the trip COUNT is what matters here, since each group
+    becomes its own PickUpTip/Distribute/DropTip step (see excel_recipe_parser's
+    Distribute branch) when "Verify aspiration" needs a fresh, probe-eligible
+    tip on every reload. Also reused by _estimate_distribute_waste below."""
+    if not volumes:
+        return []
     usable_capacity = tip_capacity - disposal_volume
     if usable_capacity <= 0:
         usable_capacity = tip_capacity
-    waste = 0.0
+    trips: List[Tuple[List[float], List[str]]] = []
     i = 0
     n = len(volumes)
     while i < n:
         used = 0.0
+        start = i
         while i < n and used + volumes[i] <= usable_capacity:
             used += volumes[i]
             i += 1
-        if used == 0.0:  # a single destination volume alone exceeds the tip - take it anyway
+        if i == start:  # a single destination volume alone exceeds the tip - take it anyway
             i += 1
-        waste += disposal_volume
-    return waste
+        trips.append((volumes[start:i], dest_wells[start:i]))
+    return trips
+
+
+def _estimate_distribute_waste(volumes: List[float], tip_capacity: float, disposal_volume: float) -> float:
+    """Approximate the liquid Opentrons' distribute() blows to trash as "disposal
+    volume" - one disposal_volume per reload trip (see _split_into_trips)."""
+    if disposal_volume <= 0 or not volumes:
+        return 0.0
+    trips = _split_into_trips(volumes, [""] * len(volumes), tip_capacity, disposal_volume)
+    return len(trips) * disposal_volume
 
 
 def _apply_advanced_liquid_options(cmd: Dict, adv: Dict) -> None:
@@ -629,6 +835,8 @@ def _apply_advanced_liquid_options(cmd: Dict, adv: Dict) -> None:
         cmd["MixAfter"] = [adv["mix_after_cycles"], adv["mix_after_volume"]]
     if adv.get("rate"):
         cmd["DispenseRate"] = adv["rate"]
+    if adv.get("verify_liquid"):
+        cmd["VerifyLiquid"] = True
 
 
 def generate_recipe_with_config(
@@ -718,48 +926,186 @@ def generate_recipe_with_config(
     pipette_max_volume = config.get('pipette_max_volume_ul', FLEX_PIPETTE_VOLUMES['flex_1channel_1000']['max'])
     pipette_min_volume = config.get('pipette_min_volume_ul', FLEX_PIPETTE_VOLUMES['flex_1channel_1000']['min'])
 
+    # Well capacity is treated as uniform across a reservoir type (true for
+    # every reservoir/plate in the library today - each has one
+    # totalLiquidVolume per well) - so one lookup covers every reagent.
+    #
+    # Precedence, highest first: (1) config['reservoir_working_volume_ul'] -
+    # a one-off override for THIS generation, e.g. "I know this specific
+    # batch of tubing/liquid leaves more dead volume than usual today";
+    # (2) the labware file's own `workingVolume` - the physical, reusable
+    # default for this labware type, correct for every future recipe using
+    # it too; (3) `totalLiquidVolume` (the physical max) when neither is
+    # set. Whichever value actually ends up in effect gets the same
+    # sanity check below: it must be a real margin BELOW the physical max,
+    # never >= it - that would defeat reserving dead-volume headroom at all
+    # and silently let a plan fill a well past what the margin was supposed
+    # to protect. The config override is intentionally NOT compared against
+    # the labware's own workingVolume, only against the physical max - a
+    # one-off override is free to be more (or less) conservative than the
+    # labware's usual default.
+    reservoir_well_max = (
+        get_reservoir_well_max_volume(reservoir_type, reservoir_wells[0]) if reservoir_wells else None
+    )
+    working_volume_override = config.get('reservoir_working_volume_ul')
+    if working_volume_override is not None:
+        reservoir_well_capacity = working_volume_override
+        working_volume_source = "config override"
+    elif reservoir_wells:
+        reservoir_well_capacity = get_reservoir_well_capacity(reservoir_type, reservoir_wells[0])
+        working_volume_source = "labware definition" if _get_explicit_working_volume(reservoir_type, reservoir_wells[0]) is not None else None
+    else:
+        reservoir_well_capacity = None
+        working_volume_source = None
+
+    if working_volume_source and reservoir_well_max is not None and reservoir_well_capacity is not None:
+        if reservoir_well_capacity >= reservoir_well_max:
+            source_hint = (
+                "config['reservoir_working_volume_ul']" if working_volume_source == "config override"
+                else "the labware definition's workingVolume"
+            )
+            return {
+                'error': (
+                    f"Working volume ({reservoir_well_capacity} uL, from {working_volume_source}) is >= "
+                    f"'{reservoir_type}' physical totalLiquidVolume ({reservoir_well_max} uL) - it must be a "
+                    f"real margin below the max, not equal to or above it. Lower {source_hint}, "
+                    f"or drop it entirely to just use the max."
+                )
+            }
+    used_wells_by_source: Dict[str, set] = {}
+    primary_fill_plans: Dict[str, List[Tuple[str, float]]] = {}
+    backup_fill_plans: Dict[str, List[Tuple[str, float]]] = {}
+    reagent_to_backup_well_map: Dict[str, List[str]] = {}
+    already_allocated: set = set()  # guards against a reagent listed in >1 group
+
     for idx, reagent in enumerate(all_group_reagents):
         source_idx = idx // reagents_per_reservoir
-        well_idx = idx % reagents_per_reservoir
         source_key = f"Source_{source_idx + 1}"
-        dedicated = reagents_per_reservoir == 1
-        base_well = reservoir_wells[well_idx] if well_idx < len(reservoir_wells) else reservoir_wells[-1]
-
         requirements.setdefault(source_key, source_key)
         reagent_to_source_map[reagent] = source_key
         all_reagents_in_config.append(reagent)
 
+        if reagent in already_allocated:
+            continue  # same reagent appears in another group too - wells already claimed
+        already_allocated.add(reagent)
+
         rv = required_volumes.get(reagent, {})
         with_excess = rv.get('with_excess_ul', 0)
-        capacity = get_reservoir_well_capacity(reservoir_type, base_well)
         has_manual_batching = any(
             reagent in g.get('reagent_batches', {}) and g['reagent_batches'][reagent].get('batch_size')
             for g in groups
         )
+        used = used_wells_by_source.setdefault(source_key, set())
 
-        if dedicated and capacity and with_excess > capacity and not has_manual_batching:
-            # This reagent has its own reservoir plate to itself, so spilling over
-            # into more of ITS wells is always safe (no other reagent to collide with).
-            n_wells_needed = min(len(reservoir_wells), -(-int(with_excess) // int(capacity)))
-            split_wells = reservoir_wells[:n_wells_needed]
-            reagent_to_well_map[reagent] = split_wells
+        if has_manual_batching:
+            # Manual batching (config['groups'][i]['reagent_batches']) manages
+            # its own per-batch wells further down - this loop just needs to
+            # reserve this reagent's single starting well, unchanged from
+            # before.
+            free = [w for w in reservoir_wells if w not in used]
+            claimed = free[:1] or (reservoir_wells[-1:] if reservoir_wells else [])
+            used.update(claimed)
+            fill_plan = [(w, with_excess) for w in claimed]
+            wells_needed = 1
+        else:
+            # Claims as many wells as this reagent's own volume needs
+            # ("load until exhausted" per well) regardless of whether it has
+            # a reservoir to itself or is sharing one - a shared reservoir
+            # used to only ever get ONE well no matter how much volume was
+            # needed, silently producing an impossible "load 7042 uL into a
+            # 3400 uL well" instruction. Wells are drawn from whatever
+            # earlier reagents in this SAME reservoir haven't already
+            # claimed, so nothing collides.
+            fill_plan, wells_needed = _claim_wells_for_volume(with_excess, reservoir_well_capacity, reservoir_wells, used)
+            if not fill_plan:  # reservoir had nothing free at all - reuse the last well rather than crash
+                fallback_well = reservoir_wells[-1] if reservoir_wells else 'A1'
+                used.add(fallback_well)
+                fill_plan = [(fallback_well, with_excess)]
+
+        claimed_wells = [w for w, _ in fill_plan]
+        reagent_to_well_map[reagent] = claimed_wells[0] if len(claimed_wells) == 1 else claimed_wells
+        primary_fill_plans[reagent] = fill_plan
+
+        if len(claimed_wells) < wells_needed:
             quantity_notes.append(
-                f"{reagent}: {rv.get('nominal_ul')} uL nominali (~{rv.get('with_excess_ul')} uL con margine) "
-                f"superano la capacita' di un pozzetto ({capacity} uL) - diviso automaticamente su "
-                f"{source_key}:{'+'.join(split_wells)}"
+                f"{reagent}: WARNING - needs {wells_needed} well(s) to hold {with_excess} uL but only "
+                f"{len(claimed_wells)} free in {source_key} - use a bigger/additional reservoir, or "
+                f"share this reservoir with fewer reagents"
+            )
+
+        # Backup wells for the runtime liquid-fallback feature: whenever this
+        # reagent has reagent_advanced[reagent]['verify_liquid'] on, it
+        # automatically gets enough EXTRA wells to hold its required volume
+        # (with_excess_ul) again - same sizing as the primary allocation
+        # just above, applied a second time as a reserve. No manual count to
+        # guess: if the primary well(s) turn out to be a total loss, the
+        # backups alone can cover the reagent from scratch. Claimed right
+        # here, in this same reagent's turn (not in a separate pass over all
+        # reagents afterwards), so this reagent's ENTIRE footprint (primary
+        # + backup) is one contiguous run in the reservoir's own physical
+        # ordering instead of being scattered by other reagents' backups
+        # claiming the wells in between. Actually trying these at runtime
+        # (skipping ahead only if the current one is found dry) happens in
+        # protocol_generator.py; this just reserves which physical wells are
+        # available for that.
+        if not has_manual_batching and config.get('reagent_advanced', {}).get(reagent, {}).get('verify_liquid'):
+            backup_plan, backup_needed = _claim_wells_for_volume(with_excess, reservoir_well_capacity, reservoir_wells, used)
+            if backup_plan:
+                reagent_to_backup_well_map[reagent] = [w for w, _ in backup_plan]
+                backup_fill_plans[reagent] = backup_plan
+            if len(backup_plan) < backup_needed:
+                quantity_notes.append(
+                    f"{reagent}: needs {backup_needed} backup well(s) to cover {with_excess} uL again for "
+                    f"liquid-fallback but only {len(backup_plan)} free well(s) available in {source_key} - "
+                    f"assign fewer reagents to this reservoir or use a reservoir with more/bigger wells"
+                )
+
+    # Human-readable loading plan, one block per reagent (primary wells
+    # immediately followed by its own backup wells, if any) instead of
+    # scattered separately across the whole reagent list - much easier to
+    # actually follow at the bench than a flat, unordered note dump.
+    seen_reagents: List[str] = []
+    for r in all_group_reagents:
+        if r not in seen_reagents:
+            seen_reagents.append(r)
+
+    for reagent in seen_reagents:
+        rv = required_volumes.get(reagent, {})
+        src = reagent_to_source_map.get(reagent, '?')
+        fill_plan = primary_fill_plans.get(reagent, [])
+        total_to_load = round(sum(v for _, v in fill_plan), 1)
+        if len(fill_plan) <= 1:
+            well_desc = f"{src}:{fill_plan[0][0]}" if fill_plan else "?"
+            quantity_notes.append(
+                f"{reagent}: {rv.get('nominal_ul')} uL nominal -> load {total_to_load} uL into {well_desc}"
             )
         else:
-            reagent_to_well_map[reagent] = base_well
-            note = f"{reagent}: {rv.get('nominal_ul')} uL nominali, carica almeno {rv.get('with_excess_ul')} uL in {source_key}:{base_well}"
-            if capacity and with_excess > capacity:
-                note += f" (ATTENZIONE: supera la capacita' del pozzetto condiviso di {capacity} uL - riduci reagenti per reservoir o gestisci il rabbocco a mano)"
-            quantity_notes.append(note)
+            per_well = "; ".join(f"{w} = {v} uL" for w, v in fill_plan)
+            quantity_notes.append(
+                f"{reagent}: {rv.get('nominal_ul')} uL nominal ({total_to_load} uL with margin - exceeds "
+                f"one well) -> fill in order until the volume is used up, in {src}: {per_well}"
+            )
+        backup_plan = backup_fill_plans.get(reagent)
+        if backup_plan:
+            backup_total = round(sum(v for _, v in backup_plan), 1)
+            per_well_backup = "; ".join(f"{w} = {v} uL" for w, v in backup_plan)
+            quantity_notes.append(
+                f"{reagent}: backup - only used if the well(s) above run dry mid-run - "
+                f"{backup_total} uL more in {src}: {per_well_backup}"
+            )
 
     num_sources_used = len(set(reagent_to_source_map.values()))
 
     requirements["TargetPlate"] = "TargetPlate"
-    requirements["MyTips"] = "MyTips"
     requirements["MyTrash"] = "MyTrash"
+    # Tip rack requirement(s) are added after `steps` is built below (see
+    # "Tip rack requirements" near the end of this function) - with
+    # tip_sizes_ul configured, Steps can reference several distinct racks
+    # (MyTips_50, MyTips_1000, ...) instead of always just "MyTips", and the
+    # Requirements section must declare exactly the ones actually used or
+    # the HAL match fails at run time ("Requirement 'MyTips' -> 'MyTips' not
+    # found in hardware config") even though the HAL does have the right
+    # rack(s), just under their real names.
 
     # Build Steps with delays between groups
     steps = []
@@ -836,6 +1182,20 @@ def generate_recipe_with_config(
             pipette = config.get('pipette', 'left')
             strategy = group.get('strategy', 'smart')  # 'smart'/'distribute' both -> Distribute; 'transfer' -> Transfer
 
+            tip_sizes_ul = config.get('tip_sizes_ul')
+
+            def _resolve_tip(tip_size):
+                """(reagent_tip_rack, pipette_max, pipette_min) for a tip
+                partition's size - `None` is the "no tip_sizes_ul configured"
+                sentinel (today's exact behavior: always "MyTips", global
+                pipette_max_volume/pipette_min_volume)."""
+                if tip_size is None:
+                    return "MyTips", pipette_max_volume, pipette_min_volume
+                rack = "MyTips" if len(tip_sizes_ul) == 1 else f"MyTips_{tip_size}"
+                return rack, FLEX_TIP_RANGES[tip_size]["max"], FLEX_TIP_RANGES[tip_size]["min"]
+
+            verify_liquid = bool(adv.get('verify_liquid'))
+            backup_wells = reagent_to_backup_well_map.get(reagent, [])
             # Optional per-reagent batching: split this reagent's own destination wells
             # into chunks with a module treatment between them (e.g. periodically
             # reheating a reagent on the source reservoir so it doesn't solidify while
@@ -844,10 +1204,19 @@ def generate_recipe_with_config(
             batch_cfg = group.get('reagent_batches', {}).get(reagent)
             batch_size = batch_cfg.get('batch_size') if batch_cfg else None
 
+            # Reservoir-well/batch chunking is computed ONCE here, on the
+            # FULL, un-partitioned `transfers` - exactly as before tip-size
+            # selection existed, and deliberately independent of it. This is
+            # what makes multi-tip-size support safe to combine with a
+            # reagent needing more than one physical reservoir well: well
+            # boundaries are decided first, tip size is chosen SEPARATELY
+            # and only WITHIN each already-fixed well boundary below (both
+            # the "transfer" and plain "Distribute" branches sub-partition
+            # each chunk's own transfers by tip afterwards) - so two
+            # different tip-size groups can never independently believe
+            # they can both draw a full well's capacity from the same
+            # physical well.
             if isinstance(well, list):
-                # Auto-split across this reagent's own reservoir wells because the
-                # required volume (Fase 3 estimate) exceeds one well's capacity -
-                # bucket destinations by cumulative volume instead of well count.
                 well_capacity = get_reservoir_well_capacity(reservoir_type, well[0]) or float('inf')
                 chunks = _bucket_transfers_by_capacity(transfers, well_capacity)
                 chunk_wells = well[:len(chunks)] if len(well) >= len(chunks) else well + [well[-1]] * (len(chunks) - len(well))
@@ -858,40 +1227,150 @@ def generate_recipe_with_config(
             if strategy == 'transfer':
                 # 1 aspirate -> 1 dispense per well, fresh tip every time (safer, slower).
                 # Transfer only accepts a single Dest per step (unlike Distribute), so
-                # each well needs its own PickUpTip/Transfer/DropTip triplet.
+                # each well needs its own PickUpTip/Transfer/DropTip triplet. Already a
+                # fresh tip on every well, so - unlike Distribute below - no extra
+                # per-trip splitting is needed for "Verify aspiration" to fire on every
+                # well; only the runtime fallback (Source as a candidate list) applies.
                 for chunk, chunk_well in zip(chunks, chunk_wells):
                     if batch_cfg and batch_cfg.get('treatment'):
                         emit(batch_cfg['treatment'])
-                    for t in chunk:
-                        steps.append({"Command": "PickUpTip", "PipetteMount": pipette, "TipRack": "MyTips"})
-                        transfer_cmd = {
-                            "Command": "Transfer",
-                            "PipetteMount": pipette,
-                            "Volume": t['volume'],
-                            "Source": f"{source_name}:{chunk_well}",
-                            "Dest": f"TargetPlate:{t['well']}",
-                            "NewTip": "never",
-                            "Description": f"Transfer {t['volume']}µL {reagent} to {t['well']}"
-                        }
-                        if liquid_class:
-                            transfer_cmd["LiquidClass"] = liquid_class
-                        _apply_advanced_liquid_options(transfer_cmd, adv)
-                        steps.append(transfer_cmd)
-                        steps.append({"Command": "DropTip", "PipetteMount": pipette, "TrashLocation": "MyTrash"})
-            else:
-                # Distribute: one aspirate -> many dispenses, single tip for the whole
-                # reagent (or per chunk if split by batch size or well capacity).
-                steps.append({"Command": "PickUpTip", "PipetteMount": pipette, "TipRack": "MyTips"})
-                for chunk, chunk_well in zip(chunks, chunk_wells):
-                    if batch_cfg and batch_cfg.get('treatment'):
-                        emit(batch_cfg['treatment'])
+                    if verify_liquid and backup_wells:
+                        source_field = [f"{source_name}:{chunk_well}"] + [f"{source_name}:{w}" for w in backup_wells]
+                    else:
+                        source_field = f"{source_name}:{chunk_well}"
+                    # Tip choice per individual well - already the finest
+                    # granularity, no interaction with the well boundary above.
+                    tip_groups, unfit = _partition_transfers_by_tip(chunk, tip_sizes_ul)
+                    for t in unfit:
+                        quantity_notes.append(
+                            f"{reagent}: well {t['well']} needs {t['volume']} uL but no configured tip "
+                            f"size {tip_sizes_ul} covers it - that well is skipped, add a suitable tip size."
+                        )
+                    for tip_size, tip_chunk in tip_groups:
+                        reagent_tip_rack, _, _ = _resolve_tip(tip_size)
+                        for t in tip_chunk:
+                            steps.append({"Command": "PickUpTip", "PipetteMount": pipette, "TipRack": reagent_tip_rack})
+                            transfer_cmd = {
+                                "Command": "Transfer",
+                                "PipetteMount": pipette,
+                                "Volume": t['volume'],
+                                "Source": source_field,
+                                "Dest": f"TargetPlate:{t['well']}",
+                                "NewTip": "never",
+                                "Description": f"Transfer {t['volume']}µL {reagent} to {t['well']}"
+                            }
+                            if liquid_class:
+                                transfer_cmd["LiquidClass"] = liquid_class
+                            _apply_advanced_liquid_options(transfer_cmd, adv)
+                            steps.append(transfer_cmd)
+                            steps.append({"Command": "DropTip", "PipetteMount": pipette, "TrashLocation": "MyTrash"})
 
-                    volumes_list = [t['volume'] for t in chunk]
-                    dest_wells = [t['well'] for t in chunk]
-                    unique_volumes = set(volumes_list)
+            elif verify_liquid:
+                # "Verify aspiration" needs a fresh, probe-eligible tip on every
+                # reload - Opentrons only re-arms its native liquid-presence probe
+                # on a clean tip (see _split_into_trips docstring), and a plain
+                # Distribute keeps ONE tip for the whole reagent. So: one
+                # PickUpTip/Distribute/DropTip PER TRIP instead of per reagent.
+                # The actual source well is then chosen at runtime in
+                # protocol_generator.py (detect_liquid_presence() per candidate),
+                # so the reservoir-capacity chunking above (chunks/chunk_wells)
+                # is skipped here in favor of a flat trip split across ALL this
+                # reagent's destinations - safe to partition by tip OUTSIDE any
+                # well boundary too, since source-well selection is fully
+                # dynamic at runtime here, not pre-assigned to a chunk.
+                tip_groups, unfit = _partition_transfers_by_tip(transfers, tip_sizes_ul)
+                for t in unfit:
+                    quantity_notes.append(
+                        f"{reagent}: well {t['well']} needs {t['volume']} uL but no configured tip "
+                        f"size {tip_sizes_ul} covers it - that well is skipped, add a suitable tip size."
+                    )
+                for tip_size, tip_transfers in tip_groups:
+                    reagent_tip_rack, reagent_pipette_max, reagent_pipette_min = _resolve_tip(tip_size)
+                    all_volumes = [t['volume'] for t in tip_transfers]
+                    all_dest_wells = [t['well'] for t in tip_transfers]
+                    trips = _split_into_trips(all_volumes, all_dest_wells, reagent_pipette_max, reagent_pipette_min)
+
+                    primary_wells = well if isinstance(well, list) else [well]
+                    candidate_wells = primary_wells + backup_wells
+                    source_field = (
+                        f"{source_name}:{candidate_wells[0]}" if len(candidate_wells) == 1
+                        else [f"{source_name}:{w}" for w in candidate_wells]
+                    )
 
                     reagent_waste_ul[reagent] = reagent_waste_ul.get(reagent, 0.0) + _estimate_distribute_waste(
-                        volumes_list, pipette_max_volume, pipette_min_volume
+                        all_volumes, reagent_pipette_max, reagent_pipette_min
+                    )
+
+                    for volumes_list, dest_wells in trips:
+                        if batch_cfg and batch_cfg.get('treatment'):
+                            emit(batch_cfg['treatment'])
+
+                        unique_volumes = set(volumes_list)
+                        if len(unique_volumes) == 1:
+                            volume_param = volumes_list[0]
+                            description = f"Distribute {volume_param}µL {reagent} to {len(dest_wells)} wells"
+                        else:
+                            volume_param = volumes_list
+                            description = f"Distribute {min(volumes_list)}-{max(volumes_list)}µL {reagent} to {len(dest_wells)} wells"
+
+                        steps.append({"Command": "PickUpTip", "PipetteMount": pipette, "TipRack": reagent_tip_rack})
+                        distribute_cmd = {
+                            "Command": "Distribute",
+                            "PipetteMount": pipette,
+                            "Volume": volume_param,
+                            "Source": source_field,
+                            "Destinations": [f"TargetPlate:{w}" for w in dest_wells],
+                            "NewTip": "never",
+                            "DisposalVolume": 0,
+                            "Description": description
+                        }
+                        if liquid_class:
+                            distribute_cmd["LiquidClass"] = liquid_class
+                        _apply_advanced_liquid_options(distribute_cmd, adv)
+                        steps.append(distribute_cmd)
+                        steps.append({"Command": "DropTip", "PipetteMount": pipette, "TrashLocation": "MyTrash"})
+
+            else:
+                # Distribute: one aspirate -> many dispenses. Tip is chosen PER
+                # (reservoir-well chunk x tip-size) pair, but a tip is only
+                # actually swapped when the SIZE changes - consecutive chunks
+                # needing the SAME size (the common no-tip_sizes_ul case: every
+                # chunk resolves to "MyTips") still share one continuous
+                # PickUpTip...DropTip span across chunks, exactly as before
+                # multi-tip-size support existed, instead of picking up a new
+                # tip once per reservoir-well chunk regardless of size.
+                distribute_units = []  # (reagent_tip_rack, chunk_well, batch_treatment, volumes_list, dest_wells, max, min)
+                for chunk, chunk_well in zip(chunks, chunk_wells):
+                    tip_groups, unfit = _partition_transfers_by_tip(chunk, tip_sizes_ul)
+                    for t in unfit:
+                        quantity_notes.append(
+                            f"{reagent}: well {t['well']} needs {t['volume']} uL but no configured tip "
+                            f"size {tip_sizes_ul} covers it - that well is skipped, add a suitable tip size."
+                        )
+                    chunk_treatment_pending = bool(batch_cfg and batch_cfg.get('treatment'))
+                    for tip_size, tip_chunk in tip_groups:
+                        reagent_tip_rack, reagent_pipette_max, reagent_pipette_min = _resolve_tip(tip_size)
+                        distribute_units.append((
+                            reagent_tip_rack, chunk_well, chunk_treatment_pending,
+                            [t['volume'] for t in tip_chunk], [t['well'] for t in tip_chunk],
+                            reagent_pipette_max, reagent_pipette_min,
+                        ))
+                        chunk_treatment_pending = False  # only emit once, before this chunk's first unit
+
+                for i, (reagent_tip_rack, chunk_well, treatment_pending, volumes_list, dest_wells,
+                        reagent_pipette_max, reagent_pipette_min) in enumerate(distribute_units):
+                    tip_changing = i == 0 or distribute_units[i - 1][0] != reagent_tip_rack
+                    tip_ending = i == len(distribute_units) - 1 or distribute_units[i + 1][0] != reagent_tip_rack
+
+                    if treatment_pending:
+                        emit(batch_cfg['treatment'])
+
+                    if tip_changing:
+                        steps.append({"Command": "PickUpTip", "PipetteMount": pipette, "TipRack": reagent_tip_rack})
+
+                    unique_volumes = set(volumes_list)
+                    reagent_waste_ul[reagent] = reagent_waste_ul.get(reagent, 0.0) + _estimate_distribute_waste(
+                        volumes_list, reagent_pipette_max, reagent_pipette_min
                     )
 
                     if len(unique_volumes) == 1:
@@ -914,9 +1393,10 @@ def generate_recipe_with_config(
                     if liquid_class:
                         distribute_cmd["LiquidClass"] = liquid_class
                     _apply_advanced_liquid_options(distribute_cmd, adv)
-
                     steps.append(distribute_cmd)
-                steps.append({"Command": "DropTip", "PipetteMount": pipette, "TrashLocation": "MyTrash"})
+
+                    if tip_ending:
+                        steps.append({"Command": "DropTip", "PipetteMount": pipette, "TrashLocation": "MyTrash"})
 
         # Module treatments configured for this phase (heater-shaker, temperature
         # module, ...) - run after this phase's pipetting, before the numeric delay.
@@ -938,7 +1418,11 @@ def generate_recipe_with_config(
     # Check if any delays were added
     has_delays = any(g.get('delay_after_seconds', 0) > 0 for g in groups)
 
-    # Fold the waste estimate (Fase 7) into the same quantity metadata as Fase 3.
+    # Waste (Distribute's disposal volume) stays in required_volumes as
+    # structured data for anything that wants it, but is deliberately NOT
+    # added to quantity_notes - it's already folded into with_excess_ul via
+    # dead_volume_ul, and operators only need the one "load this much" total
+    # in the notes panel, not a separate waste breakdown to interpret.
     total_waste_ul = 0.0
     for reagent, waste in reagent_waste_ul.items():
         if waste <= 0:
@@ -946,18 +1430,26 @@ def generate_recipe_with_config(
         total_waste_ul += waste
         if reagent in required_volumes:
             required_volumes[reagent]['estimated_waste_ul'] = round(waste, 1)
-        pct = (waste / required_volumes[reagent]['nominal_ul'] * 100) if required_volumes.get(reagent, {}).get('nominal_ul') else 0
-        quantity_notes.append(
-            f"{reagent}: ~{round(waste, 1)} uL stimati sprecati (disposal volume di Distribute, "
-            f"~{pct:.0f}% del nominale) - stima basata sul comportamento di default di Opentrons distribute(), da verificare"
-        )
 
+    # Includes backup/fallback wells too (not just the primary/overflow ones)
+    # so plate_tracking.py's reverse lookup (source_key:well -> reagent) can
+    # resolve a well no matter which candidate the run actually drew from.
     well_assignments = {
-        reagent: f"{reagent_to_source_map.get(reagent, '?')}:" + (
-            '+'.join(w) if isinstance(w, list) else w
+        reagent: f"{reagent_to_source_map.get(reagent, '?')}:" + '+'.join(
+            (w if isinstance(w, list) else [w]) + reagent_to_backup_well_map.get(reagent, [])
         )
         for reagent, w in reagent_to_well_map.items()
     }
+
+    # Tip rack requirements - derived from the TipRack each PickUpTip step
+    # actually names, not from tip_sizes_ul directly, so this stays correct
+    # even if a requested size never fits any well and never gets a step
+    # (see _partition_transfers_by_tip's "unfit" bucket). Falls back to the
+    # single legacy "MyTips" requirement if, for whatever reason, no
+    # PickUpTip step exists at all - matching the old unconditional default.
+    tip_racks_used = sorted({s["TipRack"] for s in steps if s.get("Command") == "PickUpTip" and s.get("TipRack")})
+    for rack in tip_racks_used or ["MyTips"]:
+        requirements[rack] = rack
 
     # Build recipe
     recipe = {
@@ -1032,8 +1524,13 @@ def generate_hal_config_from_recipe(recipe: Dict, hal_name: Optional[str] = None
     Uses numbered sources (Source_1, Source_2, ...) instead of reagent-specific names.
     The recipe's Metadata.ReagentMapping tells which reagent goes where.
     """
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
+    # Reuse the recipe's OWN "Generated" timestamp (set once, when the recipe
+    # itself was built) instead of computing a fresh datetime.now() here -
+    # otherwise the two calls land a few seconds apart and the recipe/HAL
+    # pair gets saved under two different timestamp suffixes, making it look
+    # like they don't belong together even though they do.
+    timestamp = recipe.get('Metadata', {}).get('Generated') or datetime.now().strftime('%Y%m%d_%H%M%S')
+
     if not hal_name:
         hal_name = "Generic_HAL"
     
@@ -1059,30 +1556,55 @@ def generate_hal_config_from_recipe(recipe: Dict, hal_name: Optional[str] = None
 
     # Slot assignments for reservoirs
     # Priority: A2 → B2 → C2 → D3 → D1 → C1 → B1 → C3
-    # A1=HeaterShaker (or other module), A3=Trash, D2=TargetPlate, B3=TipRack
+    # A1=HeaterShaker (or other module), A3=Trash, D2=TargetPlate
     available_reservoir_slots = [s for s in RESERVOIR_SLOT_POOL if s not in reserved_module_slots]
+    # Tip racks may also claim A1 when no module needs it (see
+    # GENERIC_TIP_SLOT_PREFERENCE) - offer it to the reservoir pool too so a
+    # recipe with no modules doesn't leave that slot permanently empty.
+    if 'A1' not in reserved_module_slots and 'A1' not in available_reservoir_slots:
+        available_reservoir_slots.append('A1')
 
     labware = {}
     slot_assignments = {}
-    
-    # Tip racks - Column 3: B3 primary, C3 backup
-    # A1=HeaterShaker, A3=Trash
-    labware['MyTips'] = {
-        'LoadName': 'opentrons_flex_96_tiprack_1000ul',
-        'Slot': 'B3',
-        'DisplayName': 'Tip rack 1000µL'
-    }
-    slot_assignments['B3'] = 'MyTips'
-    
-    labware['MyTips_2'] = {
-        'LoadName': 'opentrons_flex_96_tiprack_1000ul',
-        'Slot': 'C3',
-        'DisplayName': 'Tip rack 1000µL (backup)'
-    }
-    slot_assignments['C3'] = 'MyTips_2'
-    
-    # Target plate
     config = recipe.get('Configuration', {})
+
+    # Tip racks - one physical slot per requested size, claimed from
+    # GENERIC_TIP_SLOT_PREFERENCE minus whatever a module already reserved
+    # (A1 stays module territory here when one is configured, unlike the
+    # module-free generate_generic_hal()). Not capped at 2 - only at how
+    # many free deck slots actually remain. One tip size (default, matches
+    # config['tip_sizes_ul'] used by generate_recipe_with_config() for the
+    # same recipe): first slot = primary, second slot = backup of the same
+    # size. Two or more sizes: each gets its own single rack, no backup -
+    # same tradeoff as generate_generic_hal()'s matching tip_sizes_ul
+    # handling, kept consistent between the two HAL generators since a
+    # recipe can be paired with either.
+    tip_slot_pool = [s for s in GENERIC_TIP_SLOT_PREFERENCE if s not in reserved_module_slots]
+    # Dedupe (preserving order) first - see the matching note in generate_generic_hal().
+    tip_sizes = list(dict.fromkeys(config.get('tip_sizes_ul') or [1000]))
+    tip_sizes = [s for s in tip_sizes if s in FLEX_TIP_RANGES] or [1000]
+    if len(tip_sizes) > len(tip_slot_pool):
+        tip_sizes = tip_sizes[:len(tip_slot_pool)]
+    if len(tip_sizes) == 1:
+        load_name = FLEX_TIP_RANGES[tip_sizes[0]]['load_name']
+        slot, backup_slot = tip_slot_pool[0], tip_slot_pool[1]
+        labware['MyTips'] = {'LoadName': load_name, 'Slot': slot, 'DisplayName': f'Tip rack {tip_sizes[0]}µL'}
+        slot_assignments[slot] = 'MyTips'
+        labware['MyTips_2'] = {'LoadName': load_name, 'Slot': backup_slot, 'DisplayName': f'Tip rack {tip_sizes[0]}µL (backup)'}
+        slot_assignments[backup_slot] = 'MyTips_2'
+    else:
+        for size, slot in zip(tip_sizes, tip_slot_pool):
+            load_name = FLEX_TIP_RANGES[size]['load_name']
+            key = f'MyTips_{size}'
+            labware[key] = {'LoadName': load_name, 'Slot': slot, 'DisplayName': f'Tip rack {size}µL'}
+            slot_assignments[slot] = key
+
+    # Whatever slot(s) tip racks claimed above are removed from the
+    # reservoir pool now so a source-heavy recipe can't try to claim the
+    # same physical slot.
+    available_reservoir_slots = [s for s in available_reservoir_slots if s not in slot_assignments]
+
+    # Target plate
     target_plate_type = config.get('target_plate', 'corning_96_wellplate_360ul_flat')
     
     labware['TargetPlate'] = {
@@ -1142,48 +1664,98 @@ def generate_generic_hal(
     hal_name: str = "Generic_HAL",
     target_plate: str = "corning_96_wellplate_360ul_flat",
     reservoir_type: str = "nest_12_reservoir_15ml",
-    pipette: str = "flex_1channel_1000"
+    pipette: str = "flex_1channel_1000",
+    tip_sizes_ul: Optional[List[int]] = None
 ) -> Dict:
     """
     Generate a completely generic HAL configuration with numbered source slots.
-    
+
     This HAL can be reused for ANY recipe - just put the reagents in corresponding Source_N positions.
-    
+
     Args:
         num_sources: Number of source reservoirs (Source_1 to Source_N)
         hal_name: Name for the HAL configuration
         target_plate: Labware type for target plate
         reservoir_type: Labware type for reagent reservoirs
         pipette: Pipette name for left mount
-        
+        tip_sizes_ul: Which Flex tip sizes to physically load, e.g. [1000, 50]
+            (see FLEX_TIP_RANGES for the valid catalog). Default [1000] keeps
+            today's behavior (one size, primary + backup rack of the same
+            size). With 2+ sizes, each size gets its own single rack (no
+            backup) on the next free slot from GENERIC_TIP_SLOT_PREFERENCE -
+            not capped at 2, only at how many free deck slots actually exist
+            once trash and the target plate are placed. Requesting more
+            sizes than that is capped at that true ceiling, with a note in
+            the returned dict's Metadata so the caller can surface it,
+            rather than silently dropping sizes with no trace.
+
     Returns:
         HAL configuration dict compatible with opentrons_client.py
     """
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
+
     # Available slots for reservoirs
-    # Priority: A2 → B2 → C2 → D3 → D1 → C1 → B1 → C3
-    available_reservoir_slots = ['A2', 'B2', 'C2', 'D3', 'D1', 'C1', 'B1', 'C3']
-    max_sources = min(num_sources, len(available_reservoir_slots))
-    
+    # Priority: A2 → B2 → C2 → D3 → D1 → C1 → B1 → A1 → C3
+    # Whichever of these a tip rack claims below is removed from this pool -
+    # otherwise a recipe with enough sources would silently double-book that
+    # slot (a real physical collision the robot can't resolve).
+    available_reservoir_slots = ['A2', 'B2', 'C2', 'D3', 'D1', 'C1', 'B1', 'A1', 'C3']
+
     labware = {}
     slot_assignments = {}
-    
-    # Tip racks - Column 3: B3 primary, C3 backup
-    labware['MyTips'] = {
-        'LoadName': 'opentrons_flex_96_tiprack_1000ul',
-        'Slot': 'B3',
-        'DisplayName': 'Tip rack 1000µL'
-    }
-    slot_assignments['B3'] = 'MyTips'
-    
-    labware['MyTips_2'] = {
-        'LoadName': 'opentrons_flex_96_tiprack_1000ul',
-        'Slot': 'C3',
-        'DisplayName': 'Tip rack 1000µL (backup)'
-    }
-    slot_assignments['C3'] = 'MyTips_2'
-    
+    tip_metadata_notes: List[str] = []
+
+    # Tip racks - one physical slot per requested size, claimed from
+    # GENERIC_TIP_SLOT_PREFERENCE (see its definition for the ordering
+    # rationale). One requested size (default): first slot = primary,
+    # second slot = backup of the same size, matching the original
+    # single-size behavior exactly. Two or more requested sizes: each gets
+    # its own single rack, no backup - trades tip-refill redundancy for
+    # actually having every requested size on the deck, which is the point
+    # of this feature.
+    # Dedupe (preserving order) - a repeated size would otherwise consume a
+    # slot per occurrence in slot_assignments while collapsing onto a single
+    # Labware dict key, leaving earlier slots "reserved" for a key that no
+    # longer points at them.
+    sizes = list(dict.fromkeys(tip_sizes_ul)) if tip_sizes_ul else [1000]
+    unknown_sizes = [s for s in sizes if s not in FLEX_TIP_RANGES]
+    if unknown_sizes:
+        tip_metadata_notes.append(
+            f"Requested tip size(s) {unknown_sizes} not in the known Flex tip "
+            f"catalog ({sorted(FLEX_TIP_RANGES.keys())}) - ignored."
+        )
+    sizes = [s for s in sizes if s in FLEX_TIP_RANGES]
+    if not sizes:
+        sizes = [1000]
+    max_tip_slots = len(GENERIC_TIP_SLOT_PREFERENCE)
+    if len(sizes) > max_tip_slots:
+        tip_metadata_notes.append(
+            f"Requested {len(sizes)} tip sizes but only {max_tip_slots} free "
+            f"deck slots remain once trash and the target plate are placed - "
+            f"using the first {max_tip_slots}: {sizes[:max_tip_slots]}."
+        )
+        sizes = sizes[:max_tip_slots]
+
+    if len(sizes) == 1:
+        load_name = FLEX_TIP_RANGES[sizes[0]]["load_name"]
+        slot, backup_slot = GENERIC_TIP_SLOT_PREFERENCE[0], GENERIC_TIP_SLOT_PREFERENCE[1]
+        labware['MyTips'] = {'LoadName': load_name, 'Slot': slot, 'DisplayName': f'Tip rack {sizes[0]}µL'}
+        slot_assignments[slot] = 'MyTips'
+        labware['MyTips_2'] = {'LoadName': load_name, 'Slot': backup_slot, 'DisplayName': f'Tip rack {sizes[0]}µL (backup)'}
+        slot_assignments[backup_slot] = 'MyTips_2'
+    else:
+        for size, slot in zip(sizes, GENERIC_TIP_SLOT_PREFERENCE):
+            load_name = FLEX_TIP_RANGES[size]["load_name"]
+            key = f'MyTips_{size}'
+            labware[key] = {'LoadName': load_name, 'Slot': slot, 'DisplayName': f'Tip rack {size}µL'}
+            slot_assignments[slot] = key
+
+    # Whatever slot(s) tip racks claimed above are removed from the
+    # reservoir pool now so a source-heavy recipe can't try to claim the
+    # same physical slot.
+    reservoir_pool = [s for s in available_reservoir_slots if s not in slot_assignments]
+    max_sources = min(num_sources, len(reservoir_pool))
+
     # Target plate
     labware['TargetPlate'] = {
         'LoadName': target_plate,
@@ -1194,7 +1766,7 @@ def generate_generic_hal(
     
     # Generic numbered reservoirs
     for i in range(max_sources):
-        slot = available_reservoir_slots[i]
+        slot = reservoir_pool[i]
         source_key = f'Source_{i+1}'
         
         labware[source_key] = {
@@ -1220,7 +1792,9 @@ def generate_generic_hal(
             'source': 'generic_hal_generator',
             'total_sources': max_sources,
             'slot_assignments': slot_assignments,
-            'note': 'Load reagents into Source_1, Source_2, etc. Check recipe metadata for reagent order.'
+            'tip_sizes_ul': sizes,
+            'note': 'Load reagents into Source_1, Source_2, etc. Check recipe metadata for reagent order.',
+            'tip_notes': tip_metadata_notes,
         }
     }
 
@@ -1392,6 +1966,7 @@ def parse_excel_recipe(file_content: bytes, filename: str = "recipe.xlsx") -> Di
 if __name__ == "__main__":
     import sys
     import json
+    import logging
     
     if len(sys.argv) < 2:
         print("Usage: python excel_recipe_parser.py <excel_file>")

@@ -56,7 +56,6 @@ class PlateReaderImpl(PlateReaderServiceBase):
         self._bridge = TecanBridgeClient(
             host=bridge_cfg.get("host", "127.0.0.1"),
             port=bridge_cfg.get("port", 50055),
-            measurement_timeout=bridge_cfg.get("measurement_timeout_seconds", 1200.0),
         )
         instrument_cfg = config.get("instrument", {})
         # Default: "usb" → C# bridge translates to porttype=USB, type=READER, LastConnection

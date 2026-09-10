@@ -1,0 +1,32 @@
+{
+    "include": [
+        "v1/**/*.py"
+    ],
+    "exclude": [
+        "**/node_modules",
+        "**/__pycache__",
+        "**/.venv",
+        "**/venv",
+        "**/*_pb2.py",
+        "**/*_pb2_grpc.py",
+        "**/generated/**",
+        "**/.versions/**"
+    ],
+    "venvPath": "v1",
+    "venv": ".venv",
+    "pythonVersion": "3.11",
+    "reportMissingImports": "warning",
+    "reportMissingTypeStubs": false,
+    "reportAttributeAccessIssue": "none",
+    "reportOptionalMemberAccess": "warning",
+    "typeCheckingMode": "basic",
+
+    "_comment_execution_environments": "Each SiLA2 server does `sys.path.insert(0, <its own root>)` at runtime (see main.py in each) so its own `from src.xxx import yyy` / `from generated.xxx import yyy` resolve against ITS OWN src/generated, not v1/src. Every server ships a package literally named `src`, so a single flat extraPaths list (the old config) made resolution ambiguous/wrong for whichever server wasn't first. executionEnvironments scope extraPaths per subtree instead, matched by root, most-specific first. This file lives at the repo root (c:\\LabOS) rather than under v1/ because that's the actual VSCode workspace root Pylance uses to search for a config -- a v1/pyrightconfig.json is invisible to the live IDE.",
+    "executionEnvironments": [
+        { "root": "v1/SiLA2/OpentronsSiLA2Server", "extraPaths": ["v1/SiLA2/OpentronsSiLA2Server", "v1/SiLA2"] },
+        { "root": "v1/SiLA2/TecanM200SiLA2Server", "extraPaths": ["v1/SiLA2/TecanM200SiLA2Server"] },
+        { "root": "v1/SiLA2/ManualStationSiLA2Server", "extraPaths": ["v1/SiLA2/ManualStationSiLA2Server"] },
+        { "root": "v1/SiLA2/_NewInstrumentTemplate", "extraPaths": ["v1/SiLA2/_NewInstrumentTemplate"] },
+        { "root": "v1", "extraPaths": ["v1/SiLA2"] }
+    ]
+}

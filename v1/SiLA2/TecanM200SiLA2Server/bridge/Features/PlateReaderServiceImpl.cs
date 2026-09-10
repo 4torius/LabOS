@@ -375,7 +375,8 @@ namespace TecanSiLA2Server.Features
                 request.ProtocolFile,
                 request.PlateId,
                 progress,
-                context.CancellationToken);
+                context.CancellationToken,
+                request.PlateType);
 
             if (!result.Success)
             {

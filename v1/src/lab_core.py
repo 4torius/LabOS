@@ -114,8 +114,9 @@ class Command:
     description: str = ""
     feature: str = ""
     important: bool = False
+    observable: bool = False  # SiLA2 observable command - see execute_command()'s timeout handling
     parameters: List[CommandParameter] = field(default_factory=list)
-    
+
     def to_dict(self) -> Dict:
         return {
             "id": self.id,
@@ -248,7 +249,20 @@ class LabCore:
             from src.config_schema import load_lab_config
             config, _ = load_lab_config(self.base_dir / "lab_config.yaml", apply_defaults=False, strict=False)
             raw_timeout = config.get("workflow", {}).get("default_timeout", 300.0)
-            return 300.0 if raw_timeout is None else float(raw_timeout)
+            # Bug fixed: `raw_timeout is None` means the key IS PRESENT in
+            # yaml set to `null` (a real config key absent from the dict
+            # entirely would already have fallen back to the .get() default
+            # above, 300.0, and never reach this branch at all) - i.e. an
+            # explicit "unlimited" request from config.yaml. The old code
+            # returned 300.0 here instead of None, silently overriding the
+            # documented "0 or null means unlimited" behavior with a bounded
+            # timeout no config setting could ever turn off. `0` is left as
+            # a raw float(0.0), unchanged - client.execute() is already the
+            # single place responsible for normalizing 0 to None (see its
+            # own docstring), so it isn't duplicated here too.
+            if raw_timeout is None:
+                return None
+            return float(raw_timeout)
         except Exception:
             return 300.0
 
@@ -640,6 +654,7 @@ class LabCore:
                 description=cmd.description,
                 feature=feature_id,
                 important=True,
+                observable=cmd.observable,
                 parameters=params,
             ))
         return Instrument(
@@ -841,15 +856,26 @@ class LabCore:
                 )
             
             # Execute via PnPClient (Strategy 0: sila2 SilaClient).
-            # A bounded timeout is required here: without one, a hardware
-            # command that never returns would hang this coroutine (and any
-            # caller awaiting it) forever.
+            # Observable SiLA2 commands (ExecuteRecipe, RunMeasurement, ...)
+            # are the ones genuinely long-running by design and already have
+            # their own server-side real-status tracking (e.g.
+            # robot_client.wait_for_run_completion polling the actual robot
+            # run state) - a client-side cutoff on these doesn't catch a real
+            # hang, it just gives up on a command that's still working and
+            # reports a false failure. Confirmed on real hardware: an
+            # ExecuteRecipe genuinely still running past 600s got reported
+            # "failed" here, which then skipped the plate-tracking DB write
+            # gated on result.success downstream (webapp/routes/instruments.py)
+            # even though the run finished successfully moments later.
+            # Non-observable (unary) commands are expected to return quickly
+            # by SiLA2 design, so they keep the bounded default - a genuine
+            # hang there is exactly the anomaly the timeout exists to catch.
             result = await self._client.execute(
                 server,
                 command_id,
                 parameters,
                 feature=cmd.feature,
-                timeout=self._command_timeout()
+                timeout=None if cmd.observable else self._command_timeout()
             )
             
             # Check result

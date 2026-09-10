@@ -241,26 +241,60 @@ namespace TecanSiLA2Server.AnIML
             // Popola i dati
             var wellPositions = new List<string>();
             var measurements = new List<double>();
+            // Per-well full spectrum, only populated for Type="Scan" wells (multiple
+            // <Scan WL="..."> children instead of one <Single> value) - kept alongside
+            // the scalar `measurements` series below (never in place of it) so every
+            // existing consumer of that series keeps working unchanged.
+            var spectra = new List<(string Pos, List<(int Wl, double Value)> Points)>();
 
             foreach (var well in wells)
             {
                 var pos = well.Attribute("Pos")?.Value ?? "Unknown";
-                var singleNode = well.Element("Single");
-                var value = singleNode?.Value ?? "0";
-
+                var wellType = well.Attribute("Type")?.Value ?? "Single";
                 wellPositions.Add(pos);
 
-                if (value == "OVER")
+                if (wellType == "Scan")
                 {
-                    measurements.Add(double.NaN); // Overflow
-                }
-                else if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var dVal))
-                {
-                    measurements.Add(dVal);
+                    // Multi-wavelength scan: the well carries one <Scan WL="230">value</Scan>
+                    // child per wavelength instead of a single <Single> value - reading only
+                    // <Single> here (as before this fix) finds nothing and silently produces
+                    // "0" for every well, discarding real data already present in the source XML.
+                    var points = new List<(int, double)>();
+                    foreach (var scanNode in well.Elements("Scan"))
+                    {
+                        var wlAttr = scanNode.Attribute("WL")?.Value;
+                        if (!int.TryParse(wlAttr, NumberStyles.Any, CultureInfo.InvariantCulture, out var wl))
+                            continue;
+                        var scanValue = scanNode.Value;
+                        double pointVal;
+                        if (scanValue == "OVER")
+                            pointVal = double.NaN;
+                        else if (!double.TryParse(scanValue, NumberStyles.Any, CultureInfo.InvariantCulture, out pointVal))
+                            pointVal = double.NaN;
+                        points.Add((wl, pointVal));
+                    }
+                    spectra.Add((pos, points));
+
+                    var finiteVals = points.Select(p => p.Item2).Where(v => !double.IsNaN(v)).ToList();
+                    measurements.Add(finiteVals.Any() ? finiteVals.Average() : double.NaN);
                 }
                 else
                 {
-                    measurements.Add(0);
+                    var singleNode = well.Element("Single");
+                    var value = singleNode?.Value ?? "0";
+
+                    if (value == "OVER")
+                    {
+                        measurements.Add(double.NaN); // Overflow
+                    }
+                    else if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var dVal))
+                    {
+                        measurements.Add(dVal);
+                    }
+                    else
+                    {
+                        measurements.Add(0);
+                    }
                 }
 
                 // Aggiungi anche come Sample individuale
@@ -279,9 +313,52 @@ namespace TecanSiLA2Server.AnIML
                     double.IsNaN(m) ? "NaN" : m.ToString(CultureInfo.InvariantCulture)))
             ));
 
+            // A well with a full spectrum only contributes its mean to `measurements`
+            // above (kept for backward compatibility with the heatmap/statistics that
+            // already read this series) - relabel it honestly instead of leaving it
+            // looking like a single-point reading.
+            if (spectra.Any(s => s.Points.Count > 0))
+            {
+                measurementSeries.SetAttributeValue("name", GetSeriesName(measurementType) + " (scan mean)");
+            }
+
             seriesSet.Add(wellPositionSeries);
             seriesSet.Add(measurementSeries);
             resultSet!.Add(seriesSet);
+
+            // Full per-well spectra for Type="Scan" wells - the actual data a
+            // multi-wavelength scan produces, lost entirely before this fix. Kept as
+            // a separate Result so nothing reading the SeriesSet above needs to change.
+            if (spectra.Any(s => s.Points.Count > 0))
+            {
+                var wlStart = measurementParams.TryGetValue("Wavelength Start", out var wlStartStr)
+                    && double.TryParse(wlStartStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var wlStartVal) ? (double?)wlStartVal : null;
+                var wlEnd = measurementParams.TryGetValue("Wavelength End", out var wlEndStr)
+                    && double.TryParse(wlEndStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var wlEndVal) ? (double?)wlEndVal : null;
+                var wlStep = measurementParams.TryGetValue("Wavelength Step Size", out var wlStepStr)
+                    && double.TryParse(wlStepStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var wlStepVal) ? (double?)wlStepVal : null;
+
+                var spectraResult = new XElement(AnIML + "Result",
+                    new XAttribute("id", $"spectra_{sectionName}"),
+                    new XAttribute("name", "Wavelength Scan Data")
+                );
+                if (wlStart.HasValue) spectraResult.Add(new XAttribute("wavelengthStartNm", wlStart.Value));
+                if (wlEnd.HasValue) spectraResult.Add(new XAttribute("wavelengthEndNm", wlEnd.Value));
+                if (wlStep.HasValue) spectraResult.Add(new XAttribute("wavelengthStepNm", wlStep.Value));
+
+                foreach (var (pos, points) in spectra)
+                {
+                    if (points.Count == 0) continue;
+                    spectraResult.Add(new XElement(AnIML + "SampleReference",
+                        new XAttribute("sampleID", pos),
+                        points.Select(p => new XElement(AnIML + "F",
+                            new XAttribute("wl", p.Wl),
+                            double.IsNaN(p.Value) ? "NaN" : p.Value.ToString(CultureInfo.InvariantCulture)))
+                    ));
+                }
+
+                resultSet!.Add(spectraResult);
+            }
 
             // Aggiungi statistiche
             AddStatistics(resultSet, measurements.Where(m => !double.IsNaN(m)).ToList(), measurementType);

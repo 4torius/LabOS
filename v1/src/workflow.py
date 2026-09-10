@@ -891,7 +891,8 @@ class PnPWorkflowExecutor:
                         logging.getLogger(__name__).info(f"Auto-generated plate_id: {context.plate_id}")
                 
                 # Store result in context for future reference
-                result_data = result.data if isinstance(result.data, dict) else {"raw": result.data}
+                # (CommandResult.data is always Dict[str, Any], never optional)
+                result_data = result.data
                 result_data["plate_id"] = context.plate_id
                 context.step_results[step.step_number] = result_data
             

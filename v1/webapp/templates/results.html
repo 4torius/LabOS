@@ -268,16 +268,25 @@ function _buildStepHTML(step) {
         gridHTML += `<div class="well-label">${c}</div>`;
     }
 
+    // Per-well spectrum lookup (multi-wavelength scan steps only - see
+    // is_scan/measurements[].spectrum from animl_parser.py).
+    const spectrumMap = {};
+    measurements.forEach(function(m) { if (m.spectrum) spectrumMap[m.well] = m.spectrum; });
+
     ROWS.forEach(function(row) {
         gridHTML += `<div class="well-label">${row}</div>`;
         for (let c = 1; c <= COLS; c++) {
             const well = row + c;
             const val = wellMap[well];
+            const spectrum = spectrumMap[well];
             if (val !== undefined && val !== null) {
                 const norm = (val - minVal) / range;
                 const color = _heatColor(norm);
+                const title = spectrum
+                    ? `${well}: ${val.toFixed(4)} ${step.unit} (mean of ${spectrum.length}-point scan)`
+                    : `${well}: ${val} ${step.unit}`;
                 gridHTML += `<div class="well-cell" style="background:${color};"
-                    title="${well}: ${val} ${step.unit}"
+                    title="${title}"
                     data-bs-toggle="tooltip" data-value="${val}"></div>`;
             } else {
                 gridHTML += '<div class="well-cell empty" title="No data"></div>';
@@ -304,22 +313,49 @@ function _buildStepHTML(step) {
         paramHTML += '</tbody></table></div>';
     }
 
-    // Data table (collapsible)
+    // Data table (collapsible). Scan steps get an extra column: each well's
+    // full wavelength → value spectrum, collapsed by default (a well can
+    // carry 100+ points) - this is the data the old converter silently
+    // discarded down to "0", now shown per-well instead of on a chart.
+    const valueHeader = step.is_scan ? `Mean (${step.unit})` : `Value (${step.unit})`;
     let tableHTML = `<details class="mt-3"><summary class="text-muted small" style="cursor:pointer;">
         Show raw data (${measurements.length} wells)</summary>
         <div class="table-responsive mt-2" style="max-height:260px; overflow-y:auto;">
         <table class="table table-sm table-dark table-striped" style="font-size:11px;">
-        <thead><tr><th>Well</th><th>Row</th><th>Col</th><th>Value (${step.unit})</th></tr></thead><tbody>`;
+        <thead><tr><th>Well</th><th>Row</th><th>Col</th><th>${valueHeader}</th>${step.is_scan ? '<th>Spectrum</th>' : ''}</tr></thead><tbody>`;
     measurements.forEach(function(m) {
         tableHTML += `<tr><td>${m.well}</td><td>${m.row}</td><td>${m.col}</td>
-            <td>${m.value !== null ? m.value : '—'}</td></tr>`;
+            <td>${m.value !== null ? m.value : '—'}</td>`;
+        if (step.is_scan) {
+            tableHTML += `<td>${_buildSpectrumCell(m)}</td>`;
+        }
+        tableHTML += '</tr>';
     });
     tableHTML += '</tbody></table></div></details>';
+
+    const scanBadge = step.is_scan
+        ? `<span class="badge bg-info text-dark">Scan ${step.wavelength_start_nm}–${step.wavelength_end_nm} nm (${step.wavelength_step_nm} nm step)</span>`
+        : '';
 
     return `<div class="d-flex align-items-center gap-2 mb-2">
         <span class="badge bg-success">${step.technique || 'Unknown technique'}</span>
         <span class="badge bg-secondary">${step.value_series || ''}</span>
+        ${scanBadge}
     </div>` + gridHTML + legendHTML + paramHTML + tableHTML;
+}
+
+// Per-well wavelength → value table for a multi-wavelength scan well,
+// collapsed by default. Returns a dash when the well has no spectrum data
+// (e.g. it was in the plate layout but never actually scanned).
+function _buildSpectrumCell(m) {
+    if (!m.spectrum || m.spectrum.length === 0) return '—';
+    let rows = m.spectrum.map(function(p) {
+        return `<tr><td>${p.wl} nm</td><td>${p.value !== null ? p.value : '—'}</td></tr>`;
+    }).join('');
+    return `<details><summary style="cursor:pointer;">${m.spectrum.length} points</summary>
+        <table class="table table-sm table-dark" style="font-size:10px; margin:4px 0 0;">
+        <thead><tr><th>Wavelength</th><th>Value</th></tr></thead>
+        <tbody>${rows}</tbody></table></details>`;
 }
 
 // Heatmap color: blue → green → red (diverging, similar to matplotlib RdYlGn reversed)

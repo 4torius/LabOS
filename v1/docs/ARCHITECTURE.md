@@ -108,6 +108,24 @@ See [WORKFLOW_SYSTEM.md](WORKFLOW_SYSTEM.md) for the full workflow model — not
 
 ---
 
+## Layer 3.5: Persistence
+
+One SQLite file, `Results/labos.db` (`src/database.py`, WAL mode, foreign keys on), holding two clearly-separated groups of tables:
+
+- **Chemical record** — `plates`, `wells`, `reagent_catalog`, `protocols`, `protocol_channels`, `instrument_measurements`, `well_measurements`. What's physically in each well and what was measured there. `CHEMICAL_TABLES` at the top of `database.py` lists them.
+- **Automation / execution log** — `run_results`. What the orchestrator did and when. `AUTOMATION_TABLES` lists it.
+
+Not two files — one file, two conventions, so a plate's chemical content and its automation trail can still be joined by `run_id` when useful, without mixing concerns in the schema.
+
+`src/plate_tracking.py` is the business logic that turns "a SiLA2 command just succeeded" into database rows, shared identically between the workflow-execution path (`webapp/routes/workflows.py::_execute_step`) and manual Dashboard commands (`webapp/routes/instruments.py::execute_device_command`) — a plate gets created and linked the same way regardless of how the command was launched:
+
+- **`track_opentrons_recipe()`** — every successful Opentrons `ExecuteRecipe` always creates a new `plates` row (`plate_id` auto-generated as `PLT-{timestamp}-{recipe-name-slug}`, there is currently no way to name it yourself) plus one `wells` row per (well, reagent) pair extracted from the recipe JSON, with volumes and — when a reagent's stock concentration is registered in `reagent_catalog` — a computed `concentration_mm`.
+- **`track_tecan_measurement()`** — every successful Tecan `RunMeasurement`/`RunAnalysis` resolves the effective `plate_id` (explicit `PlateID` param → `current_plate_id` from workflow context → recovered from the AnIML filename as a last resort), guarantees a `plates` row exists via `ensure_plate_for_measurement()` even with no prior pipetting record (e.g. a manual measurement — the plate gets a note explaining why it has no well content), and writes `instrument_measurements` + `well_measurements` eagerly (not deferred to end-of-run).
+- **Auto-linking only happens within a single workflow execution** (`workflow_context["current_plate_id"]`, in-memory, per-run) — a manual command from the Dashboard, or a workflow run on a different day, does not inherit a previous plate_id automatically. The Database page's "Add analysis" button (on a plate's detail view) closes that gap for the common case: it pre-fills `PlateID` and launches a Tecan `RunMeasurement` from there, so linking a same-plate follow-up analysis (e.g. a fluorescence read one day, luminescence the next) is one click instead of copy-pasting the plate_id by hand.
+- A plate measured with more than one technique (e.g. fluorescence and absorbance on the same plate) keeps every technique as distinct `well_measurements`/`instrument_measurements` rows — the Database page's well-grid and per-well tables never average or overwrite across techniques; a "Tecnica" dropdown appears whenever a plate has more than one.
+
+---
+
 ## Layer 4: User Interface
 
 The web interface is a FastAPI app served on **port 5000** by default (`python launcher.py --webapp`, or `--all` for the full stack). Pages:
@@ -117,9 +135,8 @@ The web interface is a FastAPI app served on **port 5000** by default (`python l
 - **Recipe Generator** (`/batch`, alias `/recipes`) — Excel-to-recipe/HAL/workflow converter
 - **Hardware** (`/hardware`) — HAL configuration switcher
 - **Operator** (`/operator`) — pending manual tasks, Emergency Stop, tip refill
-- **Plates** (`/plates`) and **Run History** (`/runs`) — SQLite-backed experiment records, searchable, with AI-context export
+- **Database** (`/database`) — SQLite-backed experiment record, two tabs: **Plates** (chemical record — plate/well/reagent content, linked measurements) and **Runs & Log** (automation record — workflow execution history, per-step outcomes, AI-context export). `/plates` and `/runs` redirect here for old bookmarks. See [Layer 3.5: Persistence](#layer-35-persistence) below
 - **Results** (`/results`) — raw output file browser (CSV/Excel/AnIML/XML)
-- **History** (`/history`) — ephemeral in-memory session log (lost on restart — **not** the same as Run History)
 - **Settings** (`/settings`) — `lab_config.yaml` editor
 
 A single WebSocket endpoint (`/ws`) broadcasts all real-time events (workflow progress, device status, manual-intervention requests) to every connected client; a global floating status bar with Pause/Resume/Abort (defined once in `base.html`) appears on every page whenever a workflow is running.

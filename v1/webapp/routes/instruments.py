@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from src.config_schema import load_lab_config as _load_lab_config_schema
+from src import plate_tracking
 
 
 def _load_lab_config(base_dir: Path) -> dict:
@@ -227,6 +228,23 @@ def create_instruments_router(
                 if command == "RefreshTasks":
                     await ws_manager.broadcast({"type": "mobile_tasks_updated"})
 
+                # Plate ID assignment + DB population (Database page: Plates tab).
+                # Same shared logic the workflow-execution path uses, so a
+                # manually-triggered Tecan measurement or Opentrons recipe
+                # (no workflow running) is tracked identically instead of
+                # only reaching the ephemeral command history.
+                try:
+                    plate_tracking.track_tecan_measurement(
+                        actual_id, command, params, result,
+                        run_id=None, current_plate_id=None, base_dir=BASE_DIR, state=state,
+                    )
+                    plate_tracking.track_opentrons_recipe(
+                        actual_id, command, params, result,
+                        run_id=None, base_dir=BASE_DIR, state=state,
+                    )
+                except Exception as exc:
+                    logger.warning(f"Plate tracking failed for manual command {command}: {exc}")
+
                 state.add_command(
                     device=actual_id, command=command, params=params,
                     result={"data": result.data, "message": result.message}, success=True
@@ -404,6 +422,29 @@ def create_instruments_router(
     async def get_tecan_protocols():
         protocols = [f.name for f in (LIBRARY_DIR / "Analysis").glob("*.mdfx")] if (LIBRARY_DIR / "Analysis").exists() else []
         return {"protocols": protocols}
+
+    @router.get("/api/tecan/plate-types")
+    async def get_tecan_plate_types():
+        """Real Tecan-compatible plate catalog for the RunMeasurement `PlateType`
+        parameter (Library/Analysis/PlateTypes.json - maps a plate id to the
+        Tecan-internal {file, range} pair TecanBridge.RewritePlateType uses to
+        override the plate hardcoded in a .mdfx). Passing anything not listed
+        here fails on the bridge with a clear error, never a silent fallback -
+        this endpoint is the same list, just exposed to the frontend so the
+        dropdown can show real options instead of a generic placeholder."""
+        path = LIBRARY_DIR / "Analysis" / "PlateTypes.json"
+        if not path.exists():
+            return {"plate_types": []}
+        try:
+            data = json.loads(path.read_text(encoding='utf-8-sig'))
+        except Exception:
+            return {"plate_types": []}
+        plate_types = [
+            {"id": key, "display_name": key.replace("_", " "), "tecan_file": val.get("file", "")}
+            for key, val in data.items()
+            if not key.startswith("_") and isinstance(val, dict)
+        ]
+        return {"plate_types": plate_types}
 
     # Mobile + dynamic options
 

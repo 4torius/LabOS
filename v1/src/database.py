@@ -49,9 +49,33 @@ def _conn():
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Schema
+#
+#  Two clearly separated groups of tables, in one file for atomic writes and
+#  simple backup/query — not two databases:
+#
+#    AUTOMATION_TABLES — workflow/step execution log (run_results). Audit
+#    trail of *how* a run went (timing, retries, status). Not meant to be
+#    queried for chemistry.
+#
+#    CHEMICAL_TABLES — the actual scientific record: what was measured
+#    (instrument_measurements, protocols, protocol_channels), what a plate
+#    is and what went into each well (plates, wells, reagent_catalog), and
+#    the resulting per-well values (well_measurements). This is what the
+#    Plates page/tab renders and what export_plate_csv()/export_run_json()
+#    are built around.
 # ─────────────────────────────────────────────────────────────────────────────
 
+AUTOMATION_TABLES = ("run_results",)
+CHEMICAL_TABLES = (
+    "protocols", "protocol_channels", "instrument_measurements",
+    "plates", "reagent_catalog", "wells", "well_measurements",
+)
+
 _SCHEMA = """
+-- ═══════════════════════════════════════════════════════════════════════════
+--  AUTOMATION / EXECUTION LOG
+-- ═══════════════════════════════════════════════════════════════════════════
+
 -- ── Workflow run summary ──────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS run_results (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,6 +93,10 @@ CREATE TABLE IF NOT EXISTS run_results (
     created_at        TEXT DEFAULT (datetime('now'))
 );
 
+-- ═══════════════════════════════════════════════════════════════════════════
+--  CHEMICAL RECORD
+-- ═══════════════════════════════════════════════════════════════════════════
+
 -- ── Measurement protocols (Tecan .mdfx parameters) ───────────────────────────
 CREATE TABLE IF NOT EXISTS protocols (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,20 +112,44 @@ CREATE TABLE IF NOT EXISTS protocols (
     created_at        TEXT DEFAULT (datetime('now'))
 );
 
+-- ── Protocol channels: one row per distinct technique/wavelength within a  ──
+-- ── single AnIML file (a Tecan run can mix e.g. absorbance + fluorescence) ──
+CREATE TABLE IF NOT EXISTS protocol_channels (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    protocol_id       INTEGER NOT NULL,
+    step_name         TEXT,            -- AnIML ExperimentStep name/index
+    channel_index     INTEGER,         -- 0-based order within the file
+    measurement_type  TEXT,
+    wavelength_nm     REAL,
+    excitation_nm     REAL,
+    emission_nm       REAL,
+    integration_ms    REAL,
+    num_reads         INTEGER,
+    bandwidth_nm      REAL,
+    parameters_json   TEXT,
+    created_at        TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY(protocol_id) REFERENCES protocols(id),
+    UNIQUE(protocol_id, step_name)
+);
+
 -- ── Tecan/instrument command records (one row per SiLA2 command invocation) ──
 CREATE TABLE IF NOT EXISTS instrument_measurements (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id          TEXT,
+    plate_id        TEXT,
     instrument      TEXT,
     command         TEXT,
     executed_at     TEXT,
     animl_path      TEXT,
     protocol_name   TEXT,
     protocol_id     INTEGER,
+    protocol_channel_id INTEGER,
     measurement_type TEXT,
     result_json     TEXT,
     FOREIGN KEY(run_id)      REFERENCES run_results(run_id),
-    FOREIGN KEY(protocol_id) REFERENCES protocols(id)
+    FOREIGN KEY(plate_id)    REFERENCES plates(plate_id),
+    FOREIGN KEY(protocol_id) REFERENCES protocols(id),
+    FOREIGN KEY(protocol_channel_id) REFERENCES protocol_channels(id)
 );
 
 -- ── Plates prepared by Opentrons ─────────────────────────────────────────────
@@ -171,6 +223,7 @@ CREATE TABLE IF NOT EXISTS well_measurements (
     well_id          TEXT,
     measurement_id   INTEGER,         -- FK to instrument_measurements.id
     protocol_id      INTEGER,         -- FK to protocols.id (denormalized for fast joins)
+    protocol_channel_id INTEGER,      -- FK to protocol_channels.id (which technique/wavelength)
     value            REAL,
     unit             TEXT,
     measurement_type TEXT,            -- Absorbance / Fluorescence / Luminescence
@@ -181,17 +234,26 @@ CREATE TABLE IF NOT EXISTS well_measurements (
     measured_at      TEXT,
     FOREIGN KEY(plate_id)      REFERENCES plates(plate_id),
     FOREIGN KEY(measurement_id) REFERENCES instrument_measurements(id),
-    FOREIGN KEY(protocol_id)   REFERENCES protocols(id)
+    FOREIGN KEY(protocol_id)   REFERENCES protocols(id),
+    FOREIGN KEY(protocol_channel_id) REFERENCES protocol_channels(id)
 );
 
 -- ── Indexes ───────────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_run_results_workflow   ON run_results(workflow_name);
 CREATE INDEX IF NOT EXISTS idx_run_results_status     ON run_results(status);
 CREATE INDEX IF NOT EXISTS idx_measurements_run       ON instrument_measurements(run_id);
+CREATE INDEX IF NOT EXISTS idx_measurements_plate     ON instrument_measurements(plate_id);
+CREATE INDEX IF NOT EXISTS idx_protocol_channels_proto ON protocol_channels(protocol_id);
 CREATE INDEX IF NOT EXISTS idx_plates_run             ON plates(run_id);
 CREATE INDEX IF NOT EXISTS idx_plates_recipe          ON plates(recipe_name);
 CREATE INDEX IF NOT EXISTS idx_wells_plate            ON wells(plate_id);
 CREATE INDEX IF NOT EXISTS idx_wells_reagent          ON wells(reagent_name);
+-- Real uniqueness on the chemical content of a well: allows several
+-- reagents in the same well (multi-reagent wells), rejects true duplicate
+-- (plate, well, reagent) rows on re-extraction. NULL reagent_name is never
+-- deduplicated by SQLite's UNIQUE-index-with-NULL semantics, but save_wells()
+-- never inserts a row without a reagent_name today.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_wells_content    ON wells(plate_id, well_id, reagent_name);
 CREATE INDEX IF NOT EXISTS idx_well_meas_plate        ON well_measurements(plate_id);
 CREATE INDEX IF NOT EXISTS idx_well_meas_protocol     ON well_measurements(protocol_id);
 CREATE INDEX IF NOT EXISTS idx_reagent_name           ON reagent_catalog(name);
@@ -220,6 +282,10 @@ _MIGRATIONS = [
     "ALTER TABLE well_measurements ADD COLUMN excitation_nm REAL",
     "ALTER TABLE well_measurements ADD COLUMN emission_nm REAL",
     "ALTER TABLE run_results ADD COLUMN notes TEXT",
+    # Chemical/automation split follow-up (see database.py module docstring/banners):
+    "ALTER TABLE instrument_measurements ADD COLUMN plate_id TEXT",
+    "ALTER TABLE instrument_measurements ADD COLUMN protocol_channel_id INTEGER",
+    "ALTER TABLE well_measurements ADD COLUMN protocol_channel_id INTEGER",
 ]
 
 
@@ -246,7 +312,15 @@ def init_db() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def save_run(run_data: Dict[str, Any]) -> None:
-    """Insert or replace a workflow run record."""
+    """Insert or replace a workflow run summary record (automation group only).
+
+    Does NOT touch instrument_measurements — those are written eagerly by
+    save_instrument_measurement() at the moment a Tecan step actually
+    completes (see src/plate_tracking.py), not replayed from step_results
+    here. Replaying was the root cause of instrument_measurements.animl_path
+    always being NULL (step_results never carried the structured SiLA2
+    response) and of measurement_id/plate linkage races.
+    """
     try:
         steps = run_data.get("step_results", [])
         with _conn() as con:
@@ -272,53 +346,6 @@ def save_run(run_data: Dict[str, Any]) -> None:
                     json.dumps(run_data, default=str),
                 ),
             )
-            run_id = run_data.get("run_id")
-            for step in steps:
-                instrument = step.get("instrument", "")
-                command = step.get("command", step.get("action", ""))
-                if "Tecan" in instrument or command in ("RunMeasurement", "PlateIn", "PlateOut"):
-                    result = step.get("result") or {}
-                    if isinstance(result, dict):
-                        data = result.get("data") or {}
-                        if not isinstance(data, dict):
-                            data = {}
-                        animl_path = (
-                            result.get("animl_path")
-                            or result.get("animl_file_path")
-                            or result.get("AnIMLFilePath")
-                            or data.get("animl_file_path")
-                            or data.get("AnIMLFilePath")
-                        )
-                        protocol_name = (
-                            result.get("protocol_name")
-                            or data.get("protocol_name")
-                        )
-                        meas_type = (
-                            result.get("measurement_type")
-                            or data.get("measurement_type")
-                        )
-                    else:
-                        animl_path = None
-                        protocol_name = None
-                        meas_type = None
-                    con.execute(
-                        """
-                        INSERT INTO instrument_measurements
-                            (run_id, instrument, command, executed_at,
-                             animl_path, protocol_name, measurement_type, result_json)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            run_id,
-                            instrument,
-                            command,
-                            step.get("timestamp") or run_data.get("started_at"),
-                            animl_path,
-                            protocol_name,
-                            meas_type,
-                            json.dumps(step, default=str),
-                        ),
-                    )
     except Exception as e:
         logger.error(f"Failed to save run to database: {e}")
 
@@ -580,6 +607,95 @@ def get_protocols() -> List[Dict[str, Any]]:
         return []
 
 
+def get_or_create_protocol_channel(
+    protocol_id: Optional[int], step_name: str, channel_data: Optional[Dict[str, Any]] = None
+) -> Optional[int]:
+    """Return protocol_channels id for (protocol_id, step_name), inserting if absent.
+
+    One channel per distinct AnIML experiment_step, so a single file mixing
+    e.g. absorbance + fluorescence records each technique separately instead
+    of collapsing into one protocols row (which only ever captured the first
+    non-null step).
+    """
+    if not protocol_id or not step_name:
+        return None
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT id FROM protocol_channels WHERE protocol_id = ? AND step_name = ?",
+                (protocol_id, step_name),
+            ).fetchone()
+            if row:
+                return row["id"]
+            d = channel_data or {}
+            cur = con.execute(
+                """INSERT INTO protocol_channels
+                    (protocol_id, step_name, channel_index, measurement_type,
+                     wavelength_nm, excitation_nm, emission_nm,
+                     integration_ms, num_reads, bandwidth_nm, parameters_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    protocol_id,
+                    step_name,
+                    d.get("channel_index"),
+                    d.get("measurement_type"),
+                    d.get("wavelength_nm"),
+                    d.get("excitation_nm"),
+                    d.get("emission_nm"),
+                    d.get("integration_ms"),
+                    d.get("num_reads"),
+                    d.get("bandwidth_nm"),
+                    json.dumps(d.get("parameters"), default=str) if d.get("parameters") else None,
+                ),
+            )
+            return cur.lastrowid
+    except Exception as e:
+        logger.error(f"Failed to get/create protocol channel '{step_name}': {e}")
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Instrument measurements (one row per SiLA2 command invocation that
+#  produced/touched a measurement — chemical group, see module banner above)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_instrument_measurement(data: Dict[str, Any]) -> Optional[int]:
+    """Insert one instrument_measurements row and return its id immediately.
+
+    Called eagerly, synchronously, right when a Tecan step completes and its
+    animl_path/plate_id are already known — not derived later from a replay
+    of step_results (see save_run()'s docstring for why that was broken).
+    """
+    try:
+        with _conn() as con:
+            cur = con.execute(
+                """
+                INSERT INTO instrument_measurements
+                    (run_id, plate_id, instrument, command, executed_at,
+                     animl_path, protocol_name, protocol_id, protocol_channel_id,
+                     measurement_type, result_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    data.get("run_id"),
+                    data.get("plate_id"),
+                    data.get("instrument"),
+                    data.get("command"),
+                    data.get("executed_at"),
+                    data.get("animl_path"),
+                    data.get("protocol_name"),
+                    data.get("protocol_id"),
+                    data.get("protocol_channel_id"),
+                    data.get("measurement_type"),
+                    json.dumps(data.get("result"), default=str) if data.get("result") else None,
+                ),
+            )
+            return cur.lastrowid
+    except Exception as e:
+        logger.error(f"Failed to save instrument measurement: {e}")
+        return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  Reagent catalog
 # ─────────────────────────────────────────────────────────────────────────────
@@ -738,6 +854,39 @@ def get_plates(
         return []
 
 
+def search_plates(
+    query: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    limit: int = 50,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    """Full-text + date-range search over plates - mirrors search_runs()."""
+    try:
+        filters: list = []
+        params: list = []
+        if query:
+            filters.append("(plate_id LIKE ? OR recipe_name LIKE ? OR display_name LIKE ?)")
+            params += [f"%{query}%", f"%{query}%", f"%{query}%"]
+        if date_from:
+            filters.append("prepared_at >= ?")
+            params.append(date_from)
+        if date_to:
+            filters.append("prepared_at <= ?")
+            params.append(date_to + "T23:59:59")
+        where = ("WHERE " + " AND ".join(filters)) if filters else ""
+        params += [limit, offset]
+        with _conn() as con:
+            rows = con.execute(
+                f"SELECT * FROM plates {where} ORDER BY prepared_at DESC LIMIT ? OFFSET ?",
+                params,
+            ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to search plates: {e}")
+        return []
+
+
 def get_plate(plate_id: str) -> Optional[Dict[str, Any]]:
     """Return plate + wells + well_measurements, or None."""
     try:
@@ -767,6 +916,20 @@ def get_plate(plate_id: str) -> Optional[Dict[str, Any]]:
                        LEFT JOIN protocols p ON p.id = wm.protocol_id
                        WHERE wm.plate_id = ?
                        ORDER BY wm.well_id, wm.cycle""",
+                    (plate_id,),
+                ).fetchall()
+            ]
+            # Raw instrument runs (AnIML files etc.) linked to this plate via
+            # instrument_measurements.plate_id — lets the UI link back to the
+            # actual raw output file, not just the DB-computed values.
+            data["raw_results"] = [
+                dict(r)
+                for r in con.execute(
+                    """SELECT id, run_id, instrument, command, executed_at,
+                              animl_path, protocol_name, measurement_type
+                       FROM instrument_measurements
+                       WHERE plate_id = ?
+                       ORDER BY executed_at""",
                     (plate_id,),
                 ).fetchall()
             ]
@@ -852,11 +1015,11 @@ def save_well_measurements(
             con.executemany(
                 """
                 INSERT INTO well_measurements
-                    (plate_id, well_id, measurement_id, protocol_id,
+                    (plate_id, well_id, measurement_id, protocol_id, protocol_channel_id,
                      value, unit, measurement_type,
                      wavelength_nm, excitation_nm, emission_nm,
                      cycle, measured_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -864,6 +1027,7 @@ def save_well_measurements(
                         wv.get("well"),
                         measurement_id,
                         protocol_id,
+                        wv.get("protocol_channel_id"),
                         wv.get("value"),
                         wv.get("unit"),
                         wv.get("measurement_type"),
@@ -878,20 +1042,6 @@ def save_well_measurements(
             )
     except Exception as e:
         logger.error(f"Failed to save well measurements: {e}")
-
-
-def get_last_measurement_id(run_id: str) -> Optional[int]:
-    """Return the id of the most recently inserted instrument_measurement for a run."""
-    try:
-        with _conn() as con:
-            row = con.execute(
-                "SELECT id FROM instrument_measurements WHERE run_id = ? ORDER BY id DESC LIMIT 1",
-                (run_id,),
-            ).fetchone()
-            return row["id"] if row else None
-    except Exception as e:
-        logger.error(f"Failed to get last measurement id: {e}")
-        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -968,82 +1118,84 @@ def export_plate_csv(plate_id: str) -> Optional[str]:
 
 def export_run_json(run_id: str) -> Optional[Dict[str, Any]]:
     """
-    Return a structured dict with complete run data suitable for AI consumption.
-    Includes: run metadata, plates, per-well pipetting + measurement data,
-    reagent catalog entries, protocols used.
+    Return a structured dict with the run's automation record only: run
+    metadata, per-instrument measurement log entries (which instrument, which
+    AnIML file, when), and which plate(s) it touched by reference
+    (plate_id/display_name/status — no wells/reagents/measurements).
+
+    Deliberately excludes the chemical record (wells, reagent_catalog,
+    well_measurements) — that belongs to export_plate_json() only, so a run
+    export answers "what did the orchestrator do" without duplicating "what
+    was in the wells", which the user wants kept strictly separate.
     """
     try:
         run = get_run(run_id)
         if run is None:
             return None
-        plates_data = []
-        with _conn() as con:
-            plate_rows = con.execute(
-                "SELECT * FROM plates WHERE run_id = ?", (run_id,)
-            ).fetchall()
-            for plate in plate_rows:
-                p = dict(plate)
-                p["wells"] = [
-                    dict(w) for w in con.execute(
-                        """SELECT w.*, r.cas_number, r.molecular_formula,
-                                  r.molar_mass_gmol, r.display_name AS reagent_display
-                           FROM wells w
-                           LEFT JOIN reagent_catalog r ON r.id = w.reagent_catalog_id
-                           WHERE w.plate_id = ? ORDER BY w.col_number, w.row_label""",
-                        (p["plate_id"],),
-                    ).fetchall()
-                ]
-                p["well_measurements"] = [
-                    dict(m) for m in con.execute(
-                        """SELECT wm.*, pr.name AS protocol_name_ref
-                           FROM well_measurements wm
-                           LEFT JOIN protocols pr ON pr.id = wm.protocol_id
-                           WHERE wm.plate_id = ? ORDER BY wm.well_id, wm.cycle""",
-                        (p["plate_id"],),
-                    ).fetchall()
-                ]
-                plates_data.append(p)
-
-        # Reagents used in this run
-        reagent_names = set()
-        for p in plates_data:
-            for w in p.get("wells", []):
-                if w.get("reagent_name"):
-                    reagent_names.add(w["reagent_name"])
-        reagents = []
-        if reagent_names:
-            with _conn() as con:
-                placeholders = ",".join("?" * len(reagent_names))
-                reagents = [
-                    dict(r) for r in con.execute(
-                        f"SELECT * FROM reagent_catalog WHERE name IN ({placeholders})",
-                        list(reagent_names),
-                    ).fetchall()
-                ]
-
-        # Protocols used in this run
-        with _conn() as con:
-            protocols_used = [
-                dict(r) for r in con.execute(
-                    """SELECT DISTINCT p.* FROM protocols p
-                       JOIN instrument_measurements im ON im.protocol_id = p.id
-                       WHERE im.run_id = ?""",
-                    (run_id,),
-                ).fetchall()
-            ]
-
         # Remove heavy result_json from summary
         run.pop("result_json", None)
-
         return {
-            "schema_version": "2.0",
+            "schema_version": "3.0",
             "run": run,
-            "plates": plates_data,
-            "reagents": reagents,
-            "protocols": protocols_used,
         }
     except Exception as e:
         logger.error(f"Failed to export run JSON {run_id}: {e}")
+        return None
+
+
+def export_plate_json(plate_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Return the complete chemical record for a plate, ready for AI
+    consumption: everything get_plate() returns (wells, reagent-catalog
+    joins, well_measurements, raw_results) plus, for every raw_results row
+    that has an animl_path, the actual parsed measurement data under
+    "animl_data" (key kept for API stability even though the source file
+    parsed underneath may be the raw XML - see below) — so consuming this
+    export doesn't require a second round-trip to fetch and parse the raw
+    instrument file, AND so a well with a multi-wavelength scan carries its
+    full spectrum here (measurements[].spectrum), not just the single
+    scan-mean value shown in well_measurements/the heatmap.
+
+    Parses the same source plate_tracking.ingest_animl_measurement() prefers
+    (the raw Tecan XML sibling of the AnIML file, when present - see
+    plate_tracking._resolve_source_path) so this export can never show data
+    inconsistent with what's actually in well_measurements/the DB, and never
+    depends on the AnIML conversion step (the source of every bug found in
+    this pipeline) for its own numbers.
+
+    A raw_results row whose source file is missing or fails to parse gets
+    animl_data=None (logged as a warning) rather than failing the whole
+    export — one bad/rotated-away file shouldn't hide the rest of the plate.
+    """
+    try:
+        data = get_plate(plate_id)
+        if data is None:
+            return None
+
+        from src.plate_tracking import _resolve_source_path
+
+        for raw_result in data.get("raw_results", []):
+            animl_path = raw_result.get("animl_path")
+            raw_result["animl_data"] = None
+            if not animl_path:
+                continue
+            try:
+                source_path = _resolve_source_path(animl_path)
+                if source_path.suffix.lower() == ".xml":
+                    from src.tecan_xml_parser import parse_tecan_xml
+                    raw_result["animl_data"] = parse_tecan_xml(source_path)
+                else:
+                    from src.animl_parser import parse_animl
+                    raw_result["animl_data"] = parse_animl(source_path)
+            except Exception as e:
+                logger.warning(f"Could not parse measurement file for '{animl_path}' in plate export: {e}")
+
+        return {
+            "schema_version": "1.0",
+            "plate": data,
+        }
+    except Exception as e:
+        logger.error(f"Failed to export plate JSON {plate_id}: {e}")
         return None
 
 
@@ -1211,42 +1363,103 @@ def export_ai_context(
         return {}
 
 
-def get_well_heatmap(plate_id: str, measurement_type: Optional[str] = None) -> Dict[str, Any]:
+def get_well_heatmap(
+    plate_id: str, measurement_type: Optional[str] = None, measurement_id: Optional[int] = None
+) -> Dict[str, Any]:
     """
-    Return well grid data for heatmap rendering.
-    Result: {plate_id, rows, columns, wells: {well_id: {value, unit, reagent, volume_ul}}}
+    Return well grid data for heatmap rendering, shaped exactly as
+    webapp/templates/database.html (formerly plates.html) consumes it.
+
+    Result: {plate_id, rows, columns, row_labels, value_min, value_max,
+             grid: [[{well_id, value, unit, reagent_name, volume_ul,
+                      concentration_mm, measurement_type, wavelength_nm}, ...], ...]}
+
+    Driven by the UNION of well_ids present in `wells` and `well_measurements`
+    (not just `wells`), so a well that was measured but has no pipetting
+    record (extraction failed, or a manual/no-recipe measurement) still
+    shows up instead of silently disappearing.
+
+    measurement_id restricts the grid to ONE raw result (one
+    instrument_measurements row / one attached AnIML file) instead of
+    averaging every well_measurements row for the well - without it, a plate
+    with several timepoints of the SAME technique (e.g. t0/3h/24h
+    absorbance, all "Absorbance") silently blends them into one AVG(value)
+    per well, which looks like real data but isn't any single actual
+    reading. measurement_type still narrows by technique on top of that
+    (or alone, if measurement_id is omitted) exactly as before.
     """
+    empty = {"plate_id": plate_id, "rows": 8, "columns": 12, "row_labels": [],
+              "value_min": None, "value_max": None, "grid": []}
     try:
         with _conn() as con:
             plate = con.execute("SELECT rows, columns FROM plates WHERE plate_id = ?", (plate_id,)).fetchone()
-            rows_count = plate["rows"] if plate else 8
-            cols_count = plate["columns"] if plate else 12
+            rows_count = (plate["rows"] if plate and plate["rows"] else 8) or 8
+            cols_count = (plate["columns"] if plate and plate["columns"] else 12) or 12
 
-            q_filter = "AND wm.measurement_type = ?" if measurement_type else ""
-            params = [plate_id]
+            extra_filters = []
+            params = [plate_id, plate_id, plate_id, plate_id]
             if measurement_type:
+                extra_filters.append("AND wm.measurement_type = ?")
                 params.append(measurement_type)
+            if measurement_id is not None:
+                extra_filters.append("AND wm.measurement_id = ?")
+                params.append(measurement_id)
+            q_filter = " ".join(extra_filters)
 
             well_rows = con.execute(
-                f"""SELECT w.well_id, w.reagent_name, w.volume_ul, w.concentration_mm,
-                           AVG(wm.value) AS value, wm.unit, wm.measurement_type,
-                           wm.wavelength_nm
-                    FROM wells w
-                    LEFT JOIN well_measurements wm ON wm.plate_id = w.plate_id
-                                                  AND wm.well_id  = w.well_id
-                    WHERE w.plate_id = ? {q_filter}
-                    GROUP BY w.well_id
-                    ORDER BY w.col_number, w.row_label""",
+                f"""
+                WITH well_ids AS (
+                    SELECT well_id FROM wells WHERE plate_id = ?
+                    UNION
+                    SELECT well_id FROM well_measurements WHERE plate_id = ?
+                )
+                SELECT
+                    wi.well_id,
+                    w.reagent_name, w.volume_ul, w.concentration_mm,
+                    AVG(wm.value) AS value, wm.unit, wm.measurement_type,
+                    wm.wavelength_nm
+                FROM well_ids wi
+                LEFT JOIN wells w             ON w.plate_id = ? AND w.well_id = wi.well_id
+                LEFT JOIN well_measurements wm ON wm.plate_id = ? AND wm.well_id = wi.well_id {q_filter}
+                GROUP BY wi.well_id
+                """,
                 params,
             ).fetchall()
 
-            wells_dict = {r["well_id"]: dict(r) for r in well_rows}
+            wells_by_id = {r["well_id"]: dict(r) for r in well_rows}
+
+            row_labels = [chr(ord('A') + i) for i in range(rows_count)]
+            grid: List[List[Dict[str, Any]]] = []
+            all_values: List[float] = []
+            for ri, row_label in enumerate(row_labels):
+                row_cells = []
+                for col in range(1, cols_count + 1):
+                    well_id = f"{row_label}{col}"
+                    w = wells_by_id.get(well_id, {})
+                    value = w.get("value")
+                    if value is not None:
+                        all_values.append(value)
+                    row_cells.append({
+                        "well_id": well_id,
+                        "value": value,
+                        "unit": w.get("unit"),
+                        "reagent_name": w.get("reagent_name"),
+                        "volume_ul": w.get("volume_ul"),
+                        "concentration_mm": w.get("concentration_mm"),
+                        "measurement_type": w.get("measurement_type"),
+                        "wavelength_nm": w.get("wavelength_nm"),
+                    })
+                grid.append(row_cells)
+
             return {
                 "plate_id": plate_id,
                 "rows": rows_count,
                 "columns": cols_count,
-                "wells": wells_dict,
+                "row_labels": row_labels,
+                "value_min": min(all_values) if all_values else None,
+                "value_max": max(all_values) if all_values else None,
+                "grid": grid,
             }
     except Exception as e:
         logger.error(f"Failed to get heatmap for {plate_id}: {e}")
-        return {"plate_id": plate_id, "rows": 8, "columns": 12, "wells": {}}
+        return empty

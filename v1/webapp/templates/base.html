@@ -102,17 +102,11 @@
             <a class="nav-link {% if title == 'Recipes' %}active{% endif %}" href="/recipes">
                 <i class="bi bi-magic"></i> Recipes
             </a>
-            <a class="nav-link {% if title == 'Plates' %}active{% endif %}" href="/plates">
-                <i class="bi bi-grid-3x3-gap"></i> Plates
-            </a>
             <a class="nav-link {% if title == 'Results' %}active{% endif %}" href="/results">
                 <i class="bi bi-file-earmark-bar-graph"></i> Results
             </a>
-            <a class="nav-link {% if title == 'History' %}active{% endif %}" href="/history">
-                <i class="bi bi-clock-history"></i> History
-            </a>
-            <a class="nav-link {% if title == 'Run History' %}active{% endif %}" href="/runs">
-                <i class="bi bi-database"></i> Runs DB
+            <a class="nav-link {% if title == 'Database' %}active{% endif %}" href="/database">
+                <i class="bi bi-database"></i> Database
             </a>
             <a class="nav-link {% if title == 'Hardware' %}active{% endif %}" href="/hardware">
                 <i class="bi bi-cpu"></i> Hardware
@@ -188,6 +182,24 @@
                 .catch(e => console.error('Error syncing badge:', e));
         }
         syncNotificationBadge();
+
+        // Sync the bottom workflow status bar with whatever is actually
+        // running right now - a page opened/refreshed AFTER a workflow
+        // already started never receives its workflow_start event (pure
+        // push model otherwise), so without this the bar stays hidden
+        // until the next progress broadcast happens to arrive.
+        function syncWorkflowStatusBar() {
+            fetch('/api/workflows/live-status')
+                .then(resp => resp.json())
+                .then(data => {
+                    if (!data.active) return;
+                    showWorkflowStatus(data.workflow_name, data.step, data.total,
+                        data.instrument ? `${data.instrument} - ${data.action}` : (data.action || ''));
+                    if (data.paused) showWorkflowPaused(data.message, data.step);
+                })
+                .catch(e => console.error('Error syncing workflow status:', e));
+        }
+        syncWorkflowStatusBar();
         // Refresh badge every 5 seconds
         setInterval(syncNotificationBadge, 5000);
         

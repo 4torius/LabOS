@@ -84,11 +84,13 @@ class GeneratedStubs:
     service_name: str
     module_pb2: Any  # The _pb2 module
     module_pb2_grpc: Any  # The _pb2_grpc module
-    stub_class: type
+    stub_class: Optional[type]
     message_classes: Dict[str, type]
-    
+
     def create_stub(self, channel) -> Any:
         """Create a stub instance from a channel."""
+        if self.stub_class is None:
+            raise RuntimeError(f"No stub class found for service '{self.service_name}'")
         return self.stub_class(channel)
     
     def get_request(self, method_name: str) -> Optional[type]:

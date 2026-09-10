@@ -439,10 +439,25 @@ class PnPClient:
                     deadline = None if timeout is None else _time.monotonic() + timeout
                     while not result.done:
                         if deadline is not None and _time.monotonic() > deadline:
+                            # The client gave up waiting - this is NOT success. The
+                            # command is still running server-side (e.g. a long
+                            # Opentrons ExecuteRecipe); reporting success=True here
+                            # made every caller (webapp instruments.py -> dashboard.html)
+                            # log "completed"/OK regardless of what actually happens
+                            # to the run afterwards, including real failures that occur
+                            # moments after this client stops watching. A timed-out
+                            # command must surface as a failure so callers know to
+                            # check the run's real status instead of assuming success.
+                            execution_uuid = str(result.execution_uuid)
                             result.cancel_execution_info_subscription()
                             return CommandResult(
-                                success=True,
-                                data={"status": "running", "execution_uuid": str(result.execution_uuid)},
+                                success=False,
+                                error=(
+                                    f"Command still running after {timeout}s client-side timeout "
+                                    f"(execution_uuid={execution_uuid}) - not finished, not a success. "
+                                    f"Check the run's real status directly."
+                                ),
+                                data={"status": "running", "execution_uuid": execution_uuid},
                             )
                         if on_progress and result.progress is not None:
                             on_progress(int(result.progress), str(result.status or ""))
@@ -663,7 +678,8 @@ class PnPClient:
                     return self._parse_response(response)
                     
             except grpc.RpcError as e:
-                error_msg = e.details() if e.details() else str(e.code())
+                details = e.details()
+                error_msg = details if details else str(e.code())
                 if e.code() == grpc.StatusCode.UNIMPLEMENTED or "not found" in error_msg.lower():
                     return CommandResult(
                         success=False, 

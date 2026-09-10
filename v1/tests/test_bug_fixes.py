@@ -41,8 +41,9 @@ def _make_executor(registry=None, error_config=None, default_timeout=None):
 
 
 def _make_step(**kwargs):
+    from typing import Any, Dict
     from src.workflow import WorkflowStep
-    defaults = dict(
+    defaults: Dict[str, Any] = dict(
         step_number=1,
         instrument="test_instr",
         action="test_action",

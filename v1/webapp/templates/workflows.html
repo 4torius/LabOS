@@ -806,6 +806,10 @@ var LABWARE_TYPES = [];
 var TIP_RACK_TYPES = [];
 var PRIORITY_OPTIONS = [];
 var TASK_TYPE_OPTIONS = [];
+// Real Tecan-compatible plate catalog (Library/Analysis/PlateTypes.json) for
+// the RunMeasurement PlateType parameter - distinct from LABWARE_TYPES above
+// (Opentrons plate catalog, wrong list for this specific Tecan parameter).
+var TECAN_PLATE_TYPES = [];
 
 // Parameter names that should use dropdowns (camelCase + snake_case for API compatibility)
 var LOCATION_PARAMS = ['source', 'destination', 'location', 'from', 'to', 'source_location', 'dest_location', 'station', 'newlocation', 'sourcelocation', 'destlocation', 'sourceloc', 'destloc'];
@@ -902,11 +906,12 @@ var showAllCommands = true;
 // Load dropdown configuration from API catalog endpoints
 async function loadDropdownConfig() {
     try {
-        const [configResp, devicesResp, tiprackResp, platesResp] = await Promise.allSettled([
+        const [configResp, devicesResp, tiprackResp, platesResp, tecanPlateTypesResp] = await Promise.allSettled([
             fetch('/api/config'),
             fetch('/api/devices'),
             fetch('/api/tipracks'),
             fetch('/api/library/plates'),
+            fetch('/api/tecan/plate-types'),
         ]);
 
         // Config — only used for folder-based dropdowns (recipe, analysis, etc.)
@@ -935,6 +940,12 @@ async function loadDropdownConfig() {
             LABWARE_TYPES = (pl.plates || []).map(p => p.id);
         }
         if (!LABWARE_TYPES.length) LABWARE_TYPES = ['corning_96_wellplate_360ul_flat', 'corning_384_wellplate_112ul_flat'];
+
+        // Real Tecan plate catalog for the RunMeasurement PlateType param
+        if (tecanPlateTypesResp.status === 'fulfilled' && tecanPlateTypesResp.value.ok) {
+            const tpt = await tecanPlateTypesResp.value.json();
+            TECAN_PLATE_TYPES = tpt.plate_types || [];
+        }
 
         if (DROPDOWN_CONFIG.priority && DROPDOWN_CONFIG.priority.options) PRIORITY_OPTIONS = DROPDOWN_CONFIG.priority.options;
         if (DROPDOWN_CONFIG.task_type && DROPDOWN_CONFIG.task_type.options) TASK_TYPE_OPTIONS = DROPDOWN_CONFIG.task_type.options;
@@ -1103,6 +1114,18 @@ function setupDragAndDrop() {
 // ============================================================================
 function addStep(type) {
     var inst = INSTRUMENTS[type];
+    // Guard: an instrument can be discovered with zero commands (offline,
+    // or online but its command introspection failed/hasn't caught up -
+    // both look identical from here: an empty `commands` array). Without
+    // this check, `inst.commands[0].id` throws an uncaught TypeError and
+    // the drop silently does nothing - no console error the user notices,
+    // no step added, no visible feedback. That's the real bug behind
+    // "drag&drop doesn't work" (confirmed: not limited to offline devices).
+    if (!inst || !inst.commands || inst.commands.length === 0) {
+        console.warn('Cannot add step for "' + type + '": no commands available (offline or not yet discovered)');
+        showToast('warning', 'Strumento non disponibile', (inst && inst.name || type) + ' non ha comandi disponibili al momento (offline o non ancora rilevato)');
+        return;
+    }
     var step = {
         id: Date.now(),
         type: type,
@@ -1110,11 +1133,11 @@ function addStep(type) {
         params: {},
         dependsOn: []
     };
-    
+
     workflowSteps.push(step);
     renderSteps();
     selectStep(workflowSteps.length - 1);
-    
+
     console.log('Step added:', step);
 }
 
@@ -1157,15 +1180,22 @@ function renderSteps() {
     for (var i = 0; i < workflowSteps.length; i++) {
         var step = workflowSteps[i];
         var inst = INSTRUMENTS[step.type];
+        // Defensive: a step saved while its instrument was online/discovered
+        // can end up pointing at an instrument that's since gone offline or
+        // lost its command list - inst.commands.length would throw and abort
+        // rendering every step after this one. Fall back to a placeholder
+        // instead of crashing the whole canvas.
+        if (!inst) inst = { name: step.type, color: 'secondary', commands: [] };
+        if (!inst.commands) inst.commands = [];
         var cmd = null;
-        
+
         for (var j = 0; j < inst.commands.length; j++) {
             if (inst.commands[j].id === step.command) {
                 cmd = inst.commands[j];
                 break;
             }
         }
-        if (!cmd) cmd = inst.commands[0];
+        if (!cmd) cmd = inst.commands[0] || { id: step.command, label: step.command + ' (non disponibile)' };
         
         // Add connector line (except for first)
         if (i > 0) {
@@ -1396,7 +1426,7 @@ function renderProperties() {
             break;
         }
     }
-    if (!cmd) cmd = inst.commands[0];
+    if (!cmd) cmd = inst.commands[0] || { id: step.command, label: step.command, parameters: [] };
     applyRequiredConstrainedDefaults(step, cmd);
     applyRequiredStringDefaults(step, cmd);
 
@@ -1458,6 +1488,16 @@ function renderProperties() {
                 html += '<option value="">-- Select Tip Rack --</option>';
                 for (var tr = 0; tr < TIP_RACK_TYPES.length; tr++) {
                     html += '<option value="' + TIP_RACK_TYPES[tr] + '"' + (currentValue === TIP_RACK_TYPES[tr] ? ' selected' : '') + '>' + TIP_RACK_TYPES[tr] + '</option>';
+                }
+                html += '</select>';
+            } else if (paramLower === 'platetype') {
+                // Tecan RunMeasurement PlateType: real catalog from
+                // Library/Analysis/PlateTypes.json, not the Opentrons
+                // LABWARE_TYPES list below (wrong catalog for this param).
+                html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
+                html += '<option value="">-- Select Plate Type --</option>';
+                for (var pt = 0; pt < TECAN_PLATE_TYPES.length; pt++) {
+                    html += '<option value="' + TECAN_PLATE_TYPES[pt].id + '"' + (currentValue === TECAN_PLATE_TYPES[pt].id ? ' selected' : '') + '>' + TECAN_PLATE_TYPES[pt].display_name + '</option>';
                 }
                 html += '</select>';
             } else if (uiHint === 'labware' || LABWARE_PARAMS.indexOf(paramLower) !== -1) {

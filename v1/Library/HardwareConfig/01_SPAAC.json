@@ -27,7 +27,7 @@
     },
     "Source_1": {
       "LoadName": "corning_24_wellplate_3.4ml_flat",
-      "Slot": "C2",
+      "Slot": "D1",
       "DisplayName": "Source_1 - Reagent plate (A1=GEL-N3, A2=HA-N3, A3=4arm-20kPEG-DBCO, A4+A5=Solvent split)"
     }
   },

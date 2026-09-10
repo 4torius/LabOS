@@ -135,7 +135,7 @@ python main.py
 | `PlateOut` | — | Eject plate carrier |
 | `SetTemperature` | `TargetTemperature` (4.0–45.0 °C) | Set incubation temperature |
 | `TurnOffTemperature` | — | Disable temperature control |
-| `RunMeasurement` (Observable) | `ProtocolFile`, `PlateID`, `SampleSetID`, `PlateType` | Run a `.mdfx` protocol; streams progress; returns an AnIML result path. Python-side timeout: `bridge.measurement_timeout_seconds` (default 1200s; `0` = unlimited) |
+| `RunMeasurement` (Observable) | `ProtocolFile`, `PlateID`, `SampleSetID`, `PlateType` | Run a `.mdfx` protocol; streams progress; returns an AnIML result path. Python-side timeout: `bridge.measurement_timeout_seconds` (default 1200s; `0` = unlimited). `PlateType` is optional — see [MDFX Protocol Files](#mdfx-protocol-files) below for what it does |
 | `ListProtocols` | — | Available `.mdfx` files (JSON array) |
 
 `GetAnIMLResult(PlateID)` also exists for looking up a previously saved result.
@@ -151,7 +151,30 @@ python main.py
 
 ### MDFX Protocol Files
 
-Measurement protocols are created in Tecan iControl software and saved as `.mdfx` files in `Library/Analysis/`. The Recipe Generator / workflow builder populate their protocol dropdown by scanning this directory.
+Measurement protocols are created in Tecan iControl software (Reader Editor) and saved as `.mdfx` files in `Library/Analysis/`. The Recipe Generator / workflow builder / Database page's "Add analysis" button all populate their protocol dropdown by scanning this directory.
+
+A `.mdfx` file hardcodes which physical plate it was created for as two coupled XML attributes:
+
+```xml
+<CyclePlate id="3" file="COS24ft" plateWithCover="False">
+    <PlateRange id="0" range="A1~D6" auto="true">
+```
+
+`file` is a plate code from Tecan's internal library (not extractable from the installed DLLs as plain data — read it out of a real `.mdfx` instead, see below); `range` is the full well range for that plate and must always match `file` (e.g. a 96-well plate needs `A1:H12`, not `A1~D6`).
+
+**`PlateType` override**: if you pass a non-empty `PlateType` to `RunMeasurement`, `TecanBridge.RewritePlateType()` looks it up in `Library/Analysis/PlateTypes.json` and rewrites both attributes in memory before the SDK loads the protocol — the `.mdfx` file on disk is never modified. Leave `PlateType` empty (the default from every UI) to use whatever plate the `.mdfx` was originally created for; this is a fully backward-compatible no-op. If the requested key isn't in `PlateTypes.json`, the measurement fails immediately with a clear error listing the known keys — it never silently falls back to the `.mdfx` default, which would look like success while reading the wrong geometry.
+
+**To add support for a new plate type**:
+1. In Tecan's Reader Editor (iControl), create or edit any `.mdfx` protocol and pick the new plate from its own plate picker, save it.
+2. Open that `.mdfx` in a text editor and copy the two values: `file="..."` from `<CyclePlate>` and `range="..."` from `<PlateRange>`.
+3. Add an entry to `Library/Analysis/PlateTypes.json`:
+   ```json
+   "your_plate_key": { "file": "COPIED_FILE_CODE", "range": "COPIED_RANGE" }
+   ```
+   Keys starting with `_` are treated as comments/metadata and ignored — use them for notes. Pick a key name that means something to your lab; matching an existing Opentrons `Library/Labware/Plates/*.json` `id` (e.g. `corning_24_wellplate_3.4ml_flat`) is a good convention when the same physical plate is used on both instruments, but it's just a string key, nothing enforces the match.
+4. **Restart the Tecan server** (`main.py`, which relaunches the bridge) — the library is loaded once at bridge startup, not re-read per request. The startup log prints `[PlateTypeLibrary] Caricate N definizioni piastra da ...` confirming what was loaded.
+
+If `PlateTypes.json` doesn't exist or is empty, `PlateType` is a documented no-op everywhere — nothing breaks, you just can't override the plate yet.
 
 ### Configuration (`config.yaml`)
 
@@ -170,7 +193,7 @@ instrument:
 
 ### Bridge binary is up to date
 
-`bridge_launcher.py` prefers the **Release** build of `TecanSiLA2Server.exe` if one exists, falling back to Debug only if Release is absent. The Release build was rebuilt (`dotnet build -c Release`) as part of this documentation pass and now includes the `Connect()` stale-connection-flag fix — every `Connect()` call genuinely re-validates against the hardware instead of trusting a cached flag. **If you rebuild `TecanBridge.cs` again in the future, remember to rebuild Release, not just Debug** — the launcher will silently keep running the old Release binary otherwise (this bit the project once already).
+`bridge_launcher.py` prefers the **Release** build of `TecanSiLA2Server.exe` if one exists, falling back to Debug only if Release is absent. The Release build was rebuilt (`dotnet build -c Release`) as part of this documentation pass and now includes the `Connect()` stale-connection-flag fix — every `Connect()` call genuinely re-validates against the hardware instead of trusting a cached flag. It was rebuilt again on 2026-09-01 to add the `PlateType` override (see [MDFX Protocol Files](#mdfx-protocol-files)), verified against the real instrument (S/N 2511004584). **If you rebuild `TecanBridge.cs` again in the future, remember to rebuild Release, not just Debug** — the launcher will silently keep running the old Release binary otherwise (this bit the project twice already, including during the `PlateType` work).
 
 ---
 

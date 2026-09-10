@@ -78,13 +78,6 @@ except ImportError:
         manual_pb2_grpc = None
         MANUAL_STATION_AVAILABLE = False
 
-# Import gRPC servicer
-try:
-    from .opentrons_servicer import add_servicer_to_server
-    SERVICER_AVAILABLE = True
-except ImportError:
-    SERVICER_AVAILABLE = False
-
 # Import SiLA2Common for plug-and-play support
 try:
     import importlib.util
@@ -131,15 +124,7 @@ class SiLA2CommonAdapter:
     
     def __init__(self, server: 'OpentronsSiLA2Server'):
         self._server = server
-        self._servicer = None  # Set after server starts
         self._start_time = time.time()
-        
-        # Map of command_id -> handler method
-        self._command_handlers = {}
-        
-    def set_servicer(self, servicer):
-        """Set the OpentronsServicer reference."""
-        self._servicer = servicer
 
     @staticmethod
     def _to_string_map(data: dict) -> dict:
@@ -161,6 +146,8 @@ class SiLA2CommonAdapter:
         
     async def GetServerInfo(self, request, context):
         """Return server metadata for discovery."""
+        if SiLA2Common_pb2 is None:
+            raise RuntimeError("SiLA2Common_pb2 not available")
         uptime = int(time.time() - self._start_time)
         robot_info = {}
 
@@ -206,6 +193,8 @@ class SiLA2CommonAdapter:
     
     async def GetFeatures(self, request, context):
         """Return available features — read from features/*.sila.xml."""
+        if SiLA2Common_pb2 is None:
+            raise RuntimeError("SiLA2Common_pb2 not available")
         _features_dir = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "features"
@@ -221,6 +210,8 @@ class SiLA2CommonAdapter:
     
     async def GetStatus(self, request, context):
         """Return current server status."""
+        if SiLA2Common_pb2 is None:
+            raise RuntimeError("SiLA2Common_pb2 not available")
         connected = self._server.is_connected() if self._server else False
         robot_status = self._server._status if self._server else "unknown"
         is_busy = self._server._is_running if self._server else False
@@ -244,6 +235,8 @@ class SiLA2CommonAdapter:
         This is the core of plug-and-play - allows execution without
         knowing the specific protobuf types.
         """
+        if SiLA2Common_pb2 is None:
+            raise RuntimeError("SiLA2Common_pb2 not available")
         feature = request.feature
         command = request.command
         params = dict(request.parameters) if request.parameters else {}
@@ -400,6 +393,8 @@ class SiLA2CommonAdapter:
     
     async def GetProperty(self, request, context):
         """Get a property value."""
+        if SiLA2Common_pb2 is None:
+            raise RuntimeError("SiLA2Common_pb2 not available")
         prop_name = request.property_name
         
         if prop_name == "is_connected":
@@ -605,17 +600,20 @@ class OpentronsSiLA2Server:
     async def start(self):
         """Start the SiLA2 server."""
         await self.initialize()
-        
+
+        if self.robot is None:
+            raise RuntimeError("Robot client not initialized — call initialize() first")
+
         # Connect to robot with retry
         async def on_retry(attempt, max_attempts):
             self.logger.info(f"Retry {attempt}/{max_attempts}...")
-            
+
         connected = await self.robot.connect_with_retry(
             max_retries=self.config.connection_retry_count,
             retry_delay=self.config.connection_retry_delay,
             on_retry=on_retry
         )
-        
+
         if connected:
             health = await self.robot.get_health()
             self.logger.info(f"Robot connected: {health.get('name', 'Unknown')}")
@@ -629,19 +627,16 @@ class OpentronsSiLA2Server:
             futures.ThreadPoolExecutor(max_workers=10)
         )
         
-        # Register gRPC servicer if available
-        if SERVICER_AVAILABLE:
-            servicer = add_servicer_to_server(self, self._grpc_server)
-            self.logger.info("OpentronsServicer registered")
-        else:
-            servicer = None
-            self.logger.warning("gRPC servicer not available - server will have no RPC methods")
-        
+        # Per-feature gRPC servicer registration used to happen here (legacy
+        # OpentronsServicer, never actually present in this repo — dead code,
+        # removed). All real RPC dispatch goes through the SiLA2CommonAdapter's
+        # generic ExecuteCommand below.
+
         # Register SiLA2Common adapter for plug-and-play
         if SILA2_COMMON_AVAILABLE:
+            if SiLA2Common_pb2_grpc is None:
+                raise RuntimeError("SiLA2Common_pb2_grpc not available")
             self._common_adapter = SiLA2CommonAdapter(self)
-            if servicer:
-                self._common_adapter.set_servicer(servicer)
             SiLA2Common_pb2_grpc.add_SiLA2ServerInfoServicer_to_server(
                 self._common_adapter, self._grpc_server
             )
@@ -904,7 +899,10 @@ class OpentronsSiLA2Server:
         if not MANUAL_STATION_AVAILABLE:
             self.logger.warning("ManualStation not available - cannot request refill")
             return False
-            
+
+        if manual_pb2 is None or manual_pb2_grpc is None:
+            raise RuntimeError("manual_pb2/manual_pb2_grpc not available")
+
         try:
             # Connect to ManualStation
             channel = grpc.aio.insecure_channel("localhost:50360")
@@ -984,6 +982,8 @@ class OpentronsSiLA2Server:
     
     async def cmd_initialize(self) -> str:
         """Initialize connection to robot."""
+        if self.robot is None:
+            raise RuntimeError("Robot client not initialized — call initialize() first")
         if not self.robot.is_connected:
             connected = await self.robot.connect_with_retry(
                 max_retries=self.config.connection_retry_count,
@@ -1001,11 +1001,15 @@ class OpentronsSiLA2Server:
         
     async def cmd_home(self) -> str:
         """Home all robot axes."""
+        if self.robot is None:
+            raise RuntimeError("Robot client not initialized — call initialize() first")
         await self.robot.home()
         return "Homing complete"
-        
+
     async def cmd_emergency_stop(self) -> str:
         """Emergency stop - abort current run, drop tips, home."""
+        if self.robot is None:
+            raise RuntimeError("Robot client not initialized — call initialize() first")
         async with self._control_lock:
             if self._current_run_id:
                 await self.robot.stop_run(self._current_run_id)
@@ -1030,6 +1034,10 @@ class OpentronsSiLA2Server:
 
     async def _run_emergency_drop(self) -> tuple[bool, Optional[str]]:
         """Execute the emergency drop and home sequence. Returns (success, error)."""
+        if self.robot is None:
+            raise RuntimeError("Robot client not initialized — call initialize() first")
+        if self.generator is None:
+            raise RuntimeError("Protocol generator not initialized — call initialize() first")
         self.logger.info("Executing emergency drop sequence...")
 
         drop_recipe = {
@@ -1133,6 +1141,8 @@ class OpentronsSiLA2Server:
         """
         if not self.mounted_tip_tracker:
             return
+        if self.robot is None:
+            raise RuntimeError("Robot client not initialized — call initialize() first")
         try:
             run_detail = await self.robot.get_run_detail(run_id)
             pipette_mounts = {
@@ -1232,6 +1242,8 @@ class OpentronsSiLA2Server:
         """
         if not self.run_archive:
             return
+        if self.robot is None:
+            raise RuntimeError("Robot client not initialized — call initialize() first")
         try:
             data = await self.robot.get_run_commands(run_id)
             commands = data.get("data", []) if data else []
@@ -1284,6 +1296,11 @@ class OpentronsSiLA2Server:
         if self._is_running:
             raise RuntimeError("Robot is busy")
 
+        if self.robot is None:
+            raise RuntimeError("Robot client not initialized — call initialize() first")
+        if self.generator is None:
+            raise RuntimeError("Protocol generator not initialized — call initialize() first")
+
         async with self._lock:
             # Re-check inside the lock: belt-and-suspenders against two calls
             # arriving almost simultaneously and both passing the check above.
@@ -1301,6 +1318,8 @@ class OpentronsSiLA2Server:
             try:
                 if protocol_type == "json":
                     recipe = json.loads(content)
+                    if not isinstance(recipe, dict):
+                        raise ValueError("Recipe JSON must be a JSON object (dict) at the top level")
 
                     # Handle Refill command
                     if recipe.get("Command") == "Refill":
@@ -1404,7 +1423,7 @@ class OpentronsSiLA2Server:
                     
                 # Execute
                 run_start = time.time()
-                run_id = await self._execute_protocol(protocol_code)
+                run_id = await self._execute_protocol(protocol_code, recipe=recipe)
 
                 # Wait for completion
                 final_status = await self.robot.wait_for_run_completion(
@@ -1501,7 +1520,9 @@ class OpentronsSiLA2Server:
         """Smart tip tracker update - uses actual data for partial runs."""
         if not self.tip_tracker:
             return
-            
+        if self.robot is None:
+            raise RuntimeError("Robot client not initialized — call initialize() first")
+
         self.logger.info(f"Updating tip tracker (status: {status})...")
         
         if status == "succeeded":
@@ -1514,16 +1535,26 @@ class OpentronsSiLA2Server:
             
         # Partial/failed run - try to read actual usage from log
         self.logger.warning("Run incomplete - reading actual usage from log...")
-        
+
         try:
             actual_usage = await self.robot.get_actual_tip_usage(run_id)
-            
-            if actual_usage:
+
+            # None means "couldn't determine" (robot_client.get_actual_tip_usage's
+            # own analysis failed) - fall through to the planned-usage safety
+            # net below. An empty dict is a real, determined answer ("zero
+            # tips were actually picked up" - e.g. a run that failed on its
+            # very first PickUpTip) and must be recorded as exactly that,
+            # not treated the same as "unknown" - that was the bug: a failed
+            # run with truly zero tip usage always fell through to charging
+            # the FULL planned usage instead, every time.
+            if actual_usage is not None:
                 for rack_type, count in actual_usage.items():
                     self.tip_tracker.add_usage(rack_type, count)
                     self.logger.info(f"  + {count} tips ({rack_type}) [FROM LOG]")
+                if not actual_usage:
+                    self.logger.info("  Actual usage from log: 0 tips (run failed before any pickup)")
                 return
-                
+
         except Exception as e:
             self.logger.warning(f"Log analysis failed: {e}")
             
@@ -1534,16 +1565,80 @@ class OpentronsSiLA2Server:
                 self.tip_tracker.add_usage(rack_type, count)
                 self.logger.info(f"  + {count} tips ({rack_type}) [SAFETY]")
             
-    async def _execute_protocol(self, code: str) -> str:
-        """Upload and execute a protocol."""
+    def _collect_custom_labware_definitions(self, recipe: Optional[dict]) -> List[dict]:
+        """
+        Find every LoadName in recipe["Labware"] that needs to be pushed to
+        the robot before the run starts, i.e. genuinely custom labware (not
+        real Opentrons catalog labware the robot already knows). Reads
+        Library/Labware/Reservoirs/<LoadName>.json - the only local catalog
+        with the full Opentrons v2 schema (real Plates/*.json use a compact
+        schema not directly usable as a labware_definitions payload).
+
+        Standard-vs-custom is decided by each file's own "namespace" field:
+        real Opentrons definitions declare "namespace": "opentrons" (skip -
+        the robot already knows these, and pushing a slightly different copy
+        risks a version/geometry mismatch); anything else (e.g. this repo's
+        "labos_custom") is genuinely custom and gets pushed. A LoadName with
+        no local file at all is silently skipped here - if it's actually
+        needed and unknown to the robot, the run fails at loadLabware with a
+        clear FileNotFoundError, same as today, rather than this method
+        guessing/fabricating a definition.
+        """
+        if not recipe or "Labware" not in recipe:
+            return []
+        from pathlib import Path
+        # Resolved the same way as dir_recipes/hardware_config_folder
+        # elsewhere in this file (os.path.abspath against the process cwd,
+        # NOT self.base_dir - that resolves to .../SiLA2, one level short of
+        # the actual repo root, and is otherwise unused in this file).
+        library_dir = Path(os.path.abspath(self.config.dir_library))
+        reservoirs_dir = library_dir / "Labware" / "Reservoirs"
+        if not reservoirs_dir.exists():
+            return []
+        definitions = []
+        seen_load_names = set()
+        for lw_val in recipe["Labware"].values():
+            if not isinstance(lw_val, dict):
+                continue
+            load_name = lw_val.get("LoadName", lw_val.get("type", ""))
+            if not load_name or load_name in seen_load_names:
+                continue
+            seen_load_names.add(load_name)
+            def_path = reservoirs_dir / f"{load_name}.json"
+            if not def_path.exists():
+                continue
+            try:
+                data = json.loads(def_path.read_text(encoding="utf-8-sig"))
+            except Exception as e:
+                self.logger.warning(f"Could not read labware definition {def_path}: {e}")
+                continue
+            if data.get("namespace") == "opentrons":
+                continue  # real Opentrons catalog labware, robot already has it
+            definitions.append(data)
+        return definitions
+
+    async def _execute_protocol(self, code: str, recipe: Optional[dict] = None) -> str:
+        """Upload and execute a protocol.
+
+        `recipe` (optional): the resolved, post-HAL recipe dict, used only to
+        find custom labware definitions that need registering on the robot
+        before the run starts (see _collect_custom_labware_definitions). Pass
+        None for raw/uploaded protocol content with no structured recipe.
+        """
+        if self.robot is None:
+            raise RuntimeError("Robot client not initialized — call initialize() first")
         protocol_id = await self.robot.upload_protocol_content(code)
         run_id = await self.robot.create_run(protocol_id)
         self._current_run_id = run_id
+        for definition in self._collect_custom_labware_definitions(recipe):
+            await self.robot.add_labware_definition(run_id, definition)
         await self.robot.play_run(run_id)
         return run_id
-        
+
     async def cmd_abort_run(self, run_id: str = "") -> str:
         """Abort a running protocol."""
+        if self.robot is None:
+            raise RuntimeError("Robot client not initialized — call initialize() first")
         async with self._control_lock:
             target_id = run_id or self._current_run_id
             if target_id:
@@ -1557,6 +1652,8 @@ class OpentronsSiLA2Server:
 
     async def cmd_pause_run(self) -> str:
         """Pause current run."""
+        if self.robot is None:
+            raise RuntimeError("Robot client not initialized — call initialize() first")
         async with self._control_lock:
             if self._current_run_id:
                 await self.robot.pause_run(self._current_run_id)
@@ -1566,6 +1663,8 @@ class OpentronsSiLA2Server:
 
     async def cmd_resume_run(self) -> str:
         """Resume paused run."""
+        if self.robot is None:
+            raise RuntimeError("Robot client not initialized — call initialize() first")
         async with self._control_lock:
             if self._current_run_id:
                 await self.robot.play_run(self._current_run_id)
@@ -1904,13 +2003,16 @@ class OpentronsSiLA2Server:
         Returns:
             Result message
         """
+        if self.robot is None:
+            raise RuntimeError("Robot client not initialized — call initialize() first")
+
         if drop_tip:
             # Run emergency drop first
             try:
                 await self._run_emergency_drop()
             except Exception as e:
                 self.logger.warning(f"Drop tip failed (may not have tip): {e}")
-        
+
         # Then home
         await self.robot.home()
         self._status = "idle"
@@ -2019,6 +2121,8 @@ class OpentronsSiLA2Server:
         
     async def get_modules_status(self) -> str:
         """Get status of attached modules."""
+        if self.robot is None:
+            raise RuntimeError("Robot client not initialized — call initialize() first")
         modules = await self.robot.get_modules()
         return json.dumps(modules, indent=2)
         

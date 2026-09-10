@@ -90,6 +90,12 @@ var analyses = [];  // Tecan .mdfx files
 var LOCATIONS = ['opentrons', 'tecan', 'incubator', 'storage', 'manual_station', 'rack_1', 'rack_2', 'rack_3'];
 var LABWARE_TYPES = ['tiprack_1000ul', 'tiprack_200ul', 'tiprack_50ul', 'reservoir_12', 'wellplate_96', 'wellplate_384'];
 
+// Real Tecan-compatible plate catalog (Library/Analysis/PlateTypes.json via
+// /api/tecan/plate-types) - distinct from the generic LABWARE_TYPES fallback
+// above, which is Opentrons-flavored placeholder data never meant for the
+// Tecan RunMeasurement `PlateType` parameter. Populated by loadTecanPlateTypes().
+var TECAN_PLATE_TYPES = [];
+
 // Tip racks from HAL config (dynamically loaded)
 var halTipRacks = [];  // Array of {logical_name, load_name, slot, display_name}
 
@@ -182,11 +188,20 @@ function loadTipRacksFromHAL() {
     // Load mobile robot tasks (from MobileSiLA2Server)
     fetch('/api/mobile/tasks')
         .then(function(resp) { return resp.json(); })
-        .then(function(data) { 
+        .then(function(data) {
             mobileTasks = data.tasks || [];
             console.log('📱 Loaded ' + mobileTasks.length + ' mobile tasks');
         })
         .catch(function(e) { console.error('Error loading mobile tasks:', e); });
+
+    // Load real Tecan plate catalog for the RunMeasurement PlateType param
+    fetch('/api/tecan/plate-types')
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) {
+            TECAN_PLATE_TYPES = data.plate_types || [];
+            console.log('🧫 Loaded ' + TECAN_PLATE_TYPES.length + ' Tecan plate types');
+        })
+        .catch(function(e) { console.error('Error loading Tecan plate types:', e); });
 }
 
 // Refresh mobile tasks (called via WebSocket after RefreshTasks command)
@@ -307,7 +322,7 @@ function generateInstrumentCard(instrumentId, instrumentData) {
     // the truncated command list — these exist on Opentrons but were only
     // reachable by digging through "... N more commands" before this.
     var runControlIds = ['PauseRun', 'ResumeRun', 'AbortRun'];
-    var runControlLabels = {'PauseRun': 'Pausa', 'ResumeRun': 'Riprendi', 'AbortRun': 'Interrompi'};
+    var runControlLabels = {'PauseRun': 'Pause', 'ResumeRun': 'Resume', 'AbortRun': 'Abort'};
     var runControlsHtml = '';
     for (var rc = 0; rc < runControlIds.length; rc++) {
         var rcId = runControlIds[rc];
@@ -654,6 +669,21 @@ function showParameterModal(instrumentId, commandId) {
                 fieldsHtml += '<option value="all">🔄 REFILL ALL</option>';
             } else {
                 fieldsHtml += '<option value="" disabled>No tip racks in HAL</option>';
+            }
+            fieldsHtml += '</select>';
+        }
+        else if (paramLower === 'platetype') {
+            // Tecan's RunMeasurement PlateType: real catalog from
+            // Library/Analysis/PlateTypes.json, NOT the generic Opentrons
+            // LABWARE_TYPES placeholder below - passing anything not in this
+            // list fails clearly on the C# bridge (TecanBridge.RewritePlateType).
+            fieldsHtml += '<select class="form-select param-input" data-param="' + paramName + '">';
+            fieldsHtml += '<option value="">-- Select Plate Type --</option>';
+            for (var pt = 0; pt < TECAN_PLATE_TYPES.length; pt++) {
+                fieldsHtml += '<option value="' + TECAN_PLATE_TYPES[pt].id + '">' + TECAN_PLATE_TYPES[pt].display_name + '</option>';
+            }
+            if (TECAN_PLATE_TYPES.length === 0) {
+                fieldsHtml += '<option value="" disabled>Nessun tipo piastra in Library/Analysis/PlateTypes.json</option>';
             }
             fieldsHtml += '</select>';
         }

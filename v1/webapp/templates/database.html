@@ -1,0 +1,1236 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<style>
+.plate-card { border-left: 3px solid var(--labos-primary); cursor: pointer; }
+.plate-card:hover { background: rgba(102,126,234,0.07); }
+.badge-prepared  { background: #0dcaf0; color:#000; }
+.badge-measured  { background: #198754; }
+.badge-pipetted  { background: #6c757d; }
+
+.well-cell {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.15);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.55rem; font-weight: 600; color: #fff;
+    cursor: pointer; position: relative;
+    transition: transform .15s;
+}
+.well-cell:hover { transform: scale(1.2); z-index: 10; }
+.well-cell.empty { background: #2a2a3a; color: #666; border-color: #444; }
+.well-label-col { font-size: 0.65rem; color: #999; text-align: center; width: 34px; }
+.well-label-row { font-size: 0.65rem; color: #999; width: 22px; line-height: 34px; text-align: right; padding-right: 4px; }
+
+.well-tip {
+    display: none; position: absolute; z-index: 100;
+    bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    background: #1a1a2e; border: 1px solid #444; border-radius: 6px;
+    padding: 6px 10px; white-space: nowrap; font-size: 0.72rem; pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,.4);
+}
+.well-cell:hover .well-tip { display: block; }
+/* The grid's wrapping div uses overflow-x:auto, which per the CSS overflow
+   spec forces overflow-y to compute as "auto" too (a UA can't have one axis
+   visible and the other scrolling) — so a tooltip popping *above* a row-A
+   cell gets clipped by the container's own top edge, with nothing visible.
+   Flip direction for the first row only. */
+.well-cell.tip-below .well-tip { bottom: auto; top: calc(100% + 6px); }
+
+.stat-card { border-left: 3px solid var(--labos-primary); }
+.run-row { cursor: pointer; }
+.run-row:hover { background: rgba(102,126,234,0.08); }
+.badge-completed { background: #198754; }
+.badge-failed    { background: #dc3545; }
+.badge-cancelled { background: #6c757d; }
+.badge-running   { background: #0dcaf0; color: #000; }
+.step-row td { font-size: 0.85rem; padding: 4px 8px; }
+.step-ok   { color: #198754; }
+.step-fail { color: #dc3545; }
+.step-skip { color: #6c757d; }
+.edit-section { background: rgba(102,126,234,0.06); border-radius: 6px; padding: 12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h2 class="mb-3"><i class="bi bi-database"></i> Database</h2>
+
+    <ul class="nav nav-tabs mb-3" id="dbTabs">
+        <li class="nav-item">
+            <button class="nav-link active" id="tab-btn-plates" data-tab="plates" onclick="switchTab('plates')">
+                <i class="bi bi-grid-3x3-gap"></i> Plates
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" id="tab-btn-runs" data-tab="runs" onclick="switchTab('runs')">
+                <i class="bi bi-list-check"></i> Runs &amp; Log
+            </button>
+        </li>
+    </ul>
+
+    <!-- ═══════════════════════════ PLATES TAB (chemical record) ═══════════════════════════ -->
+    <div id="tab-plates" class="db-tab">
+        <div class="d-flex justify-content-end align-items-center mb-3">
+            <div class="d-flex gap-2 align-items-center">
+                <div class="form-check form-switch mb-0 me-2">
+                    <input class="form-check-input" type="checkbox" id="heatmapToggle" checked onchange="toggleHeatmap(this.checked)">
+                    <label class="form-check-label text-muted small" for="heatmapToggle">Well grid</label>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadPlates()">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="row g-2 mb-2">
+            <div class="col-md-5">
+                <input type="text" id="plateSearchQuery" class="form-control form-control-sm"
+                       placeholder="Search by plate name, recipe or ID..." oninput="debouncedPlateSearch()">
+            </div>
+            <div class="col-md-3">
+                <input type="date" id="plateDateFrom" class="form-control form-control-sm" title="From date" onchange="loadPlates()">
+            </div>
+            <div class="col-md-3">
+                <input type="date" id="plateDateTo" class="form-control form-control-sm" title="To date" onchange="loadPlates()">
+            </div>
+            <div class="col-md-1">
+                <button class="btn btn-sm btn-outline-secondary w-100" onclick="clearPlateSearch()" title="Clear filters">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="row g-3">
+            <div class="col-12 col-lg-4">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-list-ul"></i> Plate List</span>
+                        <small class="text-muted" id="platesCount"></small>
+                    </div>
+                    <div class="card-body p-0" style="overflow-y:auto; max-height:72vh">
+                        <div id="plateList">
+                            <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-lg-8" id="detailPanel">
+                <div class="card">
+                    <div class="card-body text-center text-muted py-5">
+                        <i class="bi bi-grid-3x3-gap fs-1 d-block mb-2" style="opacity:.3"></i>
+                        Select a plate to see the well layout and measurement results
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════ RUNS & LOG TAB (automation) ═══════════════════════════ -->
+    <div id="tab-runs" class="db-tab" style="display:none">
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <div></div>
+            <div class="d-flex gap-2 flex-wrap align-items-center">
+                <a class="btn btn-sm btn-outline-info" href="/api/db/export/ai-context.json"
+                   title="Export all completed runs as AI context JSON">
+                    <i class="bi bi-robot"></i> All AI Context
+                </a>
+                <select class="form-select form-select-sm" id="filterStatus" style="width:140px" onchange="loadRuns()">
+                    <option value="">All status</option>
+                    <option value="completed">Completed</option>
+                    <option value="failed">Failed</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadRuns()" title="Refresh">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="row g-3 mb-4" id="statsRow">
+            <div class="col-6 col-md-2">
+                <div class="card stat-card h-100"><div class="card-body py-2">
+                    <div class="text-muted small">Total runs</div><div class="fs-4 fw-bold" id="statTotal">—</div>
+                </div></div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="card stat-card h-100" style="border-color:#198754"><div class="card-body py-2">
+                    <div class="text-muted small">Completed</div><div class="fs-4 fw-bold text-success" id="statCompleted">—</div>
+                </div></div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="card stat-card h-100" style="border-color:#dc3545"><div class="card-body py-2">
+                    <div class="text-muted small">Failed</div><div class="fs-4 fw-bold text-danger" id="statFailed">—</div>
+                </div></div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="card stat-card h-100" style="border-color:#ffc107"><div class="card-body py-2">
+                    <div class="text-muted small">Avg duration</div><div class="fs-4 fw-bold" id="statAvgDur">—</div>
+                </div></div>
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="card stat-card h-100" style="border-color:#0dcaf0"><div class="card-body py-2">
+                    <div class="text-muted small">Last run</div><div class="fs-6" id="statLastRun">—</div>
+                </div></div>
+            </div>
+        </div>
+
+        <div class="row g-2 mb-2">
+            <div class="col-md-5">
+                <input type="text" id="searchQuery" class="form-control form-control-sm"
+                       placeholder="Search by run ID or workflow name..." oninput="debouncedSearch()">
+            </div>
+            <div class="col-md-3">
+                <input type="date" id="dateFrom" class="form-control form-control-sm" title="From date" onchange="loadRuns()">
+            </div>
+            <div class="col-md-3">
+                <input type="date" id="dateTo" class="form-control form-control-sm" title="To date" onchange="loadRuns()">
+            </div>
+            <div class="col-md-1">
+                <button class="btn btn-sm btn-outline-secondary w-100" onclick="clearSearch()" title="Clear filters">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        </div>
+        <div id="activeFilterBadge" class="mb-3" style="display:none">
+            <span class="badge bg-primary me-1"><i class="bi bi-funnel-fill"></i> Active filter:</span>
+            <span id="activeFilterText" class="text-muted small"></span>
+            <button class="btn btn-link btn-sm py-0 text-danger" onclick="clearSearch()">clear</button>
+        </div>
+
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-list-ul"></i> Workflow Runs</span>
+                <small class="text-muted" id="runsCount"></small>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width:30px"><input type="checkbox" id="selectAll" class="form-check-input" onchange="toggleSelectAll(this)" title="Select all"></th>
+                                <th>Workflow</th><th>Started</th><th>Status</th><th>Duration</th><th>Steps</th><th>Run ID</th><th style="width:60px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="runsTable"><tr><td colspan="8" class="text-center text-muted py-4">Loading...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer d-flex justify-content-between align-items-center">
+                <button class="btn btn-sm btn-outline-secondary" id="btnPrev" onclick="changePage(-1)" disabled><i class="bi bi-chevron-left"></i> Prev</button>
+                <small class="text-muted" id="pageInfo">Page 1</small>
+                <button class="btn btn-sm btn-outline-secondary" id="btnNext" onclick="changePage(1)">Next <i class="bi bi-chevron-right"></i></button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="exportBar" style="display:none;position:fixed;bottom:24px;right:24px;z-index:1050">
+    <div class="card shadow-lg border-info">
+        <div class="card-body py-2 px-3 d-flex align-items-center gap-3">
+            <span class="text-muted small"><span id="selCount">0</span> run(s) selected</span>
+            <button class="btn btn-sm btn-info" onclick="exportSelected()" title="Download AI context for selected runs"><i class="bi bi-robot"></i> AI Context</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="clearSelection()" title="Clear selection"><i class="bi bi-x-lg"></i></button>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="detailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="detailTitle">Run details</h5>
+                <div class="ms-auto d-flex gap-2 me-2">
+                    <button class="btn btn-sm btn-outline-primary" id="btnExportJson" onclick="exportRunJson()" title="Export full JSON for AI"><i class="bi bi-download"></i> JSON</button>
+                    <button class="btn btn-sm btn-outline-danger" id="btnDeleteRun" onclick="confirmDeleteFromModal()" title="Delete this run"><i class="bi bi-trash"></i></button>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="detailBody"><div class="text-center text-muted py-4">Loading...</div></div>
+        </div>
+    </div>
+</div>
+
+<!-- Well detail: reagents/concentrations/measurement for a single well -->
+<div class="modal fade" id="wellDetailModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="wellDetailTitle">Well</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="wellDetailBody"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Add analysis: either launches a new Tecan RunMeasurement linked to this
+     plate, or attaches an AnIML file that already exists on disk (a result
+     read outside this webapp, or an earlier run never tied to this plate). -->
+<div class="modal fade" id="addAnalysisModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add an analysis to this plate</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2">
+                    <label class="form-label small text-muted mb-0">Plate (PlateID)</label>
+                    <input type="text" class="form-control form-control-sm" id="addAnalysisPlateId" readonly>
+                </div>
+
+                <div class="btn-group btn-group-sm w-100 mb-3" role="group">
+                    <button type="button" class="btn btn-outline-primary active" id="addAnalysisModeRunBtn"
+                            onclick="setAddAnalysisMode('run')">Run new measurement</button>
+                    <button type="button" class="btn btn-outline-primary" id="addAnalysisModeAttachBtn"
+                            onclick="setAddAnalysisMode('attach')">Attach existing result</button>
+                </div>
+
+                <div id="addAnalysisRunFields">
+                    <div class="mb-2">
+                        <label class="form-label small text-muted mb-0">Protocol (.mdfx)</label>
+                        <select class="form-select form-select-sm" id="addAnalysisProtocol"></select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small text-muted mb-0">SampleSetID (optional)</label>
+                        <input type="text" class="form-control form-control-sm" id="addAnalysisSampleSet">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small text-muted mb-0">Plate type (optional — leave blank to use the protocol's default)</label>
+                        <input type="text" class="form-control form-control-sm" id="addAnalysisPlateType">
+                    </div>
+                </div>
+
+                <div id="addAnalysisAttachFields" hidden>
+                    <div class="mb-2">
+                        <label class="form-label small text-muted mb-0">Existing AnIML result</label>
+                        <select class="form-select form-select-sm" id="addAnalysisAnimlFile"></select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small text-muted mb-0">Protocol name (optional — for the database record only)</label>
+                        <input type="text" class="form-control form-control-sm" id="addAnalysisAttachProtocolName">
+                    </div>
+                    <p class="text-muted small mb-2">Links this file's measurements to the plate above without running the instrument again.</p>
+                </div>
+
+                <div id="addAnalysisError" class="text-danger small mb-2" hidden></div>
+                <button class="btn btn-primary btn-sm" onclick="submitAddAnalysis()" id="addAnalysisSubmitBtn">
+                    <i class="bi bi-play-fill"></i> Run measurement
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ═══════════════════════════════════ TAB SWITCHING ═══════════════════════════════════
+function switchTab(name) {
+    document.querySelectorAll('.db-tab').forEach(el => el.style.display = 'none');
+    document.getElementById('tab-' + name).style.display = '';
+    document.querySelectorAll('#dbTabs .nav-link').forEach(el => el.classList.remove('active'));
+    document.getElementById('tab-btn-' + name).classList.add('active');
+    const newHash = '#' + name;
+    if (location.hash.split('/')[0] !== newHash) history.replaceState(null, '', newHash);
+}
+
+function fmtDate(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleString('it-IT', {dateStyle:'short', timeStyle:'short'}); }
+    catch { return iso.slice(0,16).replace('T',' '); }
+}
+
+// ═══════════════════════════════════ PLATES TAB ═══════════════════════════════════
+let selectedPlateId = null;
+let heatmapEnabled = true;
+let _currentPlateData = null;  // last plate loaded by showPlate() — reused by showWellDetail() so a click doesn't need to refetch
+let _plateMeasurementFilter = null;  // active "Technique" selection when a plate has >1 measurement_type — never average/mix across techniques
+let _plateMeasurementIdFilter = null;  // active "Raw result" selection (instrument_measurements.id) when a plate has >1 raw result — never average/blend across timepoints; null = combined average
+
+function toggleHeatmap(enabled) {
+    heatmapEnabled = enabled;
+    try { localStorage.setItem('labos_heatmap', enabled ? '1' : '0'); } catch(e) {}
+    if (selectedPlateId) showPlate(selectedPlateId);
+}
+
+function plateStatusBadge(s) {
+    const cls = {prepared:'badge-prepared', pipetted:'badge-pipetted', measured:'badge-measured'};
+    return `<span class="badge ${cls[s]||'bg-secondary'}">${s||'—'}</span>`;
+}
+
+// display_name is a user-set nickname (via the rename/pencil button) - empty
+// until someone sets one. Falling back straight to plate_id used to be the
+// only alternative, which is an opaque "PLT-<timestamp>-<slug>" id; recipe_name
+// (already "<RecipeName>_<timestamp>" for anything prepared via ExecuteRecipe)
+// is a far more useful default title, so try that before the raw id.
+function plateTitle(p) {
+    return p.display_name || p.recipe_name || p.plate_id;
+}
+
+let _plateSearchTimer = null;
+function debouncedPlateSearch() {
+    clearTimeout(_plateSearchTimer);
+    _plateSearchTimer = setTimeout(loadPlates, 400);
+}
+
+function clearPlateSearch() {
+    document.getElementById('plateSearchQuery').value = '';
+    document.getElementById('plateDateFrom').value = '';
+    document.getElementById('plateDateTo').value = '';
+    loadPlates();
+}
+
+async function loadPlates() {
+    const list = document.getElementById('plateList');
+    list.innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div></div>';
+    const search   = document.getElementById('plateSearchQuery').value.trim();
+    const dateFrom = document.getElementById('plateDateFrom').value;
+    const dateTo   = document.getElementById('plateDateTo').value;
+    let url = '/api/db/plates?limit=100';
+    if (search)   url += `&search=${encodeURIComponent(search)}`;
+    if (dateFrom) url += `&date_from=${encodeURIComponent(dateFrom)}`;
+    if (dateTo)   url += `&date_to=${encodeURIComponent(dateTo)}`;
+    try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        document.getElementById('platesCount').textContent = `${d.count} plate${d.count===1?'':'s'}`;
+        if (!d.plates || d.plates.length === 0) {
+            list.innerHTML = (search || dateFrom || dateTo)
+                ? '<div class="text-center text-muted py-5 px-3">No plates match this filter.</div>'
+                : '<div class="text-center text-muted py-5 px-3">No plates yet — run a workflow with an Opentrons step, or a direct Tecan command.</div>';
+            return;
+        }
+        list.innerHTML = d.plates.map(p => `
+            <div class="plate-card p-3 border-bottom" onclick="showPlate('${p.plate_id}')">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="fw-bold small font-monospace">${plateTitle(p)}</div>
+                        <div class="text-muted small">${p.plate_id}</div>
+                    </div>
+                    ${plateStatusBadge(p.status)}
+                </div>
+                <div class="d-flex gap-2 mt-1">
+                    <small class="text-muted">${p.plate_type||'?'}</small>
+                    <small class="text-muted">&bull; ${fmtDate(p.prepared_at)}</small>
+                </div>
+            </div>
+        `).join('');
+    } catch(e) {
+        list.innerHTML = `<div class="text-danger text-center py-4">${e.message}</div>`;
+    }
+}
+
+async function showPlate(plateId) {
+    selectedPlateId = plateId;
+    const panel = document.getElementById('detailPanel');
+    panel.innerHTML = '<div class="card"><div class="text-center py-5"><div class="spinner-border"></div></div></div>';
+    if (location.hash.split('/')[0] === '#plates') history.replaceState(null, '', '#plates/' + encodeURIComponent(plateId));
+
+    try {
+        const plateResp = await fetch(`/api/db/plates/${encodeURIComponent(plateId)}`);
+        if (!plateResp.ok) throw new Error('Plate not found');
+        const plate = await plateResp.json();
+        _currentPlateData = plate;
+
+        // A plate analyzed with more than one technique (es. fluorescenza +
+        // assorbanza) must never have its values averaged/overwritten
+        // together -- default to the first technique found and let the
+        // user switch via the dropdown rendered in renderPlateDetail().
+        const distinctMeasTypesInit = [...new Set((plate.measurements||[]).map(m => m.measurement_type).filter(Boolean))];
+        _plateMeasurementFilter = distinctMeasTypesInit.length > 1 ? distinctMeasTypesInit[0] : null;
+
+        // A plate read at several timepoints (t0/3h/24h, ...) has one
+        // instrument_measurements row per raw result, all possibly sharing
+        // the SAME technique (e.g. all "Absorbance") - the technique filter
+        // above can't tell them apart, and averaging them together (the old
+        // behavior) silently blends distinct timepoints into one number
+        // that matches no actual reading. Default to the MOST RECENT raw
+        // result instead of the combined average; the user can pick a
+        // different one, or explicitly ask for the average, via the
+        // dropdown rendered in renderPlateDetail().
+        const rawResultsInit = plate.raw_results || [];
+        _plateMeasurementIdFilter = rawResultsInit.length > 1 ? rawResultsInit[rawResultsInit.length - 1].id : null;
+
+        return renderPlateDetail();
+    } catch(e) {
+        panel.innerHTML = `<div class="card"><div class="text-danger text-center py-4">${e.message}</div></div>`;
+    }
+}
+
+function onPlateMeasurementFilterChange(value) {
+    _plateMeasurementFilter = value || null;
+    renderPlateDetail();
+}
+
+function onPlateMeasurementIdFilterChange(value) {
+    _plateMeasurementIdFilter = value ? parseInt(value, 10) : null;
+    renderPlateDetail();
+}
+
+async function renderPlateDetail() {
+    const plate = _currentPlateData;
+    if (!plate) return;
+    const plateId = plate.plate_id;
+    const panel = document.getElementById('detailPanel');
+
+    try {
+        const heatmapParams = new URLSearchParams();
+        if (_plateMeasurementFilter) heatmapParams.set('measurement_type', _plateMeasurementFilter);
+        if (_plateMeasurementIdFilter) heatmapParams.set('measurement_id', _plateMeasurementIdFilter);
+        const heatmapQs = heatmapParams.toString();
+        const heatmapUrl = `/api/db/plates/${encodeURIComponent(plateId)}/heatmap` + (heatmapQs ? `?${heatmapQs}` : '');
+        const heatmapResp = await fetch(heatmapUrl);
+        const heatmap = heatmapResp.ok ? await heatmapResp.json() : null;
+        const distinctMeasTypes = [...new Set((plate.measurements||[]).map(m => m.measurement_type).filter(Boolean))];
+        // Both filters apply here too — the stats card below must match
+        // whatever the heatmap above is showing, not silently fall back to
+        // every raw result combined when only one is selected.
+        const filteredMeasurements = (plate.measurements||[]).filter(m =>
+            (!_plateMeasurementFilter || m.measurement_type === _plateMeasurementFilter) &&
+            (!_plateMeasurementIdFilter || m.measurement_id === _plateMeasurementIdFilter)
+        );
+
+        // Multiple reagents per well are possible now — map well_id to an
+        // array of rows instead of overwriting with the last one seen.
+        const wellInfo = {};
+        for (const w of (plate.wells || [])) {
+            (wellInfo[w.well_id] = wellInfo[w.well_id] || []).push(w);
+        }
+        const distinctReagents = [...new Set((plate.wells||[]).map(w => w.reagent_name).filter(Boolean))];
+        const rawResults = plate.raw_results || [];
+
+        let html = `<div class="card mb-3">
+            <div class="card-header fw-bold font-monospace d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-grid-3x3-gap"></i> ${plateTitle(plate)}</span>
+                <div class="d-flex align-items-center gap-2">
+                    ${plateStatusBadge(plate.status)}
+                    <a class="btn btn-sm btn-outline-primary py-0 px-1" href="/api/db/export/plate/${encodeURIComponent(plateId)}.json" title="Download the complete chemical record (JSON, AI-ready)"><i class="bi bi-download"></i> JSON</a>
+                    <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="editPlate('${plateId.replace(/'/g,"\\'")}')" title="Rename / notes"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="deletePlate('${plateId.replace(/'/g,"\\'")}')" title="Delete plate"><i class="bi bi-trash"></i></button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row g-3 mb-3">
+                    <div class="col-6 col-md-4"><div class="text-muted small">Plate type</div><div class="small">${plate.plate_type||'—'}</div></div>
+                    <div class="col-6 col-md-2"><div class="text-muted small">Dimensions</div>${plate.total_wells||'?'} wells (${plate.rows||'?'}×${plate.columns||'?'})</div>
+                    <div class="col-6 col-md-2"><div class="text-muted small">HAL config</div>${plate.hal_config||'—'}</div>
+                    <div class="col-6 col-md-2"><div class="text-muted small">Recipe</div>${plate.recipe_name||'—'}</div>
+                    <div class="col-6 col-md-2"><div class="text-muted small">Slot</div>${plate.labware_slot||'—'}</div>
+                    <div class="col-12 col-md-4"><div class="text-muted small">Run ID</div><div class="small text-muted font-monospace">
+                        ${plate.run_id ? `<a href="#" onclick="showRunFromPlate('${plate.run_id.replace(/'/g,"\\'")}');return false;">${plate.run_id}</a>` : '—'}
+                    </div></div>
+                    <div class="col-6 col-md-4"><div class="text-muted small">Prepared on</div>${fmtDate(plate.prepared_at)}</div>
+                    <div class="col-12">
+                        <div class="text-muted small">Reagents</div>
+                        <div class="small mt-1">${distinctReagents.length
+                            ? distinctReagents.map(r => `<span class="badge bg-secondary me-1">${r}</span>`).join('')
+                            : '<span class="text-muted">—</span>'}</div>
+                    </div>
+                    <div class="col-12">
+                        <div class="text-muted small">Raw results</div>
+                        <div class="d-flex flex-wrap gap-2 mt-1">
+                            ${rawResults.filter(r => r.animl_path).map(r => {
+                                const fname = r.animl_path.split(/[\\/]/).pop();
+                                return `<a href="/api/results/AnIML/${encodeURIComponent(fname)}" class="btn btn-sm btn-outline-secondary py-0 px-2" download title="Download the raw AnIML file">
+                                    <i class="bi bi-download"></i> ${fname}
+                                </a>`;
+                            }).join('')}
+                            <a href="/results" class="btn btn-sm btn-outline-primary py-0 px-2">
+                                <i class="bi bi-box-arrow-up-right"></i> Go to Results
+                            </a>
+                            <button class="btn btn-sm btn-outline-success py-0 px-2" onclick="showAddAnalysisModal('${plateId.replace(/'/g,"\\'")}')">
+                                <i class="bi bi-plus-lg"></i> Add analysis
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                ${plate.notes ? `<div class="alert alert-secondary py-2 px-3 small mb-3"><i class="bi bi-info-circle"></i> ${plate.notes}</div>` : ''}`;
+
+        if (distinctMeasTypes.length > 1) {
+            html += `<div class="d-flex align-items-center gap-2 mb-2">
+                <label class="text-muted small mb-0" for="measTypeFilter">Technique:</label>
+                <select id="measTypeFilter" class="form-select form-select-sm" style="width:auto" onchange="onPlateMeasurementFilterChange(this.value)">
+                    ${distinctMeasTypes.map(t => `<option value="${t}" ${t===_plateMeasurementFilter?'selected':''}>${t}</option>`).join('')}
+                </select>
+                <small class="text-muted">this plate has ${distinctMeasTypes.length} different techniques — the grid and stats show one technique at a time</small>
+            </div>`;
+        }
+
+        if (rawResults.length > 1) {
+            html += `<div class="d-flex align-items-center gap-2 mb-2">
+                <label class="text-muted small mb-0" for="rawResultFilter">Raw result:</label>
+                <select id="rawResultFilter" class="form-select form-select-sm" style="width:auto" onchange="onPlateMeasurementIdFilterChange(this.value)">
+                    <option value="">Combined (average of all ${rawResults.length})</option>
+                    ${rawResults.map(r => {
+                        const fname = (r.animl_path || '').split(/[\\/]/).pop() || `#${r.id}`;
+                        return `<option value="${r.id}" ${r.id===_plateMeasurementIdFilter?'selected':''}>${fname} — ${fmtDate(r.executed_at)}</option>`;
+                    }).join('')}
+                </select>
+                <small class="text-muted">this plate has ${rawResults.length} raw results (e.g. different timepoints) — pick one instead of averaging them together</small>
+            </div>`;
+        }
+
+        if (heatmapEnabled && heatmap && heatmap.grid && heatmap.grid.length > 0) {
+            const vMin = heatmap.value_min;
+            const vMax = heatmap.value_max;
+            const hasValues = vMin !== null && vMax !== null;
+
+            html += `<h6 class="mt-3">Well layout${hasValues ? ' <small class="text-muted fw-normal">(color = measured value)</small>' : ''}</h6>`;
+            html += `<div style="overflow-x:auto"><div style="display:inline-block;padding-bottom:8px">`;
+            html += `<div style="display:flex;gap:3px;margin-bottom:2px;padding-left:26px">`;
+            for (let c = 1; c <= heatmap.columns; c++) html += `<div class="well-label-col">${c}</div>`;
+            html += `</div>`;
+
+            for (let ri = 0; ri < heatmap.grid.length; ri++) {
+                const rowLabel = heatmap.row_labels[ri];
+                html += `<div style="display:flex;gap:3px;margin-bottom:3px;align-items:center">`;
+                html += `<div class="well-label-row">${rowLabel}</div>`;
+                for (const cell of heatmap.grid[ri]) {
+                    const reagents = wellInfo[cell.well_id] || [];
+                    const hasVal = cell.value !== undefined && cell.value !== null;
+                    const bg = hasVal ? valueToColor(cell.value, vMin, vMax) : null;
+                    const style = bg ? `background:${bg}` : '';
+                    const cls = hasVal ? '' : (reagents.length ? '' : 'empty');
+                    const tipCls = ri === 0 ? 'tip-below' : '';
+                    const tips = [`<b>${cell.well_id}</b>`];
+                    // % of well = volumetric share of the reagent over the total
+                    // dispensed in THAT well (e.g. 20% A, 30% B) — not the catalog
+                    // molar concentration (that, when known, stays visible separately).
+                    const wellTotalVol = reagents.reduce((s, r) => s + (r.volume_ul || 0), 0);
+                    for (const w of reagents) {
+                        const pct = wellTotalVol > 0 && w.volume_ul != null ? ` — ${(w.volume_ul/wellTotalVol*100).toFixed(0)}%` : '';
+                        tips.push(`Reagent: ${w.reagent_name}${w.volume_ul!=null?` (${w.volume_ul} µl${pct})`:''}`);
+                    }
+                    if (!reagents.length && cell.reagent_name) tips.push(`Reagent: ${cell.reagent_name}`);
+                    if (hasVal) tips.push(`Value: <b>${cell.value.toFixed(4)}</b> ${cell.unit||''}`);
+                    tips.push(`<span class="text-muted" style="font-size:.62rem">click for details</span>`);
+                    html += `<div class="well-cell ${cls} ${tipCls}" style="${style}" onclick="showWellDetail('${cell.well_id.replace(/'/g,"\\'")}')">
+                        ${cell.well_id}
+                        <div class="well-tip">${tips.join('<br>')}</div>
+                    </div>`;
+                }
+                html += `</div>`;
+            }
+            html += `</div></div>`;
+
+            if (hasValues) {
+                html += `<div class="d-flex align-items-center gap-2 mt-2 mb-1" style="max-width:360px">
+                    <small class="text-muted text-nowrap">${vMin.toFixed(4)}</small>
+                    <div style="flex:1;height:10px;border-radius:4px;background:linear-gradient(to right,${valueToColor(vMin,vMin,vMax)},${valueToColor((vMin+vMax)/2,vMin,vMax)},${valueToColor(vMax,vMin,vMax)})"></div>
+                    <small class="text-muted text-nowrap">${vMax.toFixed(4)}</small>
+                </div>`;
+            }
+        } else if ((plate.wells||[]).length > 0) {
+            html += `<p class="text-muted small mt-2">${plate.wells.length} wells registered — no measurement data available.</p>`;
+        } else {
+            html += `<p class="text-muted small mt-2">No well data available.</p>`;
+        }
+
+        html += `</div></div>`;
+
+        const mValues = filteredMeasurements.map(m=>m.value).filter(v=>v!==null&&v!==undefined);
+        if (mValues.length > 0) {
+            const mean = mValues.reduce((a,b)=>a+b,0)/mValues.length;
+            const mn = Math.min(...mValues), mx = Math.max(...mValues);
+            const std = Math.sqrt(mValues.reduce((s,v)=>s+(v-mean)**2,0)/mValues.length);
+            const techLabel = _plateMeasurementFilter ? ` — ${_plateMeasurementFilter}` : '';
+            const selectedRaw = rawResults.find(r => r.id === _plateMeasurementIdFilter);
+            const rawLabel = selectedRaw ? ` — ${(selectedRaw.animl_path||'').split(/[\\/]/).pop()}` : (rawResults.length > 1 ? ' — combined' : '');
+            html += `<div class="card mb-3">
+                <div class="card-header"><i class="bi bi-bar-chart"></i> Measurement statistics (${mValues.length} wells${techLabel}${rawLabel})</div>
+                <div class="card-body">
+                    <div class="row g-2 text-center">
+                        <div class="col-3"><div class="text-muted small">Mean</div><div class="fw-bold">${mean.toFixed(4)}</div></div>
+                        <div class="col-3"><div class="text-muted small">Min</div><div class="fw-bold text-info">${mn.toFixed(4)}</div></div>
+                        <div class="col-3"><div class="text-muted small">Max</div><div class="fw-bold text-warning">${mx.toFixed(4)}</div></div>
+                        <div class="col-3"><div class="text-muted small">Std Dev</div><div class="fw-bold">${std.toFixed(4)}</div></div>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        // Well content table: one row per (well, reagent) pair — a well with
+        // 2 reagents now shows 2 rows instead of losing one of them. Keyed
+        // from filteredMeasurements (not the raw plate.measurements) so a
+        // well measured by 2+ techniques doesn't have one silently
+        // overwrite the other here either.
+        if ((plate.wells||[]).length > 0) {
+            const measByWell = {};
+            for (const m of filteredMeasurements) measByWell[m.well_id] = m;
+            html += `<div class="card">
+                <div class="card-header"><i class="bi bi-table"></i> Well content</div>
+                <div class="card-body p-0">
+                <div class="table-responsive" style="max-height:260px">
+                <table class="table table-sm mb-0">
+                <thead><tr><th>Well</th><th>Reagent</th><th>Vol (µl)</th><th>% of well</th><th>Source</th><th>Value</th><th>Unit</th></tr></thead>
+                <tbody>`;
+            for (const w of plate.wells) {
+                const m = measByWell[w.well_id] || {};
+                // % of well = volumetric share over the total dispensed in THAT
+                // well (mixture composition, e.g. 20% A / 30% B), computed from
+                // volumes already present — doesn't require a manually
+                // registered catalog concentration.
+                const wellReagents = wellInfo[w.well_id] || [];
+                const wellTotalVol = wellReagents.reduce((s, r) => s + (r.volume_ul || 0), 0);
+                const pct = wellTotalVol > 0 && w.volume_ul != null ? (w.volume_ul / wellTotalVol * 100) : null;
+                html += `<tr>
+                    <td><strong>${w.well_id}</strong></td>
+                    <td>${w.reagent_name||'—'}</td>
+                    <td>${w.volume_ul!=null?w.volume_ul:'—'}</td>
+                    <td>${pct!=null?pct.toFixed(0)+'%':'—'}${w.concentration_mm!=null?`<br><small class="text-muted">${w.concentration_mm.toFixed(2)} mM</small>`:''}</td>
+                    <td class="text-muted small">${w.source_well||'—'}</td>
+                    <td>${m.value!=null?m.value.toFixed(4):'—'}</td>
+                    <td class="text-muted small">${m.unit||'—'}</td>
+                </tr>`;
+            }
+            html += `</tbody></table></div></div></div>`;
+        }
+
+        panel.innerHTML = html;
+    } catch(e) {
+        panel.innerHTML = `<div class="card"><div class="text-danger text-center py-4">${e.message}</div></div>`;
+    }
+}
+
+async function editPlate(plateId) {
+    const newName = prompt('Plate name (display name):');
+    if (newName === null) return;
+    const notes = prompt('Notes:');
+    try {
+        const r = await fetch(`/api/db/plates/${encodeURIComponent(plateId)}`, {
+            method: 'PATCH', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({display_name: newName || null, notes: notes || null}),
+        });
+        if (r.ok) { loadPlates(); showPlate(plateId); }
+        else alert('Update failed: ' + r.statusText);
+    } catch(e) { alert('Update failed: ' + e.message); }
+}
+
+async function deletePlate(plateId) {
+    if (!confirm(`Delete plate "${plateId}"? Linked wells and measurements will also be removed. This cannot be undone.`)) return;
+    try {
+        const r = await fetch(`/api/db/plates/${encodeURIComponent(plateId)}`, {method: 'DELETE'});
+        if (r.ok) {
+            selectedPlateId = null;
+            document.getElementById('detailPanel').innerHTML = '<div class="card"><div class="card-body text-center text-muted py-5">Plate deleted.</div></div>';
+            loadPlates();
+        } else alert('Delete failed: ' + r.statusText);
+    } catch(e) { alert('Delete failed: ' + e.message); }
+}
+
+function showRunFromPlate(runId) {
+    switchTab('runs');
+    showDetail(runId);
+}
+
+// "Add analysis": launches a Tecan RunMeasurement with this plate's PlateID
+// already set, so the DB link (plate_tracking.track_tecan_measurement,
+// invoked by instruments.py on manual commands) happens without having to
+// copy/paste the ID by hand.
+let _addAnalysisMode = 'run';
+
+function setAddAnalysisMode(mode) {
+    _addAnalysisMode = mode;
+    document.getElementById('addAnalysisRunFields').hidden = mode !== 'run';
+    document.getElementById('addAnalysisAttachFields').hidden = mode !== 'attach';
+    document.getElementById('addAnalysisModeRunBtn').classList.toggle('active', mode === 'run');
+    document.getElementById('addAnalysisModeAttachBtn').classList.toggle('active', mode === 'attach');
+    document.getElementById('addAnalysisError').hidden = true;
+    const btn = document.getElementById('addAnalysisSubmitBtn');
+    btn.innerHTML = mode === 'run'
+        ? '<i class="bi bi-play-fill"></i> Run measurement'
+        : '<i class="bi bi-link-45deg"></i> Attach';
+    btn.onclick = mode === 'run' ? submitAddAnalysis : submitAttachExistingAnalysis;
+}
+
+async function showAddAnalysisModal(plateId) {
+    document.getElementById('addAnalysisPlateId').value = plateId;
+    document.getElementById('addAnalysisSampleSet').value = '';
+    document.getElementById('addAnalysisPlateType').value = '';
+    document.getElementById('addAnalysisAttachProtocolName').value = '';
+    setAddAnalysisMode('run');
+
+    const select = document.getElementById('addAnalysisProtocol');
+    select.innerHTML = '<option>Loading...</option>';
+    try {
+        const r = await fetch('/api/files/protocols');
+        const data = r.ok ? await r.json() : {files: []};
+        const files = data.files || [];
+        select.innerHTML = files.length
+            ? files.map(f => `<option value="${f}">${f}</option>`).join('')
+            : '<option value="">No protocol found</option>';
+    } catch(e) {
+        select.innerHTML = '<option value="">Error loading protocols</option>';
+    }
+
+    const animlSelect = document.getElementById('addAnalysisAnimlFile');
+    animlSelect.innerHTML = '<option>Loading...</option>';
+    try {
+        const r = await fetch('/api/files/animl_results');
+        const data = r.ok ? await r.json() : {files: []};
+        const files = data.files || [];
+        animlSelect.innerHTML = files.length
+            ? files.map(f => `<option value="${f.name}">${f.name} (${new Date(f.modified).toLocaleString()})</option>`).join('')
+            : '<option value="">No AnIML result found</option>';
+    } catch(e) {
+        animlSelect.innerHTML = '<option value="">Error loading results</option>';
+    }
+
+    new bootstrap.Modal(document.getElementById('addAnalysisModal')).show();
+}
+
+async function submitAddAnalysis() {
+    const plateId = document.getElementById('addAnalysisPlateId').value;
+    const protocolFile = document.getElementById('addAnalysisProtocol').value;
+    const sampleSetId = document.getElementById('addAnalysisSampleSet').value;
+    const plateType = document.getElementById('addAnalysisPlateType').value;
+    const errEl = document.getElementById('addAnalysisError');
+    const btn = document.getElementById('addAnalysisSubmitBtn');
+    errEl.hidden = true;
+    if (!protocolFile) { errEl.textContent = 'Select a protocol.'; errEl.hidden = false; return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Measurement in progress...';
+    try {
+        const devResp = await fetch('/api/devices');
+        const devices = devResp.ok ? await devResp.json() : [];
+        const tecan = devices.find(d => (d.id || '').toLowerCase().includes('tecan'));
+        if (!tecan) throw new Error('No Tecan device found');
+
+        const r = await fetch(`/api/devices/${encodeURIComponent(tecan.id)}/command`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                command: 'RunMeasurement',
+                parameters: {ProtocolFile: protocolFile, PlateID: plateId, SampleSetID: sampleSetId, PlateType: plateType},
+            }),
+        });
+        const result = await r.json();
+        if (!r.ok || result.status === 'error' || result.success === false) {
+            throw new Error(result.error || result.message || 'Measurement failed');
+        }
+        bootstrap.Modal.getInstance(document.getElementById('addAnalysisModal')).hide();
+        showPlate(plateId);
+    } catch(e) {
+        errEl.textContent = e.message;
+        errEl.hidden = false;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-play-fill"></i> Run measurement';
+    }
+}
+
+async function submitAttachExistingAnalysis() {
+    const plateId = document.getElementById('addAnalysisPlateId').value;
+    const animlFilename = document.getElementById('addAnalysisAnimlFile').value;
+    const protocolName = document.getElementById('addAnalysisAttachProtocolName').value;
+    const errEl = document.getElementById('addAnalysisError');
+    const btn = document.getElementById('addAnalysisSubmitBtn');
+    errEl.hidden = true;
+    if (!animlFilename) { errEl.textContent = 'Select an existing AnIML result.'; errEl.hidden = false; return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Attaching...';
+    try {
+        const r = await fetch(`/api/db/plates/${encodeURIComponent(plateId)}/attach-measurement`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({animl_filename: animlFilename, protocol_name: protocolName}),
+        });
+        const result = await r.json();
+        if (!r.ok) throw new Error(result.detail || 'Attach failed');
+        bootstrap.Modal.getInstance(document.getElementById('addAnalysisModal')).hide();
+        showPlate(plateId);
+    } catch(e) {
+        errEl.textContent = e.message;
+        errEl.hidden = false;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-link-45deg"></i> Attach';
+    }
+}
+
+function showWellDetail(wellId) {
+    if (!_currentPlateData) return;
+    const wells = (_currentPlateData.wells || []).filter(w => w.well_id === wellId);
+    const measurements = (_currentPlateData.measurements || []).filter(m => m.well_id === wellId);
+
+    let html = `<h6 class="small text-muted">Content (from the recipe)</h6>`;
+    if (wells.length) {
+        // % of well = volumetric share of each reagent over the total
+        // dispensed in THIS well (e.g. 20% A, 30% B) — the mixture's
+        // composition, not a catalog molar concentration.
+        const totalVol = wells.reduce((s, w) => s + (w.volume_ul || 0), 0);
+        html += `<div class="text-muted small mb-2">Total well volume: <strong>${totalVol || '—'} µl</strong></div>`;
+        html += `<div class="table-responsive mb-3"><table class="table table-sm mb-0">
+            <thead><tr><th>Reagent</th><th>Volume (µl)</th><th>% of well</th><th>Liquid class</th><th>Source</th></tr></thead>
+            <tbody>` + wells.map(w => {
+                const pct = totalVol > 0 && w.volume_ul != null ? (w.volume_ul / totalVol * 100) : null;
+                return `<tr>
+                    <td>${w.reagent_display_name || w.reagent_name || '—'}</td>
+                    <td>${w.volume_ul!=null ? w.volume_ul : '—'}</td>
+                    <td><strong>${pct!=null ? pct.toFixed(1)+'%' : '—'}</strong>${w.concentration_mm!=null ? `<br><small class="text-muted">${w.concentration_mm.toFixed(2)} mM</small>` : ''}</td>
+                    <td class="text-muted small">${w.liquid_class || '—'}</td>
+                    <td class="text-muted small">${w.source_well || '—'}</td>
+                </tr>`;
+            }).join('') + `</tbody></table></div>`;
+    } else {
+        html += `<p class="text-muted small">No pipetting data for this well — likely a measurement with no linked recipe record (e.g. a manual analysis).</p>`;
+    }
+
+    html += `<h6 class="small text-muted mt-2">Measurements</h6>`;
+    if (measurements.length) {
+        html += `<div class="table-responsive"><table class="table table-sm mb-0">
+            <thead><tr><th>Value</th><th>Unit</th><th>Type</th><th>λ (nm)</th><th>Cycle</th></tr></thead>
+            <tbody>` + measurements.map(m => `<tr>
+                <td><strong>${m.value!=null ? m.value.toFixed(4) : '—'}</strong></td>
+                <td>${m.unit || '—'}</td>
+                <td class="text-muted small">${m.measurement_type || '—'}</td>
+                <td class="text-muted small">${m.wavelength_nm ?? '—'}</td>
+                <td class="text-muted small">${m.cycle || 1}</td>
+            </tr>`).join('') + `</tbody></table></div>`;
+    } else {
+        html += `<p class="text-muted small">No measurement recorded for this well.</p>`;
+    }
+
+    document.getElementById('wellDetailTitle').textContent = 'Well ' + wellId;
+    document.getElementById('wellDetailBody').innerHTML = html;
+    new bootstrap.Modal(document.getElementById('wellDetailModal')).show();
+}
+
+function valueToColor(v, vMin, vMax) {
+    if (v === null || v === undefined || vMin === vMax) return '#4a90d9';
+    const t = Math.max(0, Math.min(1, (v - vMin) / (vMax - vMin)));
+    const stops = [[0,[66,133,244]],[0.33,[52,168,83]],[0.67,[251,188,4]],[1.0,[234,67,53]]];
+    for (let i = 0; i < stops.length - 1; i++) {
+        const [t0,c0] = stops[i], [t1,c1] = stops[i+1];
+        if (t >= t0 && t <= t1) {
+            const f = (t-t0)/(t1-t0);
+            return `rgb(${Math.round(c0[0]+(c1[0]-c0[0])*f)},${Math.round(c0[1]+(c1[1]-c0[1])*f)},${Math.round(c0[2]+(c1[2]-c0[2])*f)})`;
+        }
+    }
+    return '#4a90d9';
+}
+
+// ═══════════════════════════════════ RUNS & LOG TAB ═══════════════════════════════════
+const PAGE_SIZE = 25;
+let currentPage = 0;
+let totalCount = 0;
+let _currentRunId = null;
+let _searchTimer = null;
+
+function fmtDuration(s) {
+    if (s == null) return '—';
+    s = parseFloat(s);
+    if (s < 60) return s.toFixed(1) + 's';
+    var m = Math.floor(s / 60), sec = Math.round(s % 60);
+    return m + 'm ' + sec + 's';
+}
+
+function runStatusBadge(s) {
+    const cls = {completed:'badge-completed', failed:'badge-failed', cancelled:'badge-cancelled', running:'badge-running'};
+    return `<span class="badge ${cls[s]||'bg-secondary'}">${s||'—'}</span>`;
+}
+
+function debouncedSearch() {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => { currentPage = 0; loadRuns(); }, 400);
+}
+
+function clearSearch() {
+    document.getElementById('searchQuery').value = '';
+    document.getElementById('dateFrom').value = '';
+    document.getElementById('dateTo').value = '';
+    currentPage = 0;
+    loadRuns();
+}
+
+async function loadStats() {
+    try {
+        const r = await fetch('/api/db/stats');
+        if (!r.ok) return;
+        const d = await r.json();
+        document.getElementById('statTotal').textContent     = d.total_runs ?? '—';
+        document.getElementById('statCompleted').textContent = d.completed  ?? '—';
+        document.getElementById('statFailed').textContent    = d.failed     ?? '—';
+        document.getElementById('statAvgDur').textContent    = fmtDuration(d.avg_duration_seconds);
+        document.getElementById('statLastRun').textContent   = fmtDate(d.last_run_at);
+    } catch(e) { console.warn('stats error', e); }
+}
+
+function updateFilterBadge(search, dateFrom, dateTo, status) {
+    const badge = document.getElementById('activeFilterBadge');
+    const text  = document.getElementById('activeFilterText');
+    const sq    = document.getElementById('searchQuery');
+    const parts = [];
+    if (search)   parts.push(`"${search}"`);
+    if (dateFrom) parts.push(`from ${dateFrom}`);
+    if (dateTo)   parts.push(`to ${dateTo}`);
+    if (status)   parts.push(`status=${status}`);
+    if (parts.length) {
+        badge.style.display = '';
+        text.textContent = parts.join(', ');
+        sq.classList.add('border-primary');
+    } else {
+        badge.style.display = 'none';
+        text.textContent = '';
+        sq.classList.remove('border-primary');
+    }
+}
+
+async function loadRuns() {
+    const status   = document.getElementById('filterStatus').value;
+    const search   = document.getElementById('searchQuery').value.trim();
+    const dateFrom = document.getElementById('dateFrom').value;
+    const dateTo   = document.getElementById('dateTo').value;
+    const offset   = currentPage * PAGE_SIZE;
+
+    updateFilterBadge(search, dateFrom, dateTo, status);
+
+    let url = `/api/db/runs?limit=${PAGE_SIZE}&offset=${offset}`;
+    if (status)   url += `&status=${encodeURIComponent(status)}`;
+    if (search)   url += `&search=${encodeURIComponent(search)}`;
+    if (dateFrom) url += `&date_from=${encodeURIComponent(dateFrom)}`;
+    if (dateTo)   url += `&date_to=${encodeURIComponent(dateTo)}`;
+
+    clearSelection();
+    const tbody = document.getElementById('runsTable');
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div></td></tr>';
+
+    try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        totalCount = d.count;
+
+        document.getElementById('runsCount').textContent = `${d.count} run${d.count!==1?'s':''}`;
+        document.getElementById('pageInfo').textContent  = `Page ${currentPage+1} of ${Math.max(1, Math.ceil(totalCount/PAGE_SIZE))}`;
+        document.getElementById('btnPrev').disabled = currentPage === 0;
+        document.getElementById('btnNext').disabled = (offset + PAGE_SIZE) >= totalCount;
+
+        if (!d.runs || d.runs.length === 0) {
+            const emptyMsg = search ? `No runs match "<strong>${search}</strong>"` : 'No runs found';
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted py-4">${emptyMsg}</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = d.runs.map(run => {
+            const total = run.steps_total || '?';
+            const failTxt = run.steps_failed ? ` <span class="text-danger">(${run.steps_failed} failed)</span>` : '';
+            const escapedId = run.run_id.replace(/'/g, "\\'");
+            const escapedIdAttr = run.run_id.replace(/"/g, '&quot;');
+            return `<tr class="run-row" onclick="showDetail('${escapedId}')">
+                <td onclick="event.stopPropagation()"><input type="checkbox" class="form-check-input run-select" value="${escapedIdAttr}" onchange="updateExportBar()"></td>
+                <td><strong>${run.workflow_name||'—'}</strong>${run.notes ? `<br><small class="text-muted">${run.notes}</small>` : ''}</td>
+                <td class="text-nowrap">${fmtDate(run.started_at)}</td>
+                <td>${runStatusBadge(run.status)}</td>
+                <td>${fmtDuration(run.duration_seconds)}</td>
+                <td>${run.steps_completed||0}/${total}${failTxt}</td>
+                <td class="text-muted small" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${run.run_id}">${run.run_id}</td>
+                <td onclick="event.stopPropagation()"><button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="confirmDelete('${escapedId}')" title="Delete run"><i class="bi bi-trash"></i></button></td>
+            </tr>`;
+        }).join('');
+    } catch(e) {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-4">${e.message}</td></tr>`;
+    }
+}
+
+async function showDetail(runId) {
+    _currentRunId = runId;
+    switchTab('runs');
+    history.replaceState(null, '', '#runs/' + encodeURIComponent(runId));
+    const modal = new bootstrap.Modal(document.getElementById('detailModal'));
+    document.getElementById('detailTitle').textContent = 'Run: ' + runId;
+    document.getElementById('detailBody').innerHTML = '<div class="text-center py-4"><div class="spinner-border"></div></div>';
+    modal.show();
+
+    try {
+        const r = await fetch(`/api/db/runs/${encodeURIComponent(runId)}`);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        const result = d.result || {};
+        const stepResults = result.step_results || [];
+        const measurements = d.measurements || [];
+        const plates = d.plates || [];
+
+        let html = `
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-md-3"><div class="text-muted small">Status</div>${runStatusBadge(d.status)}</div>
+            <div class="col-6 col-md-3"><div class="text-muted small">Duration</div>${fmtDuration(d.duration_seconds)}</div>
+            <div class="col-6 col-md-3"><div class="text-muted small">Steps</div>${d.steps_completed||0}/${d.steps_total||'?'}</div>
+            <div class="col-6 col-md-3"><div class="text-muted small">Started</div>${fmtDate(d.started_at)}</div>
+        </div>`;
+
+        html += `
+        <div class="edit-section mb-3">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-5">
+                    <label class="form-label small text-muted mb-1">Workflow name</label>
+                    <input type="text" id="editRunName" class="form-control form-control-sm" value="${(d.workflow_name||'').replace(/"/g,'&quot;')}">
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label small text-muted mb-1">Notes</label>
+                    <input type="text" id="editRunNotes" class="form-control form-control-sm" value="${(d.notes||'').replace(/"/g,'&quot;')}" placeholder="Optional notes...">
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-sm btn-primary w-100" onclick="saveRunEdit('${runId.replace(/'/g,"\\'")}')"><i class="bi bi-check-lg"></i> Save</button>
+                </div>
+            </div>
+        </div>`;
+
+        if (stepResults.length > 0) {
+            html += `<h6 class="mt-3">Steps</h6>
+            <div class="table-responsive"><table class="table table-sm">
+            <thead><tr><th>#</th><th>Instrument</th><th>Action</th><th>Status</th><th>Time</th></tr></thead>
+            <tbody>` + stepResults.map(s => {
+                const iconCls = s.status==='completed'?'step-ok':s.status==='skipped'?'step-skip':'step-fail';
+                const icon = s.status==='completed'?'check-circle':s.status==='skipped'?'skip-forward':'x-circle';
+                return `<tr class="step-row">
+                    <td>${s.step||'—'}</td><td>${s.instrument||'—'}</td><td>${s.action||s.command||'—'}</td>
+                    <td class="${iconCls}"><i class="bi bi-${icon}"></i> ${s.status||'—'}${s.error?`<br><small class="text-danger">${s.error}</small>`:''}</td>
+                    <td class="text-nowrap text-muted small">${s.timestamp?fmtDate(s.timestamp):''}</td>
+                </tr>`;
+            }).join('') + `</tbody></table></div>`;
+        }
+
+        if (measurements.length > 0) {
+            html += `<h6 class="mt-3">Measurements (Tecan)</h6>
+            <div class="table-responsive"><table class="table table-sm">
+            <thead><tr><th>Instrument</th><th>Command</th><th>Plate</th><th>Time</th><th>AnIML</th></tr></thead>
+            <tbody>` + measurements.map(m => {
+                const animlLink = m.animl_path
+                    ? `<a href="/api/results/AnIML/${encodeURIComponent(m.animl_path.split(/[\\/]/).pop())}" class="btn btn-xs btn-outline-primary btn-sm py-0 px-1" download><i class="bi bi-download"></i></a>`
+                    : '<span class="text-muted">—</span>';
+                const plateLink = m.plate_id
+                    ? `<a href="#" onclick="showRunPlate('${m.plate_id.replace(/'/g,"\\'")}');return false;" class="font-monospace small">${m.plate_id}</a>`
+                    : '<span class="text-muted">—</span>';
+                return `<tr><td>${m.instrument||'—'}</td><td>${m.command||'—'}</td><td>${plateLink}</td>
+                    <td class="text-muted small">${fmtDate(m.executed_at)}</td><td>${animlLink}</td></tr>`;
+            }).join('') + `</tbody></table></div>`;
+        }
+
+        if (plates.length > 0) {
+            html += `<h6 class="mt-3">Plates</h6><div class="d-flex flex-wrap gap-2">` +
+                plates.map(p => `
+                <div class="card" style="min-width:200px;cursor:pointer" onclick="showRunPlate('${p.plate_id.replace(/'/g,"\\'")}')">
+                    <div class="card-body py-2 px-3">
+                        <div class="fw-bold small">${plateTitle(p)}</div>
+                        <div class="text-muted x-small">${p.plate_type||'—'}</div>
+                        <div class="d-flex gap-1 mt-1">
+                            <span class="badge bg-secondary">${p.status||'prepared'}</span>
+                            <a href="/api/db/export/plate/${encodeURIComponent(p.plate_id)}.csv"
+                               class="btn btn-xs btn-outline-secondary py-0 px-1 btn-sm" title="Export plate CSV" download
+                               onclick="event.stopPropagation()">
+                                <i class="bi bi-filetype-csv"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>`).join('') + `</div>`;
+        }
+
+        if (result.errors && result.errors.length > 0) {
+            html += `<h6 class="mt-3 text-danger">Errors</h6><ul class="list-unstyled">` +
+                result.errors.map(e => `<li><i class="bi bi-exclamation-triangle text-danger"></i> ${e}</li>`).join('') + `</ul>`;
+        }
+
+        document.getElementById('detailBody').innerHTML = html;
+    } catch(e) {
+        document.getElementById('detailBody').innerHTML = `<div class="text-danger text-center py-4">${e.message}</div>`;
+    }
+}
+
+function showRunPlate(plateId) {
+    const modalEl = document.getElementById('detailModal');
+    const modal = bootstrap.Modal.getInstance(modalEl);
+    if (modal) modal.hide();
+    switchTab('plates');
+    showPlate(plateId);
+}
+
+function exportRunJson() {
+    if (!_currentRunId) return;
+    window.open(`/api/db/export/run/${encodeURIComponent(_currentRunId)}.json`, '_blank');
+}
+
+async function confirmDelete(runId) {
+    if (!confirm(`Delete run "${runId}"?\n\nThis will also remove all instrument measurements linked to this run. Plate data is preserved.\n\nThis cannot be undone.`)) return;
+    try {
+        const r = await fetch(`/api/db/runs/${encodeURIComponent(runId)}`, {method: 'DELETE'});
+        if (r.ok) { loadRuns(); loadStats(); }
+        else { const err = await r.json().catch(() => ({detail: r.statusText})); alert('Delete failed: ' + (err.detail || r.statusText)); }
+    } catch(e) { alert('Delete failed: ' + e.message); }
+}
+
+async function confirmDeleteFromModal() {
+    if (!_currentRunId) return;
+    const modalEl = document.getElementById('detailModal');
+    const modal = bootstrap.Modal.getInstance(modalEl);
+    if (modal) modal.hide();
+    await confirmDelete(_currentRunId);
+}
+
+async function saveRunEdit(runId) {
+    const name  = document.getElementById('editRunName').value.trim();
+    const notes = document.getElementById('editRunNotes').value.trim();
+    try {
+        const r = await fetch(`/api/db/runs/${encodeURIComponent(runId)}`, {
+            method: 'PATCH', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({workflow_name: name || null, notes: notes || null}),
+        });
+        if (r.ok) { document.getElementById('detailTitle').textContent = 'Run: ' + runId; loadRuns(); }
+        else { const err = await r.json().catch(() => ({detail: r.statusText})); alert('Update failed: ' + (err.detail || r.statusText)); }
+    } catch(e) { alert('Update failed: ' + e.message); }
+}
+
+function changePage(dir) { currentPage = Math.max(0, currentPage + dir); loadRuns(); }
+
+function updateExportBar() {
+    const n = document.querySelectorAll('.run-select:checked').length;
+    const selCount = document.getElementById('selCount');
+    const exportBar = document.getElementById('exportBar');
+    if (selCount) selCount.textContent = n;
+    if (exportBar) exportBar.style.display = n > 0 ? '' : 'none';
+}
+
+function toggleSelectAll(cb) {
+    document.querySelectorAll('.run-select').forEach(el => { el.checked = cb.checked; });
+    updateExportBar();
+}
+
+function clearSelection() {
+    document.querySelectorAll('.run-select').forEach(el => { el.checked = false; });
+    const sa = document.getElementById('selectAll');
+    if (sa) sa.checked = false;
+    updateExportBar();
+}
+
+function exportSelected() {
+    const ids = [...document.querySelectorAll('.run-select:checked')].map(cb => cb.value);
+    if (!ids.length) return;
+    window.open(`/api/db/export/ai-context.json?run_ids=${ids.map(encodeURIComponent).join(',')}`, '_blank');
+}
+
+// ═══════════════════════════════════ INIT / DEEP LINKING ═══════════════════════════════════
+window.handleWebSocketMessage = window.handleWebSocketMessage || function(){};
+
+document.addEventListener('DOMContentLoaded', () => {
+    try {
+        const saved = localStorage.getItem('labos_heatmap');
+        if (saved === '0') { heatmapEnabled = false; document.getElementById('heatmapToggle').checked = false; }
+    } catch(e) {}
+
+    loadPlates();
+    loadStats();
+    loadRuns();
+
+    const hash = location.hash || '#plates';
+    const [tabPart, subId] = hash.slice(1).split('/');
+    if (tabPart === 'runs') {
+        switchTab('runs');
+        if (subId) showDetail(decodeURIComponent(subId));
+    } else {
+        switchTab('plates');
+        if (subId) showPlate(decodeURIComponent(subId));
+    }
+});
+</script>
+{% endblock %}

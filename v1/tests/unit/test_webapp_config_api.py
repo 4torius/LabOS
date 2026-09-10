@@ -39,6 +39,7 @@ def client_with_isolated_config(tmp_path, monkeypatch):
     monkeypatch.setattr(webapp_app, "BASE_DIR", tmp_path)
     config_path = tmp_path / "lab_config.yaml"
     config_path.write_text(yaml.dump(_base_config(), sort_keys=False), encoding="utf-8")
+    assert webapp_app.app is not None
     client = TestClient(webapp_app.app)
     return client, config_path
 

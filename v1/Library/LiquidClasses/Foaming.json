@@ -9,7 +9,7 @@
     "aspirate_rate": 0.3,
     "dispense_rate": 0.3,
     "blow_out": false,
-    "touch_tip": true,
+    "touch_tip": false,
     "mix_after": null,
     "air_gap": 2,
     "push_out": 3.0,

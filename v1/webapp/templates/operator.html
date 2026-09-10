@@ -167,15 +167,15 @@
                             </div>
                         </div>
                         <div class="col-6">
-                            <div class="quick-btn btn btn-outline-secondary w-100" onclick="sendTestNotification()">
-                                <i class="bi bi-send"></i>
-                                Test Notif
+                            <div class="quick-btn btn btn-outline-danger w-100" onclick="abortWorkflowQuick()">
+                                <i class="bi bi-x-octagon"></i>
+                                Abort Workflow
                             </div>
                         </div>
                         <div class="col-6">
-                            <div class="quick-btn btn btn-outline-danger w-100" onclick="sendTestTipRefill()">
-                                <i class="bi bi-exclamation-triangle"></i>
-                                Test Refill
+                            <div class="quick-btn btn btn-outline-secondary w-100" onclick="location.href='/database#runs'">
+                                <i class="bi bi-clock-history"></i>
+                                Run History
                             </div>
                         </div>
                     </div>
@@ -773,16 +773,12 @@ document.getElementById('manual-step-type').addEventListener('change', function(
 });
 
 // ── Test helpers ───────────────────────────────────────────────────────────
-function sendTestNotification() {
-    fetch('/api/operator/test-notification', { method: 'POST' })
-        .then(r => r.json()).then(() => refreshPendingActions())
-        .catch(() => addPendingAction({ id: Date.now(), title: 'Test Notification', message: 'Test of the operator system.', priority: 'info' }));
-}
-
-function sendTestTipRefill() {
-    fetch('/api/operator/test-tip-refill', { method: 'POST' })
-        .then(r => r.json()).then(() => { showToast('info', 'Sent', 'Tip refill notification sent'); refreshPendingActions(); })
-        .catch(() => addPendingAction({ id: Date.now(), title: 'Refill Tip Rack (TEST)', message: 'Replace the tiprack and confirm.', priority: 'urgent', action: 'RefillTipRack' }));
+function abortWorkflowQuick() {
+    if (!confirm('Abort the active workflow? This stops the run at the next safe point and cannot be undone.')) return;
+    fetch('/api/workflows/abort', { method: 'POST' })
+        .then(r => r.json())
+        .then(result => showToast('danger', 'Workflow', result.message || 'Abort requested'))
+        .catch(e => showToast('danger', 'Error', e.message));
 }
 
 // ── Polling & init ─────────────────────────────────────────────────────────

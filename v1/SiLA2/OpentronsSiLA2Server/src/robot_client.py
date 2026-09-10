@@ -115,21 +115,71 @@ class RobotClient:
                 f"Not connected to Opentrons robot at {self.base_url}. "
                 "The robot may be off or unreachable."
             )
-    
+
+    @property
+    def _http(self) -> httpx.AsyncClient:
+        """The active HTTP client, narrowed to non-Optional.
+
+        Raises the same error as _require_connected() if accessed before
+        connect() has run. Use this (instead of self._client directly) at
+        any call site that dereferences the client, so type checkers can
+        see it is never None here.
+        """
+        if self._client is None:
+            raise ConnectionError(
+                f"Not connected to Opentrons robot at {self.base_url}. "
+                "The robot may be off or unreachable."
+            )
+        return self._client
+
+    async def _rediscover_via_mdns(self) -> bool:
+        """Ask mDNS where the robot is now and re-point this client at it.
+
+        The switch assigns the robot's IP by DHCP, so it can move between
+        power cycles. Returns True if a *different*, reachable address was
+        found and adopted (caller should then retry the connection).
+        """
+        try:
+            from .config import discover_opentrons_via_mdns
+        except Exception:  # pragma: no cover - defensive
+            return False
+
+        loop = asyncio.get_event_loop()
+        found = await loop.run_in_executor(None, discover_opentrons_via_mdns)
+        if not found:
+            logger.warning("mDNS re-discovery found no Opentrons robot")
+            return False
+
+        new_host, new_port = found
+        if (new_host, new_port) == (self.host, self.port):
+            return False  # same place we already failed against
+
+        logger.warning(
+            f"Robot not at {self.host}:{self.port} — mDNS says {new_host}:{new_port}; switching"
+        )
+        await self.disconnect()
+        self.host, self.port = new_host, new_port
+        self.base_url = f"http://{new_host}:{new_port}"
+        return True
+
     async def connect_with_retry(
-        self, 
-        max_retries: int = 5, 
+        self,
+        max_retries: int = 5,
         retry_delay: float = 2.0,
-        on_retry: Optional[Callable] = None
+        on_retry: Optional[Callable] = None,
+        rediscover: bool = True,
     ) -> bool:
         """
         Attempt to connect with retry logic.
-        
+
         Args:
             max_retries: Maximum number of connection attempts
             retry_delay: Delay between retries in seconds
             on_retry: Optional callback called on each retry
-            
+            rediscover: If True, after all retries fail, try one mDNS
+                re-discovery (in case the switch moved the robot to a new IP)
+                and retry once against the address it reports.
+
         Returns:
             True if connected successfully, False otherwise
         """
@@ -142,12 +192,22 @@ class RobotClient:
                     return True
             except Exception as e:
                 logger.warning(f"Connection attempt {attempt + 1}/{max_retries} failed: {e}")
-                
+
             if attempt < max_retries - 1:
                 if on_retry:
                     await on_retry(attempt + 1, max_retries)
                 await asyncio.sleep(retry_delay)
-                
+
+        if rediscover and await self._rediscover_via_mdns():
+            try:
+                await self.connect()
+                health = await self.get_health()
+                if "error" not in health:
+                    logger.info(f"Connected after mDNS re-discovery ({self.base_url})")
+                    return True
+            except Exception as e:
+                logger.warning(f"Connection after mDNS re-discovery failed: {e}")
+
         logger.error(f"Failed to connect after {max_retries} attempts")
         return False
             
@@ -159,7 +219,7 @@ class RobotClient:
         """Get robot health status."""
         self._require_connected()
         try:
-            response = await self._client.get("/health")
+            response = await self._http.get("/health")
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -170,7 +230,7 @@ class RobotClient:
         """Get robot information (name, serial, version)."""
         self._require_connected()
         try:
-            response = await self._client.get("/robot/settings")
+            response = await self._http.get("/robot/settings")
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -194,7 +254,7 @@ class RobotClient:
         filename = os.path.basename(file_path)
         with open(file_path, 'rb') as f:
             files = {"files": (filename, f, "application/x-python")}
-            response = await self._client.post("/protocols", files=files)
+            response = await self._http.post("/protocols", files=files)
             
         if not response.is_success:
             raise Exception(f"Protocol upload failed: {response.status_code} - {response.text}")
@@ -221,7 +281,7 @@ class RobotClient:
         """
         self._require_connected()
         files = {"files": (filename, content.encode('utf-8'), "application/x-python")}
-        response = await self._client.post("/protocols", files=files)
+        response = await self._http.post("/protocols", files=files)
         
         if not response.is_success:
             raise Exception(f"Protocol upload failed: {response.status_code} - {response.text}")
@@ -238,7 +298,7 @@ class RobotClient:
     async def delete_protocol(self, protocol_id: str):
         """Delete a protocol from the robot."""
         try:
-            await self._client.delete(f"/protocols/{protocol_id}")
+            await self._http.delete(f"/protocols/{protocol_id}")
             logger.debug(f"Protocol deleted: {protocol_id}")
         except Exception as e:
             logger.warning(f"Failed to delete protocol {protocol_id}: {e}")
@@ -258,13 +318,13 @@ class RobotClient:
             Run ID
         """
         payload = {"data": {"protocolId": protocol_id}}
-        response = await self._client.post("/runs", json=payload)
+        response = await self._http.post("/runs", json=payload)
         
         # Handle zombie run conflict
         if response.status_code == 409:
             logger.warning("Zombie run detected, cleaning up...")
             await self._deactivate_current_run()
-            response = await self._client.post("/runs", json=payload)
+            response = await self._http.post("/runs", json=payload)
             
         if not response.is_success:
             raise Exception(f"Run creation failed: {response.status_code} - {response.text}")
@@ -278,11 +338,39 @@ class RobotClient:
         self._current_run_id = run_id
         logger.info(f"Run created: {run_id}")
         return run_id
-        
+
+    async def add_labware_definition(self, run_id: str, definition: Dict[str, Any]) -> None:
+        """
+        Register a custom labware definition against a run, before it's
+        loaded via ctx.load_labware(). Needed for any labware not already
+        known to the robot's own built-in "opentrons" catalog - without this,
+        the run fails at the first loadLabware command with a
+        FileNotFoundError (confirmed on real hardware: a custom EuroClone
+        plate that was referenced by LoadName but never registered).
+
+        Args:
+            run_id: Run ID (from create_run()) to register the definition against.
+            definition: Full Opentrons v2 labware definition dict (the same
+                shape read from Library/Labware/Reservoirs/<LoadName>.json).
+        """
+        response = await self._http.post(
+            f"/runs/{run_id}/labware_definitions", json={"data": definition}
+        )
+        if not response.is_success:
+            raise Exception(
+                f"Labware definition registration failed for run {run_id} "
+                f"(loadName={definition.get('parameters', {}).get('loadName', '?')}): "
+                f"{response.status_code} - {response.text}"
+            )
+        logger.info(
+            f"Labware definition registered: "
+            f"{definition.get('parameters', {}).get('loadName', '?')} (run {run_id})"
+        )
+
     async def _deactivate_current_run(self):
         """Deactivate any currently active run."""
         try:
-            response = await self._client.get("/runs?pageLength=1")
+            response = await self._http.get("/runs?pageLength=1")
             if response.is_success:
                 data = response.json()
                 runs = data.get("data", [])
@@ -296,7 +384,7 @@ class RobotClient:
         """Dismiss (deactivate) a run."""
         try:
             payload = {"data": {"current": False}}
-            await self._client.patch(f"/runs/{run_id}", json=payload)
+            await self._http.patch(f"/runs/{run_id}", json=payload)
             logger.info(f"Run dismissed: {run_id}")
         except Exception as e:
             logger.warning(f"Failed to dismiss run {run_id}: {e}")
@@ -324,7 +412,7 @@ class RobotClient:
         """Send an action to a run."""
         self._require_connected()
         payload = {"data": {"actionType": action}}
-        response = await self._client.post(f"/runs/{run_id}/actions", json=payload)
+        response = await self._http.post(f"/runs/{run_id}/actions", json=payload)
         if not response.is_success:
             # Must raise, not just log: callers (play_run/pause_run/stop_run)
             # otherwise report success unconditionally right after calling this,
@@ -339,7 +427,7 @@ class RobotClient:
         """Get the current status of a run."""
         self._require_connected()
         try:
-            response = await self._client.get(f"/runs/{run_id}")
+            response = await self._http.get(f"/runs/{run_id}")
             if not response.is_success:
                 return "error"
             data = response.json()
@@ -361,7 +449,7 @@ class RobotClient:
         """
         self._require_connected()
         try:
-            response = await self._client.get(
+            response = await self._http.get(
                 f"/runs/{run_id}/commands",
                 params={"cursor": 0, "pageLength": 10000}
             )
@@ -380,7 +468,7 @@ class RobotClient:
         """
         self._require_connected()
         try:
-            response = await self._client.get(f"/runs/{run_id}")
+            response = await self._http.get(f"/runs/{run_id}")
             if response.is_success:
                 return response.json()
         except Exception as e:
@@ -425,6 +513,50 @@ class RobotClient:
                     await on_status_change(status)
                 last_status = status
 
+            # Flex firmware "error recovery" state - entered on ANY unhandled
+            # command failure the robot would otherwise pause for a human to
+            # resolve via its own touchscreen (which LabOS has no UI for):
+            # liquid_presence_detection (VerifyLiquid) finding no liquid, but
+            # also e.g. a pickUpTip finding no physical tip where the
+            # software expected one (tipPhysicallyMissing - confirmed on
+            # hardware), or other hardware-detected mismatches. Not in
+            # terminal_states and doesn't contain "failed"/"stopped", so
+            # without this branch the run would sit here silently until
+            # `timeout` (default 7200s). Stop it immediately instead,
+            # matching the fail-fast behavior of the existing
+            # (Aspirate-only) VerifyLiquid mechanism - the actual cause is
+            # read from the run's own error detail below, never assumed.
+            if status == "awaiting-recovery":
+                reason = "unspecified error (no error detail available from the run)"
+                try:
+                    detail = await self.get_run_detail(run_id)
+                    errors = (detail or {}).get("data", {}).get("errors") or []
+                    if errors:
+                        first = errors[0]
+                        reason = first.get("detail") or first.get("errorType") or reason
+                    else:
+                        # data.errors is empty for a command-level failure
+                        # (confirmed on hardware: a pickUpTip that hit
+                        # tipPhysicallyMissing left data.errors=[] on the run
+                        # detail even though the command itself carries a
+                        # full error object) - fall back to the last failed
+                        # command in the run's own command log instead of
+                        # leaving `reason` at the generic default.
+                        commands_resp = await self.get_run_commands(run_id)
+                        cmds = (commands_resp or {}).get("data") or []
+                        failed = [c for c in cmds if c.get("status") == "failed" and c.get("error")]
+                        if failed:
+                            err = failed[-1]["error"]
+                            reason = err.get("detail") or err.get("errorType") or reason
+                except Exception as e:
+                    logger.warning(f"Could not fetch run detail for awaiting-recovery reason: {e}")
+                logger.warning(f"Run {run_id} entered awaiting-recovery ({reason}) - stopping")
+                try:
+                    await self.stop_run(run_id)
+                except Exception as e:
+                    logger.error(f"Failed to stop run {run_id} after awaiting-recovery: {e}")
+                return f"stopped-error-recovery: {reason}"
+
             # Check for terminal state
             if status in terminal_states or "failed" in status or "stopped" in status:
                 return status
@@ -449,7 +581,7 @@ class RobotClient:
     async def home(self):
         """Home all robot axes."""
         self._require_connected()
-        response = await self._client.post("/robot/home", json={"target": "robot"})
+        response = await self._http.post("/robot/home", json={"target": "robot"})
         if not response.is_success:
             raise RuntimeError(f"Home failed: {response.status_code} - {response.text}")
         logger.info("Robot homed")
@@ -457,7 +589,7 @@ class RobotClient:
     async def set_lights(self, on: bool) -> bool:
         """Turn robot lights on or off."""
         self._require_connected()
-        response = await self._client.post("/robot/lights", json={"on": on})
+        response = await self._http.post("/robot/lights", json={"on": on})
         if not response.is_success:
             raise RuntimeError(f"SetLights failed: {response.status_code} - {response.text}")
         return True
@@ -466,7 +598,7 @@ class RobotClient:
         """Get robot lights status."""
         self._require_connected()
         try:
-            response = await self._client.get("/robot/lights")
+            response = await self._http.get("/robot/lights")
             if response.is_success:
                 return response.json().get("on", False)
             return None
@@ -482,7 +614,7 @@ class RobotClient:
         """Get list of attached modules."""
         self._require_connected()
         try:
-            response = await self._client.get("/modules")
+            response = await self._http.get("/modules")
             if response.is_success:
                 return response.json().get("data", [])
         except Exception as e:
@@ -556,32 +688,62 @@ class RobotClient:
     #                    PARTIAL TIP TRACKING
     # ═══════════════════════════════════════════════════════════════════
     
-    async def get_actual_tip_usage(self, run_id: str) -> Dict[str, int]:
+    async def get_actual_tip_usage(self, run_id: str) -> Optional[Dict[str, int]]:
         """
         Analyze run commands to determine actual tip usage.
-        
+
         Useful for partial runs or crash recovery.
-        
+
         Args:
             run_id: Run ID to analyze
-            
+
         Returns:
-            Dict mapping rack load names to tip counts used
+            Dict mapping rack load names to tip counts actually picked up
+            (successfully) in this run - EMPTY dict is a real, meaningful
+            answer ("determined: zero tips were actually picked up", e.g. a
+            run that failed on its very first PickUpTip), NOT "couldn't
+            tell". Returns None only when the analysis itself failed (robot
+            unreachable, malformed response, ...) - the caller
+            (_update_tracker_smart) must fall back to the planned usage
+            ONLY in that case, never for a genuine zero-usage result, or
+            it reintroduces the exact bug fixed below by another path.
+
+        BUG FIX (confirmed on hardware): this used to build the labwareId ->
+        loadName map from each loadLabware command's own "result" field on
+        the /runs/{id}/commands *list* endpoint - but that endpoint never
+        populates "result" at all (the same gap already documented on
+        reconstruct_tip_mount_state's pipette_mounts parameter, in
+        tip_tracker.py), so labware_map was ALWAYS empty and this function
+        ALWAYS returned {} regardless of what actually happened, for every
+        partial/failed run ever. Since _update_tracker_smart() only reads
+        "actual" usage from here for a non-succeeded run and falls back to
+        the full PLANNED usage whenever this comes back empty, that meant a
+        run that failed on its very first PickUpTip (0 tips actually taken)
+        still had its full planned tip count charged to the tracker -
+        confirmed by a real run (label DA_hydrogel_96_combinations_05,
+        pickUpTip on MyTips_50 well A1 failed with tipPhysicallyMissing/"No
+        Tip Detected", 0 tips ever picked up) whose archived summary shows
+        planned_tip_usage {"MyTips_50": 4, "MyTips_1000": 1} charged in full
+        despite the run stopping at its first, failed pickup.
+
+        Fixed the same way reconstruct_tip_mount_state's mapping is sourced:
+        from get_run_detail()'s data.labware (confirmed to carry id/loadName
+        for every loaded labware, unlike the commands list), not from
+        anything on the individual commands.
         """
         self._require_connected()
         try:
+            detail = await self.get_run_detail(run_id)
+            labware_list = (detail or {}).get("data", {}).get("labware", [])
+            labware_map = {
+                lw["id"]: lw["loadName"]
+                for lw in labware_list
+                if lw.get("id") and "tip" in (lw.get("loadName") or "").lower()
+            }
+
             data = await self.get_run_commands(run_id)
             commands = data.get("data", []) if data else []
-            
-            # Build labware map: labwareId -> loadName
-            labware_map = {}
-            for cmd in commands:
-                if cmd.get("commandType") == "loadLabware":
-                    labware_id = cmd.get("result", {}).get("labwareId", "")
-                    load_name = cmd.get("params", {}).get("loadName", "")
-                    if labware_id and "tip" in load_name.lower():
-                        labware_map[labware_id] = load_name
-                        
+
             # Count successful pickUpTip commands
             usage = {}
             for cmd in commands:
@@ -590,9 +752,9 @@ class RobotClient:
                     if labware_id in labware_map:
                         rack = labware_map[labware_id]
                         usage[rack] = usage.get(rack, 0) + 1
-                        
+
             return usage
-            
+
         except Exception as e:
             logger.error(f"Failed to analyze tip usage: {e}")
-            return {}
+            return None

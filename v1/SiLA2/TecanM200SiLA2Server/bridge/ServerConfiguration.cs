@@ -21,6 +21,13 @@ namespace TecanSiLA2Server
         // Paths
         public string ProtocolsPath { get; set; } = "";
         public string ResultsPath { get; set; } = "";
+
+        // Piastra->{file,range} lookup used to override the plate type
+        // hardcoded in a .mdfx protocol (see PlateTypeLibrary.cs). Empty by
+        // default: RunMeasurement's PlateType parameter stays a no-op (the
+        // .mdfx's own hardcoded plate is used) unless this points at a real
+        // file.
+        public string PlateTypesPath { get; set; } = "";
         
         // Connection
         public string DefaultConnectionString { get; set; } = "";
@@ -54,6 +61,13 @@ namespace TecanSiLA2Server
                 ResultsPath = Path.Combine(basePath, "Results");
             else if (!Path.IsPathRooted(ResultsPath))
                 ResultsPath = Path.Combine(basePath, ResultsPath);
+
+            // Default: alongside the .mdfx protocols themselves, so the lab
+            // manages/backs up both together.
+            if (string.IsNullOrEmpty(PlateTypesPath))
+                PlateTypesPath = Path.Combine(ProtocolsPath, "PlateTypes.json");
+            else if (!Path.IsPathRooted(PlateTypesPath))
+                PlateTypesPath = Path.Combine(basePath, PlateTypesPath);
         }
         
         /// <summary>
