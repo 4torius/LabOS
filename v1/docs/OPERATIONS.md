@@ -141,6 +141,17 @@ and equally consequential.
 
 ## Troubleshooting
 
+### A command that used to exist has disappeared from the dashboard
+
+An instrument's commands come from the server that is *running*, not from the
+files on disk. After editing a feature definition and regenerating, the server
+must be restarted before the new commands appear — and until it is, the old
+ones are what everything sees.
+
+```bash
+python labos.py instruments        # what the running servers actually offer
+```
+
 ### Server shows "offline" in the dashboard
 1. `python labos.py status` — it names the address it tried
 2. Check the server's terminal/process is still running
@@ -153,6 +164,25 @@ and equally consequential.
 1. Verify the robot is powered and reachable: `ping <robot_ip from config.yaml>`
 2. Check `SiLA2/OpentronsSiLA2Server/config.yaml` → `robot.ip`
 3. Check the robot's own touchscreen for an error state
+
+### Tecan: `Connect` fails, but iControl connects fine
+
+That combination is the symptom, not a contradiction: **iControl takes exclusive
+ownership of the USB connection**, and does not reliably release it on close.
+If it has been opened at any point since the Tecan server started, the bridge
+cannot get the instrument.
+
+1. Close iControl (and Magellan) completely.
+2. Restart the Tecan server, so the bridge re-enumerates USB devices. The
+   bridge caches nothing across restarts, but the SDK's device enumeration
+   happens when it connects.
+3. Only then check power and cable.
+
+A useful distinction while reading the error: if the dashboard shows the Tecan
+**online** and its properties read (`IsConnected: false`,
+`OperationalStatus: Disconnected`), the SiLA2 server is fine and answering. The
+failure is strictly between the bridge and the instrument — nothing to do with
+the network, the orchestrator or the workflow.
 
 ### Tecan: bridge not responding
 1. Check Task Manager for `TecanSiLA2Server.exe` — if absent, the Python server's health monitor should auto-restart it within seconds (with backoff)

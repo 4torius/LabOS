@@ -150,6 +150,7 @@ This is the SQLite-backed store behind the unified **Database** page (`/database
 | GET | `/api/results/{fmt}/{filename}` | Download a raw result file |
 | GET | `/api/results/{fmt}/{filename}/view` | Inline text view |
 | GET | `/api/files/animl_results` | List `.animl` files |
+| GET | `/api/properties` | Every instrument property value currently known, optionally `?instrument_id=`. Values are pushed to the server by the instruments; this is the snapshot a page reads on load instead of firing one request per property |
 | GET | `/api/images` | Deck photos taken with the robot's camera (`CaptureImage`, or a `TakeSnapshot` recipe step) |
 | GET | `/api/images/{filename}` | One image. Shown in **Results → Deck photos** |
 | GET | `/api/results/animl/{filename}/parse` | Parse an AnIML file into plate-heatmap data |
@@ -170,6 +171,19 @@ All messages are JSON with a `type` field.
 **`workflow_complete`** / **`workflow_error`** — terminal events with `steps_completed`/`steps_failed` and, on error, `failed_step`/`error`.
 
 **`device_update`** — instrument status change (`idle`/`running`/`error`/`offline`).
+
+**`property_update`** — an instrument published a new value for one of its
+observable properties. Pushed by the instrument, not polled for:
+
+```json
+{ "type": "property_update", "instrument_id": "opentrons",
+  "feature": "WorkflowAPI", "property": "Status",
+  "value": "{\"state\": \"running\", \"run_id\": \"abc\"}",
+  "source": "subscription" }
+```
+
+`source` is `subscription` when the instrument pushed it and `poll` when the
+property is not observable and had to be read.
 
 **`manual_intervention`** — a `RequestOperatorTask`-style step is waiting; drives both the Operator page's Pending Actions list and any active notification toast.
 

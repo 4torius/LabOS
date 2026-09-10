@@ -338,18 +338,52 @@ consolidating something, and each was live:
 
 ---
 
+## Phase 12 — the two deferred items, and a deck that tells the truth ✅
+
+Both items listed below as "not done" were completed on 2026-09-10.
+
+**Inline JavaScript extracted.** Three shared modules under
+`webapp/static/js/`: `labos-core.js` (escaping, fetch with real error messages,
+formatting, toasts, the page log), `labos-ws.js` (one reconnecting socket with
+per-type subscriptions, replacing a 40-line if/else chain every page shared
+whether it cared or not), `labos-params.js` (parameter forms, superseding
+param-form-shared.js). Two live bugs fell out: the websocket heartbeat called
+`send()` unguarded on a timer, throwing every 30 seconds for as long as the
+socket was down; and simultaneous toasts rendered exactly on top of each other.
+
+The concern that stopped this before — no test can prove a refactor of
+untested UI code — is answered as far as it can be without a browser:
+`tests/unit/test_frontend_assets.py` verifies every module and every inline
+block is structurally sound (balanced brackets, no unterminated literal, a
+scanner that understands nested template literals and regex-versus-division),
+which is precisely the failure mode string surgery on templates produces and
+which turns into a blank page nothing else would catch.
+
+**Observable properties are subscribed to.** `src/property_watch.py` subscribes
+to every observable property of every instrument and pushes changes over the
+websocket; unobservable ones are read on a slow timer. `GET /api/properties`
+returns everything already known for a page loading mid-session.
+
+**And the pickers now describe the real deck.** `MoveLabware` could not work:
+its labware picker listed six invented load names matching nothing Opentrons
+knows, and its destination picker listed the discovered *instruments*, because
+the parameter is called `NewLocation`. `src/deck.py` answers both from the
+active hardware config, the move is validated before the gripper starts, and
+the config is rewritten afterwards — otherwise it lies from the moment a plate
+moves.
+
+**`CaptureTimelapse`** answers "can it record video": it cannot, because every
+frame travels base64-encoded through the run log, which is fine for a
+photograph and impractical for a clip. A timelapse is what the transport
+supports, in one run so the robot homes once.
+
+---
+
 ## Not done, and why
 
-- **Extracting the ~7,000 lines of inline JavaScript** from the Jinja
-  templates into modules. Real debt, and worth doing. It is pure refactor: no
-  behaviour changes, no test can prove it, and every regression lands directly
-  in front of an operator. It wants a browser and a person clicking, which this
-  pass did not have. The duplicated *logic* is already shared
-  (`param-form-shared.js`); what remains is layout code.
-- **Observable-property subscriptions in the orchestrator.** The properties are
-  declared observable and the servers push on every state change, but
-  `src/client.py` reads them one-shot. Subscribing would let the dashboard drop
-  its refresh entirely.
+- **The remaining inline JavaScript.** The shared helpers are extracted; what
+  is left in each template is that page's own layout code, which has no second
+  copy to drift from. Moving it out too would be motion without benefit.
 - **Verifying the camera against the robot.** The protocol fallback homes the
   robot, which needs someone at the bench. The HTTP path and the `/dev/video2`
   device node are both unverified on this particular Flex, both are one config

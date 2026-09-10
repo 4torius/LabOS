@@ -28,6 +28,31 @@ have several that disagreed. Adding a second is a regression, not a shortcut:
 | Matching an instrument name | `src/resolver.py::resolve()` — no substring matching anywhere else |
 | Ordering workflow steps | `src/workflow.py::topological_waves()` |
 | "0 or null means unlimited" | `src/settings.py::normalize_timeout()` |
+| What is on the deck | `src/deck.py` — never a hardcoded labware or slot list |
+| Front-end helpers | `webapp/static/js/labos-*.js` — not a copy in a template |
+
+### Front-end
+
+The templates carry a lot of inline JavaScript. Anything *shared* has been
+pulled out into `webapp/static/js/`:
+
+| Module | What belongs in it |
+|---|---|
+| `labos-core.js` | escaping, `fetchJson`, formatting, toasts, the page log |
+| `labos-ws.js` | the one websocket. `LabOS.ws.on('workflow_progress', fn)` |
+| `labos-params.js` | rendering a command's parameters as a form |
+
+Two rules, both learned the hard way. **Escape anything that came from a
+server, a file name or an operator** before concatenating it into HTML —
+`LabOS.escapeHtml` for text, `LabOS.escapeAttr` inside an attribute. And **never
+offer a choice the system cannot honour**: a picker's options come from
+discovery, from `Library/`, or from the active hardware config. Hardcoded lists
+of instruments, labware and deck slots have all been removed for offering
+things that do not exist, and a test now guards each one.
+
+There is no JS test runner here. `tests/unit/test_frontend_assets.py` checks
+what can be checked without a browser: that every module and every inline block
+is structurally sound, and that the removed affordances stay removed.
 
 The mobile robot's SiLA2 server is **not part of this repository** — its real deployment lives entirely on the remote Linux host. See [ARCHITECTURE.md](ARCHITECTURE.md#mobile-robot-current-status).
 

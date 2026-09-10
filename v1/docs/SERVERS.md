@@ -80,7 +80,7 @@ Descriptions beginning **MOVES HARDWARE** physically move the robot.
 
 | Command | Parameters | Description |
 |---------|-----------|--------------|
-| `MoveLabware` (obs) | `LabwareName`, `NewLocation`, `UseGripper` | MOVES HARDWARE. Move labware between slots with the gripper |
+| `MoveLabware` (obs) | `LabwareName`, `NewLocation`, `UseGripper` | MOVES HARDWARE. Move labware with the gripper — see below |
 | `SetModuleTemperature` (obs) | `ModuleName`, `Celsius`, `WaitForTemperature` | MOVES HARDWARE. `Celsius: 0` deactivates heating |
 | `ShakeModule` (obs) | `ModuleName`, `RPM`, `DurationSeconds` | MOVES HARDWARE. Latch must be closed; `DurationSeconds: 0` stops |
 | `SetModuleLatch` | `ModuleName`, `Open` | MOVES HARDWARE. Closed before shaking, open before the gripper touches the plate |
@@ -97,6 +97,7 @@ Descriptions beginning **MOVES HARDWARE** physically move the robot.
 | Command | Parameters | Description |
 |---------|-----------|--------------|
 | `CaptureImage` (obs) | `Label`, `AllowRobotMotion` | Photograph the deck — see below |
+| `CaptureTimelapse` (obs) | `Count`, `IntervalSeconds`, `Label`, `AllowRobotMotion` | MOVES HARDWARE. A series of photographs in one run — see below |
 
 ### `RunSteps`: atomic control without a recipe file
 
@@ -119,6 +120,34 @@ recipe file. It runs against the currently active HAL, exactly like
 `MoveLabware`, `SetModuleTemperature`, `ShakeModule` and `SetModuleLatch` are
 thin, well-named wrappers over the same mechanism, for the operations common
 enough to deserve their own entry in the workflow builder.
+
+### `MoveLabware`: what it offers, and what it records
+
+Both pickers come from the **active hardware config**, not from a list typed
+into the UI:
+
+- **Labware Name** — the labware that config declares, shown as what it is and
+  where it currently sits (`TargetPlate — Target plate (slot D2)`). Modules and
+  the trash bin are excluded: they are bolted to the deck.
+- **New Location** — the slots nothing is standing in, including the column-4
+  staging area, plus any module on the deck. `move_labware()` accepts a module
+  as a destination, and the generated protocol resolves it by its logical name.
+
+The move is checked **before the gripper starts**: unknown labware, or a
+destination something else already occupies, is refused with the list of what
+is actually available. Both used to fail deep inside the generated protocol,
+after the run had begun and the robot had homed.
+
+**After a successful move the hardware config is rewritten** with the new
+position. Without that it lies from the moment a plate moves — it still claims
+the labware is in the slot it started in, so the next recipe generates
+`load_labware(..., "D2")` for a plate that is now somewhere else, and the deck
+the operator sees stops matching the deck the software believes in. A
+destination that is a module is recorded as `OnModule`, which the protocol
+generator already understands (it loads such labware with
+`module.load_labware()`). If the move succeeds but the config cannot be
+updated, the response says so explicitly rather than reporting a clean success
+over a config that is now wrong.
 
 ### `CaptureImage`: the on-board camera
 
@@ -154,6 +183,29 @@ If capture produces no frame, `device` is the value to check: list the robot's
 video devices over SSH with `ls /dev/video*`. The HTTP path and the exact
 device node have not been verified against this particular Flex — both are one
 config value away, and the command reports precisely which path it used.
+
+### `CaptureTimelapse`: what you get instead of video
+
+**The robot cannot send back a video.** A protocol executes *on* the robot, and
+the only channel to the orchestrator is the run log, where each frame travels
+base64-encoded. That is fine for one photograph — a JPEG is a couple of hundred
+kilobytes — and impractical for the megabytes of a clip.
+
+A timelapse is the form this transport supports, and for watching a gel set or
+a plate fill it is the more useful one anyway: frames at chosen moments, each a
+full-resolution still, rather than a low-bitrate video of a mostly-static deck.
+
+```
+CaptureTimelapse(Count=12, IntervalSeconds=300, Label="curing", AllowRobotMotion=true)
+```
+
+All frames come from **one** protocol run, so the robot homes once at the start
+rather than once per photograph. Count is capped at 240. The frames land in
+`Results/Images/` alongside single captures and appear in the same gallery,
+named so they sort in order.
+
+The same thing can be composed by hand with `RunSteps` — a `TakeSnapshot` and a
+`Delay` per frame — which is what this command generates.
 
 ### Safety features (in `src/server.py`, not exposed as commands)
 
@@ -294,6 +346,27 @@ bridge:
 instrument:
   connection_string: "usb"   # "usb" (default), or "sim"/"simulator" for simulation mode
 ```
+
+### When `Connect` fails
+
+The bridge reports `ConnectionFailed`, and the server adds what that actually
+means, in the order it is usually true:
+
+1. **iControl (or Magellan) is open, or was opened since the server started.**
+   It takes exclusive ownership of the USB connection and does not reliably
+   release it on close. This is by far the most common cause. Close it, then
+   restart the Tecan server so the bridge re-enumerates.
+2. **The bridge started before the instrument finished powering up.** The SDK
+   enumerates USB devices when it connects; restarting the Tecan server is
+   enough.
+3. The instrument is genuinely off, unplugged, or on a USB port Windows has
+   suspended.
+
+A useful distinction when reading the error: if the *server* answered the call
+at all — the dashboard shows it online, its properties read — then the SiLA2
+side is fine and the failure is strictly between the bridge and the instrument.
+`IsConnected: false` with `OperationalStatus: Disconnected` is exactly that
+state.
 
 ### Bridge binary is up to date
 

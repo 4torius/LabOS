@@ -117,6 +117,25 @@ Used by LabCore, discovery, workflow validation and the device-command route.
 Capability lookup (`instruments_with_command("RefillTipRack")`) covers the cases
 where the right question is "whoever can do X", not "the instrument named Y".
 
+### Deck state (`deck.py`)
+
+What is on the deck right now, per the active hardware config: the labware it
+declares, the slots it leaves free, the modules bolted to it. This is what the
+labware and destination pickers offer. Read-only — the Opentrons server owns
+*writing* the config, because it is the process that knows a move happened.
+
+### Property watching (`property_watch.py`)
+
+Subscribes to every observable property of every discovered instrument and
+reports each change once. Properties that cannot be subscribed to are read on a
+slow timer. The dashboard used to poll: four instruments times six properties
+every few seconds, to learn that nothing had happened.
+
+Two things it has to get right — the sila2 library delivers values on its own
+executor thread, so every callback is marshalled back onto the asyncio loop
+before touching anything shared; and a subscription dies *silently* when its
+server restarts, so dead ones are noticed and re-established.
+
 ### LabCore (`lab_core.py`)
 
 `LabCore` is the central singleton (`get_lab_core()`) that owns the registry and the workflow executor, shared between the CLI and the web app. It starts discovery, and routes REST/WebSocket requests to the appropriate subsystem. `execute_command()` applies the configured command timeout (`workflow.default_timeout` from `lab_config.yaml`, `0`/`null` = unlimited).
@@ -253,6 +272,8 @@ v1/
 ├── src/                     # Core orchestration code
 │   ├── settings.py          # THE reader of lab_config.yaml (typed, cached)
 │   ├── resolver.py          # THE instrument-name matcher
+│   ├── deck.py              # What is on the deck, per the active HAL
+│   ├── property_watch.py    # Subscribed property values, not polled
 │   ├── lab_core.py          # LabCore singleton, discovery→instrument mapping
 │   ├── discovery.py         # PnP discovery engine (bootstrap + mDNS)
 │   ├── workflow.py          # DAG executor: waves, handlers, real abort
@@ -272,7 +293,9 @@ v1/
 │
 ├── webapp/                  # FastAPI web application
 │   ├── app.py                # App shell, page routes, WebSocket, config editor
-│   └── routes/                # batch, workflows, instruments, operator, hardware, db, plates
+│   ├── routes/               # batch, workflows, instruments, operator, hardware, db
+│   └── static/js/            # labos-core (helpers), labos-ws (one socket),
+│                             #   labos-params (parameter forms)
 │
 ├── Library/                 # User-editable assets
 │   ├── Workflows/            # JSON workflow definitions
