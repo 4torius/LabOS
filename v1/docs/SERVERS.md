@@ -380,14 +380,25 @@ Each keyword picks a different SDK connection *method*, not just a different
 string. They used to all funnel through `LastConnection` with a token appended,
 which is why `dialog` and `last` behaved alike.
 
-| Value | Method | What it does |
+| Value | Methods tried, in order | What it does |
 |---|---|---|
 | *(empty)* | — | Uses `instrument.connection_string` from config.yaml |
-| `usb` | `LastConnection`, then `Manually` | The stored connection; if that finds nothing, a fresh USB scan. **This is what recovers a reader moved to another port**, automatically |
+| `usb` | `LastConnection` → `Manually` | The stored connection; if it matched nothing, a fresh USB scan. Both silent, so it is **safe unattended**, and it recovers a moved reader on its own |
+| `ask` | `LastConnection` → `Manually` → `UserDialog` | As `usb`, and if the reader still is not found, the selection window. **Needs somebody at the machine** — the call waits until the window is answered |
+| `dialog` | `UserDialog` | The selection window straight away |
 | `last` | `LastConnection` | The stored connection only, no fallback |
-| `dialog` | `UserDialog` | Opens the instrument-selection window on the lab PC. Needs someone in front of it; the choice becomes the new stored connection |
 | `sim` | `Manually`, `porttype=SIM` | The Tecan simulator |
 | `any` | `Manually`, `porttype=USB\|SIM` | Whichever answers first — may pick the simulator |
+
+**No default chain can open a window.** A modal dialog on the lab PC does not
+fail: it waits, and a workflow running overnight waits with it. Escalating to
+the picker is opt-in, which is what `ask` is for.
+
+Does `LastConnection` not already show the picker by itself? It appears to,
+when *several* instruments match — but not when none does, which is the case a
+stale stored port produces. There is nothing to choose between, so it simply
+returns nothing. That is why the escalation is explicit rather than relied
+upon.
 
 The empty string is deliberately still valid: it is the documented default, and
 it is what `Simple_PlateRead.workflow.json` sends. That is why this parameter is

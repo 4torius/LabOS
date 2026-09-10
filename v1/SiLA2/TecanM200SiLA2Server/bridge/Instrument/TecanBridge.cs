@@ -477,33 +477,43 @@ namespace TecanSiLA2Server.Instrument
         /// </summary>
         private struct ConnectionPlan
         {
-            public InstrumentConnectionMethod Method;
+            /// <summary>Methods to try, in order, until one finds the instrument.</summary>
+            public InstrumentConnectionMethod[] Methods;
             public string ConnString;
-            /// <summary>Retry with a fresh enumeration if Method finds nothing.</summary>
-            public bool AllowEnumerationFallback;
             public string Explanation;
         }
 
         /// <summary>
-        /// Map a keyword onto a real SDK connection method and string.
+        /// Map a keyword onto the connection methods to try, in order.
         /// </summary>
         /// <remarks>
         /// These keywords used to differ only in the connection *string* while
         /// every one of them was passed to InstrumentConnectionMethod.LastConnection.
         /// So "dialog" and "last" were the same strategy with a different token
         /// appended, and the method that decides the whole approach never
-        /// varied. Each keyword now selects the method that actually
-        /// implements it.
+        /// varied.
         ///
         /// The methods the SDK exposes (Tecan.At.Instrument.Common):
         ///   LastConnection            replay the stored connection - the port
         ///                             the reader was on last time. Fast, and
-        ///                             wrong as soon as it is moved.
+        ///                             wrong as soon as it is moved. It appears
+        ///                             to show the picker when SEVERAL
+        ///                             instruments match, but not when none
+        ///                             does: a stale stored port matches
+        ///                             nothing, so there is nothing to ask
+        ///                             about and it simply fails. That is why
+        ///                             the escalation below is explicit rather
+        ///                             than relied upon.
         ///   Manually                  connect from the given connection string,
         ///                             enumerating rather than replaying.
         ///   UserDialog                show the instrument-selection window.
         ///   UserDialogMinimalConnect  the same, minimal handshake.
         ///   EVOware / EVOlyzer / Magellan   connect as those applications do.
+        ///
+        /// Nothing that can open a window is ever in a default chain. A modal
+        /// dialog on the lab PC does not fail - it waits, forever, and a
+        /// workflow running overnight waits with it. Escalating to the picker
+        /// is opt-in ("ask"), for when somebody is actually at the machine.
         /// </remarks>
         private ConnectionPlan ResolveConnection(string connectionString)
         {
@@ -511,42 +521,56 @@ namespace TecanSiLA2Server.Instrument
 
             if (key == "" || key == "default" || key == "usb")
             {
-                // The everyday path: try the stored connection first because it
-                // is quick, and fall back to enumerating when the reader has
-                // been moved to a different USB port.
+                // The everyday path. Stored connection first because it is
+                // quick, then a fresh enumeration, which is what recovers a
+                // reader that has been moved to a different USB port. Both are
+                // silent, so this is safe to run unattended.
                 return new ConnectionPlan
                 {
-                    Method = InstrumentConnectionMethod.LastConnection,
+                    Methods = new[]
+                    {
+                        InstrumentConnectionMethod.LastConnection,
+                        InstrumentConnectionMethod.Manually,
+                    },
                     ConnString = "porttype=USB, type=READER",
-                    AllowEnumerationFallback = true,
-                    Explanation = "stored connection, falling back to a fresh USB enumeration",
+                    Explanation = "stored connection, then a fresh USB scan",
+                };
+            }
+
+            if (key == "ask" || key == "interactive" || key == "recover")
+            {
+                // Everything the default tries, and if the instrument still is
+                // not found, the picker. Only for someone at the machine.
+                return new ConnectionPlan
+                {
+                    Methods = new[]
+                    {
+                        InstrumentConnectionMethod.LastConnection,
+                        InstrumentConnectionMethod.Manually,
+                        InstrumentConnectionMethod.UserDialog,
+                    },
+                    ConnString = "porttype=USB, type=READER",
+                    Explanation = "stored connection, a fresh scan, then the picker",
                 };
             }
 
             if (key == "last" || key == "usb_auto" || key == "lastconnected")
             {
-                // An explicit request for the stored connection: no fallback,
-                // because the caller asked for this specific behaviour.
                 return new ConnectionPlan
                 {
-                    Method = InstrumentConnectionMethod.LastConnection,
+                    Methods = new[] { InstrumentConnectionMethod.LastConnection },
                     ConnString = "porttype=USB, type=READER",
-                    AllowEnumerationFallback = false,
                     Explanation = "the stored connection only",
                 };
             }
 
             if (key == "dialog" || key == "usb_dialog" || key == "select")
             {
-                // Opens a window on the machine running the bridge, so it needs
-                // somebody in front of it. It is the manual recovery path: the
-                // selection is recorded as the new stored connection.
                 return new ConnectionPlan
                 {
-                    Method = InstrumentConnectionMethod.UserDialog,
+                    Methods = new[] { InstrumentConnectionMethod.UserDialog },
                     ConnString = "porttype=USB, type=READER",
-                    AllowEnumerationFallback = false,
-                    Explanation = "the instrument-selection dialog (needs someone at the machine)",
+                    Explanation = "the picker, straight away (needs someone at the machine)",
                 };
             }
 
@@ -555,9 +579,8 @@ namespace TecanSiLA2Server.Instrument
                 // A simulator has no meaningful stored connection to replay.
                 return new ConnectionPlan
                 {
-                    Method = InstrumentConnectionMethod.Manually,
+                    Methods = new[] { InstrumentConnectionMethod.Manually },
                     ConnString = "porttype=SIM, type=READER",
-                    AllowEnumerationFallback = false,
                     Explanation = "the Tecan simulator",
                 };
             }
@@ -566,9 +589,8 @@ namespace TecanSiLA2Server.Instrument
             {
                 return new ConnectionPlan
                 {
-                    Method = InstrumentConnectionMethod.Manually,
+                    Methods = new[] { InstrumentConnectionMethod.Manually },
                     ConnString = "porttype=USB|SIM, type=READER",
-                    AllowEnumerationFallback = false,
                     Explanation = "USB or simulator, whichever answers first",
                 };
             }
@@ -576,9 +598,8 @@ namespace TecanSiLA2Server.Instrument
             // A raw SDK connection string, passed through untouched.
             return new ConnectionPlan
             {
-                Method = InstrumentConnectionMethod.LastConnection,
+                Methods = new[] { InstrumentConnectionMethod.LastConnection },
                 ConnString = connectionString ?? "",
-                AllowEnumerationFallback = false,
                 Explanation = "a custom connection string",
             };
         }
@@ -589,46 +610,55 @@ namespace TecanSiLA2Server.Instrument
             {
                 var plan = ResolveConnection(connectionString);
                 _logger.LogInformation(
-                    "Connecting via {Method} using '{ConnStr}' -- {Explanation}",
-                    plan.Method, plan.ConnString, plan.Explanation);
+                    "Connecting using '{ConnStr}' -- {Explanation}",
+                    plan.ConnString, plan.Explanation);
 
-                if (TryConnect(plan.Method, plan.ConnString))
+                for (int i = 0; i < plan.Methods.Length; i++)
                 {
-                    return true;
-                }
+                    var method = plan.Methods[i];
 
-                // LastConnection replays the port the reader was on the last
-                // time something connected to it. Windows creates a separate
-                // device instance per physical port, so moving the instrument
-                // invalidates that record: the reader is present and powered,
-                // iControl still connects to it, and this does not. Manually
-                // connects from the string instead, and finds it wherever it is.
-                //
-                // Only ever a fallback, so a working setup takes the same path
-                // it always did, and the case this rescues previously just
-                // returned an error.
-                if (plan.AllowEnumerationFallback)
-                {
-                    _logger.LogWarning(
-                        "The stored connection matched no instrument. Retrying with a fresh " +
-                        "enumeration -- this is what recovers a reader that has been moved to " +
-                        "a different USB port.");
-
-                    if (TryConnect(InstrumentConnectionMethod.Manually, plan.ConnString))
+                    if (i > 0)
                     {
-                        _logger.LogInformation(
-                            "Connected after a fresh enumeration: the reader is on a different " +
-                            "USB port than the stored connection expected.");
+                        _logger.LogWarning(
+                            "{Previous} found no instrument; escalating to {Next}.",
+                            plan.Methods[i - 1], method);
+
+                        if (method == InstrumentConnectionMethod.UserDialog)
+                        {
+                            _logger.LogWarning(
+                                "A selection window is opening on the machine running the " +
+                                "bridge. This call blocks until somebody answers it.");
+                        }
+                    }
+
+                    if (TryConnect(method, plan.ConnString))
+                    {
+                        if (i > 0)
+                        {
+                            _logger.LogInformation(
+                                "Connected via {Method}. The stored connection was stale -- " +
+                                "usually because the reader is on a different USB port than " +
+                                "the last time something connected to it.", method);
+                        }
                         return true;
                     }
                 }
 
                 UpdateStatus("Error", "Connection failed - no instrument found");
-                _logger.LogError("Failed to connect - no reader found via {Method}. Check that:", plan.Method);
+                _logger.LogError(
+                    "Failed to connect - no reader found after trying {Methods}. Check that:",
+                    string.Join(", ", plan.Methods));
                 _logger.LogError("  1. Tecan M200 Pro is powered ON");
                 _logger.LogError("  2. USB cable is connected");
                 _logger.LogError("  3. iControl/Magellan is closed - they hold the USB connection exclusively");
                 _logger.LogError("  4. Tecan USB drivers are installed");
+                if (!plan.Methods.Contains(InstrumentConnectionMethod.UserDialog))
+                {
+                    _logger.LogError(
+                        "  Then, with somebody at the machine: Connect with ConnectionString " +
+                        "'ask' to end with the instrument-selection window, or 'dialog' to go " +
+                        "straight to it.");
+                }
                 return false;
             }
             catch (Exception ex)

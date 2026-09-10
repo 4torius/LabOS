@@ -14,6 +14,7 @@ sends. A dropdown is a UI affordance; narrowing the protocol to get one costs
 more than it gives.
 """
 import json
+import re
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -142,7 +143,7 @@ class TestTecanConnectionModes:
 
 
 class TestConnectionMethodsAreDistinct:
-    """Each keyword selects a real SDK connection method.
+    """Each keyword selects a real chain of SDK connection methods.
 
     They used to differ only in the connection *string* while every one of them
     was passed to InstrumentConnectionMethod.LastConnection — so "dialog" and
@@ -154,16 +155,45 @@ class TestConnectionMethodsAreDistinct:
         return (V1_DIR / "SiLA2" / "TecanM200SiLA2Server" / "bridge" / "Instrument"
                 / "TecanBridge.cs").read_text(encoding="utf-8")
 
+    def _plan(self, keyword):
+        """The Methods array the C# resolver builds for one keyword."""
+        source = self.source
+        marker = f'key == "{keyword}"'
+        start = source.index(marker)
+        end = source.index("ConnString =", start)
+        return re.findall(r"InstrumentConnectionMethod\.(\w+)", source[start:end])
+
     @pytest.mark.parametrize("method", ["LastConnection", "Manually", "UserDialog"])
     def test_more_than_one_method_is_used(self, method):
         assert f"InstrumentConnectionMethod.{method}" in self.source
 
-    def test_the_default_falls_back_to_a_fresh_enumeration(self):
-        """This is what recovers a reader moved to another USB port."""
-        assert "AllowEnumerationFallback = true" in self.source
+    def test_the_default_tries_the_stored_connection_then_a_fresh_scan(self):
+        """The fresh scan is what recovers a reader moved to another USB port."""
+        assert self._plan("usb") == ["LastConnection", "Manually"]
 
-    def test_the_fallback_only_runs_after_the_fast_path_failed(self):
+    def test_ask_ends_with_the_picker(self):
+        assert self._plan("ask") == ["LastConnection", "Manually", "UserDialog"]
+
+    def test_last_is_the_stored_connection_alone(self):
+        assert self._plan("last") == ["LastConnection"]
+
+    def test_dialog_goes_straight_to_the_picker(self):
+        assert self._plan("dialog") == ["UserDialog"]
+
+    def test_no_default_chain_can_open_a_window(self):
+        """A modal dialog on the lab PC does not fail — it waits, and a
+        workflow running overnight waits with it. Escalating to the picker has
+        to be asked for."""
+        for keyword in ("usb", "last", "sim", "any"):
+            assert "UserDialog" not in self._plan(keyword), (
+                f"'{keyword}' can open a window; it must not"
+            )
+
+    def test_the_picker_is_always_last_when_present(self):
+        for keyword in ("ask", "dialog"):
+            plan = self._plan(keyword)
+            assert plan[-1] == "UserDialog"
+
+    def test_the_failure_message_points_at_the_interactive_options(self):
         source = self.source
-        first = source.index("TryConnect(plan.Method, plan.ConnString)")
-        fallback = source.index("TryConnect(InstrumentConnectionMethod.Manually")
-        assert first < fallback, "the fallback must not pre-empt the stored connection"
+        assert "'ask'" in source and "'dialog'" in source

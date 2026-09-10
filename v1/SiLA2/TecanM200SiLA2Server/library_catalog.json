@@ -16,18 +16,20 @@
       "values": [
         "",
         "usb",
+        "ask",
         "dialog",
         "last",
         "sim",
         "any"
       ],
       "value_labels": {
-        "": "default (from config.yaml)",
-        "usb": "usb - stored connection, then a fresh scan",
-        "dialog": "dialog - pick the instrument (needs someone at the PC)",
+        "": "default (from the server's config.yaml)",
+        "usb": "usb - stored connection, then a fresh scan (unattended-safe)",
+        "ask": "ask - as above, then the picker if still not found (needs someone at the PC)",
+        "dialog": "dialog - the picker, straight away (needs someone at the PC)",
         "last": "last - the stored connection only",
         "sim": "sim - the Tecan simulator",
-        "any": "any - USB or simulator"
+        "any": "any - USB or simulator, whichever answers"
       },
       "parameter_names": [
         "ConnectionString"
