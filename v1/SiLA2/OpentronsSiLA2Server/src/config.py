@@ -216,6 +216,17 @@ class ServerConfig:
     dir_temp: str = "./temp"
     dir_recipes: str = "../../Library/Recipes"
     dir_library: str = "../../Library"
+    dir_results: str = "../../Results"
+
+    # ── Camera ──────────────────────────────────────────────────────────────
+    # The Flex has an on-board camera. `camera_device` is the V4L2 node the
+    # snapshot step reads *on the robot*; `camera_http_probe` first tries the
+    # robot's own camera endpoint, which takes a picture without moving
+    # anything. Scalars rather than a nested dict because this class declares a
+    # custom __init__, so dataclass field(default_factory=...) never runs.
+    camera_enabled: bool = True
+    camera_device: str = "/dev/video2"
+    camera_http_probe: bool = True
     
     # Tip tracking
     tip_tracking_enabled: bool = True
@@ -360,6 +371,13 @@ class ServerConfig:
         self.dir_logs = dirs.get("logs", self.dir_logs)
         self.dir_recipes = dirs.get("recipes", self.dir_recipes)
         self.dir_library = dirs.get("library", self.dir_library)
+        self.dir_results = dirs.get("results", self.dir_results)
+
+        # Camera section
+        cam = cfg.get("camera", {})
+        self.camera_enabled = cam.get("enabled", self.camera_enabled)
+        self.camera_device = cam.get("device", self.camera_device)
+        self.camera_http_probe = cam.get("http_probe", self.camera_http_probe)
         
         # Tip tracking section
         tip = cfg.get("tip_tracking", {})

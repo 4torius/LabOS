@@ -12,123 +12,95 @@ if TYPE_CHECKING:
 
     from typing import Iterable, Optional
 
-    from sila2.client import ClientMetadataInstance, ClientObservableCommandInstance
+    from sila2.client import (
+        ClientMetadataInstance,
+        ClientObservableCommandInstance,
+        ClientObservableProperty,
+        ClientUnobservableProperty,
+    )
     from workflowapi_types import (
         AbortRun_Responses,
+        CaptureImage_Responses,
         EmergencyStop_Responses,
         ExecuteRecipe_Responses,
-        GetCurrentConfig_Responses,
-        GetModulesStatus_Responses,
-        GetRobotInfo_Responses,
-        GetStatus_Responses,
         Home_Responses,
-        Initialize_Responses,
-        ListHardwareConfigs_Responses,
-        ListRecipes_Responses,
-        ListTipRacks_Responses,
         LoadHardwareConfig_Responses,
+        MoveLabware_Responses,
         PauseRun_Responses,
         RefillTipRack_Responses,
         ResetTipTracking_Responses,
         ResumeRun_Responses,
+        RunSteps_Responses,
         SetLights_Responses,
+        SetModuleLatch_Responses,
+        SetModuleTemperature_Responses,
+        ShakeModule_Responses,
+        ValidateRecipe_Responses,
     )
 
 
 class WorkflowAPIClient:
     """
 
-    Simplified workflow-level API for Opentrons Flex robot.
-    5 feature groups, 17 total commands.
-    Low-level commands (Transfer, Aspirate, etc.) are internal to recipes.
+    Workflow-level control of an Opentrons Flex.
+
+    Two rules shape this surface. Commands *do* something to the robot;
+    anything that merely reads state is a Property, so a client can read it
+    without asking the robot to act. And rather than one command per
+    Opentrons primitive, RunSteps takes recipe steps inline: any step the
+    recipe format supports becomes available as a workflow step without
+    this file growing a command for each.
+
+    Commands whose description begins with MOVES HARDWARE physically move
+    the robot. Everything else is safe to call at any time.
 
     """
 
-    def Initialize(self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None) -> Initialize_Responses:
-        """
-        Initialize connection to the robot and verify it's ready.
-        """
-        ...
+    RobotInfo: ClientUnobservableProperty[str]
+    """
+    Robot metadata as JSON: name, model, serial, firmware version.
+    """
+
+    ModulesStatus: ClientUnobservableProperty[str]
+    """
+    Attached modules (heater-shaker, temperature module) as a JSON array.
+    """
+
+    Status: ClientObservableProperty[str]
+    """
+    
+            Current robot state as JSON: state, run_id, connected, config.
+            Replaces the former GetStatus command — reading state is not an
+            operation, and as a Property it can be polled or subscribed to
+            without appearing in the command list as something to "run".
+        
+    """
+
+    CurrentRunId: ClientObservableProperty[str]
+    """
+    Id of the protocol run in progress, or empty when idle.
+    """
+
+    ActiveConfig: ClientObservableProperty[str]
+    """
+    
+            The HAL configuration currently loaded, as JSON ({name, config}).
+            This is what ExecuteRecipe runs against.
+        
+    """
+
+    TipsAvailable: ClientObservableProperty[str]
+    """
+    Per-rack tip consumption as JSON: load name, slot, used, available.
+    """
 
     def EmergencyStop(self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None) -> EmergencyStop_Responses:
         """
-        Immediately stop all robot operations.
-        """
-        ...
 
-    def GetStatus(self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None) -> GetStatus_Responses:
-        """
-        Get current robot status including active run information.
-        """
-        ...
+        MOVES HARDWARE. Stop the current run, force-drop any tips, and home.
+        Never reports success if the drop/home sequence itself failed — read
+        the response text before assuming the deck is safe.
 
-    def ListHardwareConfigs(
-        self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
-    ) -> ListHardwareConfigs_Responses:
-        """
-        List available HAL hardware configurations.
-        """
-        ...
-
-    def LoadHardwareConfig(
-        self, ConfigName: str, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
-    ) -> LoadHardwareConfig_Responses:
-        """
-        Load a hardware configuration (HAL) defining deck layout.
-        """
-        ...
-
-    def GetCurrentConfig(
-        self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
-    ) -> GetCurrentConfig_Responses:
-        """
-        Get the currently loaded HAL configuration.
-        """
-        ...
-
-    def ListRecipes(self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None) -> ListRecipes_Responses:
-        """
-        List available JSON recipe files.
-        """
-        ...
-
-    def PauseRun(self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None) -> PauseRun_Responses:
-        """
-        Pause the currently executing recipe.
-        """
-        ...
-
-    def ResumeRun(self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None) -> ResumeRun_Responses:
-        """
-        Resume a paused recipe.
-        """
-        ...
-
-    def AbortRun(self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None) -> AbortRun_Responses:
-        """
-        Abort the current recipe execution.
-        """
-        ...
-
-    def ListTipRacks(self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None) -> ListTipRacks_Responses:
-        """
-        List all tip racks with current usage statistics.
-        """
-        ...
-
-    def RefillTipRack(
-        self, RackSlot: str, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
-    ) -> RefillTipRack_Responses:
-        """
-        Mark a tip rack as refilled/replaced.
-        """
-        ...
-
-    def ResetTipTracking(
-        self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
-    ) -> ResetTipTracking_Responses:
-        """
-        Reset all tip tracking counters to full.
         """
         ...
 
@@ -136,21 +108,81 @@ class WorkflowAPIClient:
         self, On: bool, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
     ) -> SetLights_Responses:
         """
-        Turn deck lights on or off.
+        Turn the deck lights on or off.
         """
         ...
 
-    def GetRobotInfo(self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None) -> GetRobotInfo_Responses:
+    def LoadHardwareConfig(
+        self, ConfigName: str, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
+    ) -> LoadHardwareConfig_Responses:
         """
-        Get robot model, serial number, firmware version.
+
+        Switch the active HAL configuration. Persists to
+        Library/HardwareConfig/.active, so it survives a server restart.
+        Recipes are not paired with a HAL: set it once, and every later
+        ExecuteRecipe runs against whatever is active.
+
         """
         ...
 
-    def GetModulesStatus(
+    def ValidateRecipe(
+        self, RecipeName: str, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
+    ) -> ValidateRecipe_Responses:
+        """
+
+        Check a recipe against the active HAL configuration without running
+        it: every labware the recipe requires must be present on the deck,
+        and the generated protocol must compile. Safe to call at any time.
+
+        """
+        ...
+
+    def PauseRun(self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None) -> PauseRun_Responses:
+        """
+        Pause the protocol currently running.
+        """
+        ...
+
+    def ResumeRun(self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None) -> ResumeRun_Responses:
+        """
+        MOVES HARDWARE. Resume a paused protocol.
+        """
+        ...
+
+    def AbortRun(self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None) -> AbortRun_Responses:
+        """
+
+        MOVES HARDWARE. Abort the running protocol. Drops tips first when
+        safety.auto_drop_tip_on_abort is set.
+
+        """
+        ...
+
+    def SetModuleLatch(
+        self, ModuleName: str, Open: bool, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
+    ) -> SetModuleLatch_Responses:
+        """
+
+        MOVES HARDWARE. Open or close a heater-shaker's labware latch. It
+        must be closed before shaking and open before the gripper can place
+        or remove a plate.
+
+        """
+        ...
+
+    def RefillTipRack(
+        self, RackSlot: str, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
+    ) -> RefillTipRack_Responses:
+        """
+        Record that a tip rack has been physically refilled.
+        """
+        ...
+
+    def ResetTipTracking(
         self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
-    ) -> GetModulesStatus_Responses:
+    ) -> ResetTipTracking_Responses:
         """
-        Get status of all attached modules (heater/shaker, thermocycler, etc.).
+        Reset every tip-consumption counter to full.
         """
         ...
 
@@ -158,7 +190,7 @@ class WorkflowAPIClient:
         self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
     ) -> ClientObservableCommandInstance[Home_Responses]:
         """
-        Home all robot axes to their default positions.
+        MOVES HARDWARE. Home all robot axes to their default positions.
         """
         ...
 
@@ -166,6 +198,98 @@ class WorkflowAPIClient:
         self, RecipeName: str, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
     ) -> ClientObservableCommandInstance[ExecuteRecipe_Responses]:
         """
-        Execute a JSON recipe file on the robot.
+
+        MOVES HARDWARE. Run a saved recipe against the currently active HAL
+        configuration. Fails loudly if the run's own final state is anything
+        other than "succeeded" — a stopped or errored run is not a success.
+
+        """
+        ...
+
+    def RunSteps(
+        self, StepsJson: str, Description: str, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
+    ) -> ClientObservableCommandInstance[RunSteps_Responses]:
+        """
+
+        MOVES HARDWARE. Run recipe steps supplied inline, without a saved
+        recipe file, against the active HAL configuration.
+
+        This is what makes atomic control possible without one SiLA2 command
+        per Opentrons primitive: pass a JSON array of recipe steps (the same
+        format as a recipe's "Steps") and any command the recipe format
+        supports — Transfer, Mix, MoveLabware, heater-shaker, Delay, and the
+        rest — becomes usable as a single workflow step. Previously the only
+        way to move one plate or mix one well was to author a recipe file.
+
+        Example: [{"Command": "Mix", "PipetteMount": "left",
+                   "Location": "MyPlate:A1", "Repetitions": 3, "Volume": 100}]
+
+        """
+        ...
+
+    def MoveLabware(
+        self,
+        LabwareName: str,
+        NewLocation: str,
+        UseGripper: bool,
+        *,
+        metadata: Optional[Iterable[ClientMetadataInstance]] = None,
+    ) -> ClientObservableCommandInstance[MoveLabware_Responses]:
+        """
+
+        MOVES HARDWARE. Move a piece of labware to another deck slot using
+        the gripper. Implemented for a long time but not reachable: moving a
+        plate between slots required authoring a whole recipe file.
+
+        """
+        ...
+
+    def SetModuleTemperature(
+        self,
+        ModuleName: str,
+        Celsius: float,
+        WaitForTemperature: bool,
+        *,
+        metadata: Optional[Iterable[ClientMetadataInstance]] = None,
+    ) -> ClientObservableCommandInstance[SetModuleTemperature_Responses]:
+        """
+
+        MOVES HARDWARE. Set a heater-shaker or temperature module's target
+        temperature. Set Celsius to 0 to deactivate heating.
+
+        """
+        ...
+
+    def ShakeModule(
+        self,
+        ModuleName: str,
+        RPM: int,
+        DurationSeconds: int,
+        *,
+        metadata: Optional[Iterable[ClientMetadataInstance]] = None,
+    ) -> ClientObservableCommandInstance[ShakeModule_Responses]:
+        """
+
+        MOVES HARDWARE. Shake a heater-shaker for a set time. The latch must
+        be closed; set DurationSeconds to 0 to stop shaking immediately.
+
+        """
+        ...
+
+    def CaptureImage(
+        self, Label: str, AllowRobotMotion: bool, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
+    ) -> ClientObservableCommandInstance[CaptureImage_Responses]:
+        """
+
+        Photograph the deck with the robot's on-board camera and save the
+        image under Results/Images, where the web interface serves it.
+
+        Two acquisition paths are tried. First the robot's HTTP camera
+        endpoint, which takes a picture without moving anything. If that is
+        unavailable, capture falls back to running a one-step protocol on
+        the robot — and starting a protocol HOMES THE ROBOT, so the fallback
+        is refused unless AllowRobotMotion is true. The response always says
+        which path was used and why the other was not.
+
         """
         ...

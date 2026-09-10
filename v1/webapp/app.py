@@ -256,6 +256,40 @@ def create_app() -> "FastAPI":
         except UnicodeDecodeError:
             return {"filename": filename, "format": fmt, "content": "(Binary file - download to view)", "size": file_path.stat().st_size, "binary": True}
 
+    @app.get("/api/images")
+    async def list_deck_images():
+        """Images captured from the robot's on-board camera.
+
+        CaptureImage writes here. Before, captured frames landed in the
+        Opentrons server's own ./images directory, which no route served —
+        taken and then invisible.
+        """
+        images_dir = RESULTS_DIR / "Images"
+        if not images_dir.exists():
+            return {"images": []}
+        files = sorted(
+            ({"name": f.name,
+              "url": f"/api/images/{f.name}",
+              "size": f.stat().st_size,
+              "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat()}
+             for f in images_dir.iterdir()
+             if f.is_file() and f.suffix.lower() in (".jpg", ".jpeg", ".png")),
+            key=lambda i: i["modified"], reverse=True,
+        )
+        return {"images": files}
+
+    @app.get("/api/images/{filename}")
+    async def get_deck_image(filename: str):
+        file_path = RESULTS_DIR / "Images" / filename
+        if not file_path.exists():
+            raise HTTPException(404, "Image not found")
+        try:
+            file_path.resolve().relative_to((RESULTS_DIR / "Images").resolve())
+        except ValueError:
+            raise HTTPException(403, "Access denied")
+        media = "image/png" if file_path.suffix.lower() == ".png" else "image/jpeg"
+        return FileResponse(path=str(file_path), media_type=media)
+
     @app.get("/api/files/animl_results")
     async def list_animl_result_files():
         """List available AnIML result files for the plate analysis browser."""

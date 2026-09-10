@@ -3,255 +3,336 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import timedelta
-from typing import TYPE_CHECKING, Optional
+from queue import Queue
+from typing import TYPE_CHECKING, Optional, Union
 
 from sila2.server import FeatureImplementationBase, MetadataDict, ObservableCommandInstance
 
 from .workflowapi_types import (
     AbortRun_Responses,
+    CaptureImage_Responses,
     EmergencyStop_Responses,
     ExecuteRecipe_Responses,
-    GetCurrentConfig_Responses,
-    GetModulesStatus_Responses,
-    GetRobotInfo_Responses,
-    GetStatus_Responses,
     Home_Responses,
-    Initialize_Responses,
-    ListHardwareConfigs_Responses,
-    ListRecipes_Responses,
-    ListTipRacks_Responses,
     LoadHardwareConfig_Responses,
+    MoveLabware_Responses,
     PauseRun_Responses,
     RefillTipRack_Responses,
     ResetTipTracking_Responses,
     ResumeRun_Responses,
+    RunSteps_Responses,
     SetLights_Responses,
+    SetModuleLatch_Responses,
+    SetModuleTemperature_Responses,
+    ShakeModule_Responses,
+    ValidateRecipe_Responses,
 )
 
 if TYPE_CHECKING:
 
-    from typing import TypeVar
-
-    from sila2.server import SilaServer
-
-    Server = TypeVar("Server", bound=SilaServer)
+    from ...server import Server
 
 
 class WorkflowAPIBase(FeatureImplementationBase, ABC):
     parent_server: Server
 
+    _Status_producer_queue: Queue[Union[str, Exception]]
+    _Status_current_value: str
+
+    _CurrentRunId_producer_queue: Queue[Union[str, Exception]]
+    _CurrentRunId_current_value: str
+
+    _ActiveConfig_producer_queue: Queue[Union[str, Exception]]
+    _ActiveConfig_current_value: str
+
+    _TipsAvailable_producer_queue: Queue[Union[str, Exception]]
+    _TipsAvailable_current_value: str
+
     Home_default_lifetime_of_execution: Optional[timedelta]
 
     ExecuteRecipe_default_lifetime_of_execution: Optional[timedelta]
 
+    RunSteps_default_lifetime_of_execution: Optional[timedelta]
+
+    MoveLabware_default_lifetime_of_execution: Optional[timedelta]
+
+    SetModuleTemperature_default_lifetime_of_execution: Optional[timedelta]
+
+    ShakeModule_default_lifetime_of_execution: Optional[timedelta]
+
+    CaptureImage_default_lifetime_of_execution: Optional[timedelta]
+
     def __init__(self, parent_server: Server):
         """
 
-        Simplified workflow-level API for Opentrons Flex robot.
-        5 feature groups, 17 total commands.
-        Low-level commands (Transfer, Aspirate, etc.) are internal to recipes.
+        Workflow-level control of an Opentrons Flex.
+
+        Two rules shape this surface. Commands *do* something to the robot;
+        anything that merely reads state is a Property, so a client can read it
+        without asking the robot to act. And rather than one command per
+        Opentrons primitive, RunSteps takes recipe steps inline: any step the
+        recipe format supports becomes available as a workflow step without
+        this file growing a command for each.
+
+        Commands whose description begins with MOVES HARDWARE physically move
+        the robot. Everything else is safe to call at any time.
 
         """
         super().__init__(parent_server=parent_server)
 
+        self._Status_producer_queue = Queue()
+
+        self._CurrentRunId_producer_queue = Queue()
+
+        self._ActiveConfig_producer_queue = Queue()
+
+        self._TipsAvailable_producer_queue = Queue()
+
         self.Home_default_lifetime_of_execution = None
         self.ExecuteRecipe_default_lifetime_of_execution = None
+        self.RunSteps_default_lifetime_of_execution = None
+        self.MoveLabware_default_lifetime_of_execution = None
+        self.SetModuleTemperature_default_lifetime_of_execution = None
+        self.ShakeModule_default_lifetime_of_execution = None
+        self.CaptureImage_default_lifetime_of_execution = None
 
     @abstractmethod
-    def Initialize(self, *, metadata: MetadataDict) -> Initialize_Responses:
+    def get_RobotInfo(self, *, metadata: MetadataDict) -> str:
         """
-        Initialize connection to the robot and verify it's ready.
-
+        Robot metadata as JSON: name, model, serial, firmware version.
 
         :param metadata: The SiLA Client Metadata attached to the call
-
-        :return:
-
-            - InitializeResult: Status message with robot serial number.
-
-
+        :return: Robot metadata as JSON: name, model, serial, firmware version.
         """
+
+    @abstractmethod
+    def get_ModulesStatus(self, *, metadata: MetadataDict) -> str:
+        """
+        Attached modules (heater-shaker, temperature module) as a JSON array.
+
+        :param metadata: The SiLA Client Metadata attached to the call
+        :return: Attached modules (heater-shaker, temperature module) as a JSON array.
+        """
+
+    def update_Status(self, Status: str, queue: Optional[Queue[str]] = None) -> None:
+        """
+
+            Current robot state as JSON: state, run_id, connected, config.
+            Replaces the former GetStatus command — reading state is not an
+            operation, and as a Property it can be polled or subscribed to
+            without appearing in the command list as something to "run".
+
+
+        This method updates the observable property 'Status'.
+
+        :param queue: The queue to send updates to. If None, the default Queue will be used.
+        """
+        if queue is None:
+            queue = self._Status_producer_queue
+            self._Status_current_value = Status
+        queue.put(Status)
+
+    def Status_on_subscription(self, *, metadata: MetadataDict) -> Optional[Queue[str]]:
+        """
+
+            Current robot state as JSON: state, run_id, connected, config.
+            Replaces the former GetStatus command — reading state is not an
+            operation, and as a Property it can be polled or subscribed to
+            without appearing in the command list as something to "run".
+
+
+        This method is called when a client subscribes to the observable property 'Status'
+
+        :param metadata: The SiLA Client Metadata attached to the call
+        :return: Optional `Queue` that should be used for updating this property.
+            If None, the default Queue will be used.
+        """
+
+    def abort_Status_subscriptions(self, error: Exception, queue: Optional[Queue[str]] = None) -> None:
+        """
+
+            Current robot state as JSON: state, run_id, connected, config.
+            Replaces the former GetStatus command — reading state is not an
+            operation, and as a Property it can be polled or subscribed to
+            without appearing in the command list as something to "run".
+
+
+        This method aborts subscriptions to the observable property 'Status'.
+
+        :param error: The Exception to be sent to the subscribing client.
+            If it is no DefinedExecutionError or UndefinedExecutionError, it will be wrapped in an UndefinedExecutionError.
+        :param queue: The queue to abort. If None, the default Queue will be used.
+        """
+        if queue is None:
+            queue = self._Status_producer_queue
+        queue.put(error)
+
+    @property
+    def current_Status(self) -> str:
+        try:
+            return self._Status_current_value
+        except AttributeError:
+            raise AttributeError("Observable property Status has never been set")
+
+    def update_CurrentRunId(self, CurrentRunId: str, queue: Optional[Queue[str]] = None) -> None:
+        """
+        Id of the protocol run in progress, or empty when idle.
+
+        This method updates the observable property 'CurrentRunId'.
+
+        :param queue: The queue to send updates to. If None, the default Queue will be used.
+        """
+        if queue is None:
+            queue = self._CurrentRunId_producer_queue
+            self._CurrentRunId_current_value = CurrentRunId
+        queue.put(CurrentRunId)
+
+    def CurrentRunId_on_subscription(self, *, metadata: MetadataDict) -> Optional[Queue[str]]:
+        """
+        Id of the protocol run in progress, or empty when idle.
+
+        This method is called when a client subscribes to the observable property 'CurrentRunId'
+
+        :param metadata: The SiLA Client Metadata attached to the call
+        :return: Optional `Queue` that should be used for updating this property.
+            If None, the default Queue will be used.
+        """
+
+    def abort_CurrentRunId_subscriptions(self, error: Exception, queue: Optional[Queue[str]] = None) -> None:
+        """
+        Id of the protocol run in progress, or empty when idle.
+
+        This method aborts subscriptions to the observable property 'CurrentRunId'.
+
+        :param error: The Exception to be sent to the subscribing client.
+            If it is no DefinedExecutionError or UndefinedExecutionError, it will be wrapped in an UndefinedExecutionError.
+        :param queue: The queue to abort. If None, the default Queue will be used.
+        """
+        if queue is None:
+            queue = self._CurrentRunId_producer_queue
+        queue.put(error)
+
+    @property
+    def current_CurrentRunId(self) -> str:
+        try:
+            return self._CurrentRunId_current_value
+        except AttributeError:
+            raise AttributeError("Observable property CurrentRunId has never been set")
+
+    def update_ActiveConfig(self, ActiveConfig: str, queue: Optional[Queue[str]] = None) -> None:
+        """
+
+            The HAL configuration currently loaded, as JSON ({name, config}).
+            This is what ExecuteRecipe runs against.
+
+
+        This method updates the observable property 'ActiveConfig'.
+
+        :param queue: The queue to send updates to. If None, the default Queue will be used.
+        """
+        if queue is None:
+            queue = self._ActiveConfig_producer_queue
+            self._ActiveConfig_current_value = ActiveConfig
+        queue.put(ActiveConfig)
+
+    def ActiveConfig_on_subscription(self, *, metadata: MetadataDict) -> Optional[Queue[str]]:
+        """
+
+            The HAL configuration currently loaded, as JSON ({name, config}).
+            This is what ExecuteRecipe runs against.
+
+
+        This method is called when a client subscribes to the observable property 'ActiveConfig'
+
+        :param metadata: The SiLA Client Metadata attached to the call
+        :return: Optional `Queue` that should be used for updating this property.
+            If None, the default Queue will be used.
+        """
+
+    def abort_ActiveConfig_subscriptions(self, error: Exception, queue: Optional[Queue[str]] = None) -> None:
+        """
+
+            The HAL configuration currently loaded, as JSON ({name, config}).
+            This is what ExecuteRecipe runs against.
+
+
+        This method aborts subscriptions to the observable property 'ActiveConfig'.
+
+        :param error: The Exception to be sent to the subscribing client.
+            If it is no DefinedExecutionError or UndefinedExecutionError, it will be wrapped in an UndefinedExecutionError.
+        :param queue: The queue to abort. If None, the default Queue will be used.
+        """
+        if queue is None:
+            queue = self._ActiveConfig_producer_queue
+        queue.put(error)
+
+    @property
+    def current_ActiveConfig(self) -> str:
+        try:
+            return self._ActiveConfig_current_value
+        except AttributeError:
+            raise AttributeError("Observable property ActiveConfig has never been set")
+
+    def update_TipsAvailable(self, TipsAvailable: str, queue: Optional[Queue[str]] = None) -> None:
+        """
+        Per-rack tip consumption as JSON: load name, slot, used, available.
+
+        This method updates the observable property 'TipsAvailable'.
+
+        :param queue: The queue to send updates to. If None, the default Queue will be used.
+        """
+        if queue is None:
+            queue = self._TipsAvailable_producer_queue
+            self._TipsAvailable_current_value = TipsAvailable
+        queue.put(TipsAvailable)
+
+    def TipsAvailable_on_subscription(self, *, metadata: MetadataDict) -> Optional[Queue[str]]:
+        """
+        Per-rack tip consumption as JSON: load name, slot, used, available.
+
+        This method is called when a client subscribes to the observable property 'TipsAvailable'
+
+        :param metadata: The SiLA Client Metadata attached to the call
+        :return: Optional `Queue` that should be used for updating this property.
+            If None, the default Queue will be used.
+        """
+
+    def abort_TipsAvailable_subscriptions(self, error: Exception, queue: Optional[Queue[str]] = None) -> None:
+        """
+        Per-rack tip consumption as JSON: load name, slot, used, available.
+
+        This method aborts subscriptions to the observable property 'TipsAvailable'.
+
+        :param error: The Exception to be sent to the subscribing client.
+            If it is no DefinedExecutionError or UndefinedExecutionError, it will be wrapped in an UndefinedExecutionError.
+        :param queue: The queue to abort. If None, the default Queue will be used.
+        """
+        if queue is None:
+            queue = self._TipsAvailable_producer_queue
+        queue.put(error)
+
+    @property
+    def current_TipsAvailable(self) -> str:
+        try:
+            return self._TipsAvailable_current_value
+        except AttributeError:
+            raise AttributeError("Observable property TipsAvailable has never been set")
 
     @abstractmethod
     def EmergencyStop(self, *, metadata: MetadataDict) -> EmergencyStop_Responses:
         """
-        Immediately stop all robot operations.
 
+            MOVES HARDWARE. Stop the current run, force-drop any tips, and home.
+            Never reports success if the drop/home sequence itself failed — read
+            the response text before assuming the deck is safe.
 
-        :param metadata: The SiLA Client Metadata attached to the call
-
-        :return:
-
-            - StopResult: Confirmation of emergency stop.
-
-
-        """
-
-    @abstractmethod
-    def GetStatus(self, *, metadata: MetadataDict) -> GetStatus_Responses:
-        """
-        Get current robot status including active run information.
 
 
         :param metadata: The SiLA Client Metadata attached to the call
 
         :return:
 
-            - StatusResult: Robot status as JSON.
-
-
-        """
-
-    @abstractmethod
-    def ListHardwareConfigs(self, *, metadata: MetadataDict) -> ListHardwareConfigs_Responses:
-        """
-        List available HAL hardware configurations.
-
-
-        :param metadata: The SiLA Client Metadata attached to the call
-
-        :return:
-
-            - ConfigList: JSON array of available configurations.
-
-
-        """
-
-    @abstractmethod
-    def LoadHardwareConfig(self, ConfigName: str, *, metadata: MetadataDict) -> LoadHardwareConfig_Responses:
-        """
-        Load a hardware configuration (HAL) defining deck layout.
-
-
-        :param ConfigName: Name of the HAL config file (without .yaml extension).
-
-        :param metadata: The SiLA Client Metadata attached to the call
-
-        :return:
-
-            - LoadResult: Loaded configuration details.
-
-
-        """
-
-    @abstractmethod
-    def GetCurrentConfig(self, *, metadata: MetadataDict) -> GetCurrentConfig_Responses:
-        """
-        Get the currently loaded HAL configuration.
-
-
-        :param metadata: The SiLA Client Metadata attached to the call
-
-        :return:
-
-            - CurrentConfig: Currently loaded configuration as JSON.
-
-
-        """
-
-    @abstractmethod
-    def ListRecipes(self, *, metadata: MetadataDict) -> ListRecipes_Responses:
-        """
-        List available JSON recipe files.
-
-
-        :param metadata: The SiLA Client Metadata attached to the call
-
-        :return:
-
-            - RecipeList: JSON array of recipe names.
-
-
-        """
-
-    @abstractmethod
-    def PauseRun(self, *, metadata: MetadataDict) -> PauseRun_Responses:
-        """
-        Pause the currently executing recipe.
-
-
-        :param metadata: The SiLA Client Metadata attached to the call
-
-        :return:
-
-            - PauseResult: Confirmation of pause.
-
-
-        """
-
-    @abstractmethod
-    def ResumeRun(self, *, metadata: MetadataDict) -> ResumeRun_Responses:
-        """
-        Resume a paused recipe.
-
-
-        :param metadata: The SiLA Client Metadata attached to the call
-
-        :return:
-
-            - ResumeResult: Confirmation of resume.
-
-
-        """
-
-    @abstractmethod
-    def AbortRun(self, *, metadata: MetadataDict) -> AbortRun_Responses:
-        """
-        Abort the current recipe execution.
-
-
-        :param metadata: The SiLA Client Metadata attached to the call
-
-        :return:
-
-            - AbortResult: Confirmation of abort.
-
-
-        """
-
-    @abstractmethod
-    def ListTipRacks(self, *, metadata: MetadataDict) -> ListTipRacks_Responses:
-        """
-        List all tip racks with current usage statistics.
-
-
-        :param metadata: The SiLA Client Metadata attached to the call
-
-        :return:
-
-            - TipRackList: JSON array of tip rack info with usage counts.
-
-
-        """
-
-    @abstractmethod
-    def RefillTipRack(self, RackSlot: str, *, metadata: MetadataDict) -> RefillTipRack_Responses:
-        """
-        Mark a tip rack as refilled/replaced.
-
-
-        :param RackSlot: Slot where the tip rack is located (e.g., 'A1', 'B2').
-
-        :param metadata: The SiLA Client Metadata attached to the call
-
-        :return:
-
-            - RefillResult: Confirmation and new tip count.
-
-
-        """
-
-    @abstractmethod
-    def ResetTipTracking(self, *, metadata: MetadataDict) -> ResetTipTracking_Responses:
-        """
-        Reset all tip tracking counters to full.
-
-
-        :param metadata: The SiLA Client Metadata attached to the call
-
-        :return:
-
-            - ResetResult: Confirmation of reset.
+            - StopResult: What was actually stopped, dropped and homed.
 
 
         """
@@ -259,46 +340,162 @@ class WorkflowAPIBase(FeatureImplementationBase, ABC):
     @abstractmethod
     def SetLights(self, On: bool, *, metadata: MetadataDict) -> SetLights_Responses:
         """
-        Turn deck lights on or off.
+        Turn the deck lights on or off.
 
 
-        :param On: True to turn lights on, false to turn off.
+        :param On: True to switch the lights on.
 
         :param metadata: The SiLA Client Metadata attached to the call
 
         :return:
 
-            - LightsResult: Current light state.
+            - LightsResult: Resulting light state.
 
 
         """
 
     @abstractmethod
-    def GetRobotInfo(self, *, metadata: MetadataDict) -> GetRobotInfo_Responses:
+    def LoadHardwareConfig(self, ConfigName: str, *, metadata: MetadataDict) -> LoadHardwareConfig_Responses:
         """
-        Get robot model, serial number, firmware version.
 
+            Switch the active HAL configuration. Persists to
+            Library/HardwareConfig/.active, so it survives a server restart.
+            Recipes are not paired with a HAL: set it once, and every later
+            ExecuteRecipe runs against whatever is active.
+
+
+
+        :param ConfigName: File name in Library/HardwareConfig.
 
         :param metadata: The SiLA Client Metadata attached to the call
 
         :return:
 
-            - RobotInfo: Robot details as JSON.
+            - LoadResult: Status message.
 
 
         """
 
     @abstractmethod
-    def GetModulesStatus(self, *, metadata: MetadataDict) -> GetModulesStatus_Responses:
+    def ValidateRecipe(self, RecipeName: str, *, metadata: MetadataDict) -> ValidateRecipe_Responses:
         """
-        Get status of all attached modules (heater/shaker, thermocycler, etc.).
+
+            Check a recipe against the active HAL configuration without running
+            it: every labware the recipe requires must be present on the deck,
+            and the generated protocol must compile. Safe to call at any time.
+
+
+
+        :param RecipeName: File name in Library/Recipes.
+
+        :param metadata: The SiLA Client Metadata attached to the call
+
+        :return:
+
+            - ValidationResult: JSON: {valid, errors, warnings}.
+
+
+        """
+
+    @abstractmethod
+    def PauseRun(self, *, metadata: MetadataDict) -> PauseRun_Responses:
+        """
+        Pause the protocol currently running.
 
 
         :param metadata: The SiLA Client Metadata attached to the call
 
         :return:
 
-            - ModulesStatus: Modules status as JSON array.
+            - PauseResult: Status message.
+
+
+        """
+
+    @abstractmethod
+    def ResumeRun(self, *, metadata: MetadataDict) -> ResumeRun_Responses:
+        """
+        MOVES HARDWARE. Resume a paused protocol.
+
+
+        :param metadata: The SiLA Client Metadata attached to the call
+
+        :return:
+
+            - ResumeResult: Status message.
+
+
+        """
+
+    @abstractmethod
+    def AbortRun(self, *, metadata: MetadataDict) -> AbortRun_Responses:
+        """
+
+            MOVES HARDWARE. Abort the running protocol. Drops tips first when
+            safety.auto_drop_tip_on_abort is set.
+
+
+
+        :param metadata: The SiLA Client Metadata attached to the call
+
+        :return:
+
+            - AbortResult: Status message; warns explicitly if the tip drop failed.
+
+
+        """
+
+    @abstractmethod
+    def SetModuleLatch(self, ModuleName: str, Open: bool, *, metadata: MetadataDict) -> SetModuleLatch_Responses:
+        """
+
+            MOVES HARDWARE. Open or close a heater-shaker's labware latch. It
+            must be closed before shaking and open before the gripper can place
+            or remove a plate.
+
+
+
+        :param ModuleName: Logical module name from the active HAL config.
+
+        :param Open: True to open the latch, false to close it.
+
+        :param metadata: The SiLA Client Metadata attached to the call
+
+        :return:
+
+            - LatchResult: Status message.
+
+
+        """
+
+    @abstractmethod
+    def RefillTipRack(self, RackSlot: str, *, metadata: MetadataDict) -> RefillTipRack_Responses:
+        """
+        Record that a tip rack has been physically refilled.
+
+
+        :param RackSlot: Deck slot of the refilled rack (e.g. A1), or "all".
+
+        :param metadata: The SiLA Client Metadata attached to the call
+
+        :return:
+
+            - RefillResult: Status message.
+
+
+        """
+
+    @abstractmethod
+    def ResetTipTracking(self, *, metadata: MetadataDict) -> ResetTipTracking_Responses:
+        """
+        Reset every tip-consumption counter to full.
+
+
+        :param metadata: The SiLA Client Metadata attached to the call
+
+        :return:
+
+            - ResetResult: Status message.
 
 
         """
@@ -306,7 +503,7 @@ class WorkflowAPIBase(FeatureImplementationBase, ABC):
     @abstractmethod
     def Home(self, *, metadata: MetadataDict, instance: ObservableCommandInstance) -> Home_Responses:
         """
-        Home all robot axes to their default positions.
+        MOVES HARDWARE. Home all robot axes to their default positions.
 
 
         :param metadata: The SiLA Client Metadata attached to the call
@@ -314,7 +511,7 @@ class WorkflowAPIBase(FeatureImplementationBase, ABC):
 
         :return:
 
-            - HomeResult: Status after homing.
+            - HomeResult: Status message.
 
 
         """
@@ -324,17 +521,191 @@ class WorkflowAPIBase(FeatureImplementationBase, ABC):
         self, RecipeName: str, *, metadata: MetadataDict, instance: ObservableCommandInstance
     ) -> ExecuteRecipe_Responses:
         """
-        Execute a JSON recipe file on the robot.
+
+            MOVES HARDWARE. Run a saved recipe against the currently active HAL
+            configuration. Fails loudly if the run's own final state is anything
+            other than "succeeded" — a stopped or errored run is not a success.
 
 
-        :param RecipeName: Name of the recipe file (without .json extension).
+
+        :param RecipeName: File name in Library/Recipes.
 
         :param metadata: The SiLA Client Metadata attached to the call
         :param instance: The command instance, enabling sending status updates to subscribed clients
 
         :return:
 
-            - RunId: ID of the started run for tracking.
+            - RunId: The robot's own run id, for looking the run up later.
+
+
+        """
+
+    @abstractmethod
+    def RunSteps(
+        self, StepsJson: str, Description: str, *, metadata: MetadataDict, instance: ObservableCommandInstance
+    ) -> RunSteps_Responses:
+        """
+
+            MOVES HARDWARE. Run recipe steps supplied inline, without a saved
+            recipe file, against the active HAL configuration.
+
+            This is what makes atomic control possible without one SiLA2 command
+            per Opentrons primitive: pass a JSON array of recipe steps (the same
+            format as a recipe's "Steps") and any command the recipe format
+            supports — Transfer, Mix, MoveLabware, heater-shaker, Delay, and the
+            rest — becomes usable as a single workflow step. Previously the only
+            way to move one plate or mix one well was to author a recipe file.
+
+            Example: [{"Command": "Mix", "PipetteMount": "left",
+                       "Location": "MyPlate:A1", "Repetitions": 3, "Volume": 100}]
+
+
+
+        :param StepsJson: JSON array of recipe step objects.
+
+        :param Description: Label for the run archive. Optional.
+
+        :param metadata: The SiLA Client Metadata attached to the call
+        :param instance: The command instance, enabling sending status updates to subscribed clients
+
+        :return:
+
+            - RunId: The robot's own run id.
+
+
+        """
+
+    @abstractmethod
+    def MoveLabware(
+        self,
+        LabwareName: str,
+        NewLocation: str,
+        UseGripper: bool,
+        *,
+        metadata: MetadataDict,
+        instance: ObservableCommandInstance,
+    ) -> MoveLabware_Responses:
+        """
+
+            MOVES HARDWARE. Move a piece of labware to another deck slot using
+            the gripper. Implemented for a long time but not reachable: moving a
+            plate between slots required authoring a whole recipe file.
+
+
+
+        :param LabwareName: Logical name from the active HAL config (e.g. MyPlate).
+
+        :param NewLocation: Destination deck slot (e.g. C2), or a module's logical name.
+
+        :param UseGripper: True to move with the gripper; false pauses for a manual move.
+
+        :param metadata: The SiLA Client Metadata attached to the call
+        :param instance: The command instance, enabling sending status updates to subscribed clients
+
+        :return:
+
+            - MoveResult: Status message.
+
+
+        """
+
+    @abstractmethod
+    def SetModuleTemperature(
+        self,
+        ModuleName: str,
+        Celsius: float,
+        WaitForTemperature: bool,
+        *,
+        metadata: MetadataDict,
+        instance: ObservableCommandInstance,
+    ) -> SetModuleTemperature_Responses:
+        """
+
+            MOVES HARDWARE. Set a heater-shaker or temperature module's target
+            temperature. Set Celsius to 0 to deactivate heating.
+
+
+
+        :param ModuleName: Logical module name from the active HAL config.
+
+        :param Celsius: Target temperature in degrees Celsius; 0 deactivates.
+
+        :param WaitForTemperature: Block until the target is reached.
+
+        :param metadata: The SiLA Client Metadata attached to the call
+        :param instance: The command instance, enabling sending status updates to subscribed clients
+
+        :return:
+
+            - TemperatureResult: Status message.
+
+
+        """
+
+    @abstractmethod
+    def ShakeModule(
+        self,
+        ModuleName: str,
+        RPM: int,
+        DurationSeconds: int,
+        *,
+        metadata: MetadataDict,
+        instance: ObservableCommandInstance,
+    ) -> ShakeModule_Responses:
+        """
+
+            MOVES HARDWARE. Shake a heater-shaker for a set time. The latch must
+            be closed; set DurationSeconds to 0 to stop shaking immediately.
+
+
+
+        :param ModuleName: Logical module name from the active HAL config.
+
+        :param RPM: Shake speed in revolutions per minute.
+
+        :param DurationSeconds: How long to shake; 0 stops shaking.
+
+        :param metadata: The SiLA Client Metadata attached to the call
+        :param instance: The command instance, enabling sending status updates to subscribed clients
+
+        :return:
+
+            - ShakeResult: Status message.
+
+
+        """
+
+    @abstractmethod
+    def CaptureImage(
+        self, Label: str, AllowRobotMotion: bool, *, metadata: MetadataDict, instance: ObservableCommandInstance
+    ) -> CaptureImage_Responses:
+        """
+
+            Photograph the deck with the robot's on-board camera and save the
+            image under Results/Images, where the web interface serves it.
+
+            Two acquisition paths are tried. First the robot's HTTP camera
+            endpoint, which takes a picture without moving anything. If that is
+            unavailable, capture falls back to running a one-step protocol on
+            the robot — and starting a protocol HOMES THE ROBOT, so the fallback
+            is refused unless AllowRobotMotion is true. The response always says
+            which path was used and why the other was not.
+
+
+
+        :param Label: Short name for the image file. Optional.
+
+        :param AllowRobotMotion:
+                Permit the protocol-based fallback, which homes the robot.
+                Leave false unless someone is watching the deck.
+
+
+        :param metadata: The SiLA Client Metadata attached to the call
+        :param instance: The command instance, enabling sending status updates to subscribed clients
+
+        :return:
+
+            - CaptureResult: JSON: {saved, path, url, method, detail}.
 
 
         """

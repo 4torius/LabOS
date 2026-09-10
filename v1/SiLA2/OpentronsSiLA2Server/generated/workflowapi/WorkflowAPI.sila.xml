@@ -1,35 +1,90 @@
-<Feature xmlns="http://www.sila-standard.org" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Category="workflow" FeatureVersion="1.0" MaturityLevel="Draft" Originator="org.labos" SiLA2Version="1.1" xsi:schemaLocation="http://www.sila-standard.org https://gitlab.com/SiLA2/sila_base/raw/master/schema/FeatureDefinition.xsd">
+<Feature xmlns="http://www.sila-standard.org" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Category="workflow" FeatureVersion="1.1" MaturityLevel="Draft" Originator="org.labos" SiLA2Version="1.1" xsi:schemaLocation="http://www.sila-standard.org https://gitlab.com/SiLA2/sila_base/raw/master/schema/FeatureDefinition.xsd">
   <Identifier>WorkflowAPI</Identifier>
   <DisplayName>Opentrons Workflow API</DisplayName>
-  <Description>Simplified workflow-level API for Opentrons Flex robot.
-        5 feature groups, 17 total commands.
-        Low-level commands (Transfer, Aspirate, etc.) are internal to recipes.</Description>
+  <Description>Workflow-level control of an Opentrons Flex.
+
+        Two rules shape this surface. Commands *do* something to the robot;
+        anything that merely reads state is a Property, so a client can read it
+        without asking the robot to act. And rather than one command per
+        Opentrons primitive, RunSteps takes recipe steps inline: any step the
+        recipe format supports becomes available as a workflow step without
+        this file growing a command for each.
+
+        Commands whose description begins with MOVES HARDWARE physically move
+        the robot. Everything else is safe to call at any time.</Description>
   <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
-  <!--                    ROBOT CONTROL (4 commands)                       -->
+  <!--  PROPERTIES &#8212; reads, no side effects                                -->
   <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
-  <Command>
-    <Identifier>Initialize</Identifier>
-    <DisplayName>Initialize Robot</DisplayName>
-    <Description>Initialize connection to the robot and verify it's ready.</Description>
+  <Property>
+    <Identifier>Status</Identifier>
+    <DisplayName>Status</DisplayName>
+    <Description>Current robot state as JSON: state, run_id, connected, config.
+            Replaces the former GetStatus command &#8212; reading state is not an
+            operation, and as a Property it can be polled or subscribed to
+            without appearing in the command list as something to "run".</Description>
+    <Observable>Yes</Observable>
+    <DataType>
+      <Basic>String</Basic>
+    </DataType>
+  </Property>
+  <Property>
+    <Identifier>CurrentRunId</Identifier>
+    <DisplayName>Current Run Id</DisplayName>
+    <Description>Id of the protocol run in progress, or empty when idle.</Description>
+    <Observable>Yes</Observable>
+    <DataType>
+      <Basic>String</Basic>
+    </DataType>
+  </Property>
+  <Property>
+    <Identifier>ActiveConfig</Identifier>
+    <DisplayName>Active Hardware Config</DisplayName>
+    <Description>The HAL configuration currently loaded, as JSON ({name, config}).
+            This is what ExecuteRecipe runs against.</Description>
+    <Observable>Yes</Observable>
+    <DataType>
+      <Basic>String</Basic>
+    </DataType>
+  </Property>
+  <Property>
+    <Identifier>TipsAvailable</Identifier>
+    <DisplayName>Tips Available</DisplayName>
+    <Description>Per-rack tip consumption as JSON: load name, slot, used, available.</Description>
+    <Observable>Yes</Observable>
+    <DataType>
+      <Basic>String</Basic>
+    </DataType>
+  </Property>
+  <Property>
+    <Identifier>RobotInfo</Identifier>
+    <DisplayName>Robot Info</DisplayName>
+    <Description>Robot metadata as JSON: name, model, serial, firmware version.</Description>
     <Observable>No</Observable>
-    <Response>
-      <Identifier>InitializeResult</Identifier>
-      <DisplayName>Initialize Result</DisplayName>
-      <Description>Status message with robot serial number.</Description>
-      <DataType>
-        <Basic>String</Basic>
-      </DataType>
-    </Response>
-  </Command>
+    <DataType>
+      <Basic>String</Basic>
+    </DataType>
+  </Property>
+  <Property>
+    <Identifier>ModulesStatus</Identifier>
+    <DisplayName>Modules Status</DisplayName>
+    <Description>Attached modules (heater-shaker, temperature module) as a JSON array.</Description>
+    <Observable>No</Observable>
+    <DataType>
+      <Basic>String</Basic>
+    </DataType>
+  </Property>
+  <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
+  <!--  ROBOT CONTROL                                                      -->
+  <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
   <Command>
     <Identifier>Home</Identifier>
     <DisplayName>Home Robot</DisplayName>
-    <Description>Home all robot axes to their default positions.</Description>
+    <Description>MOVES HARDWARE. Home all robot axes to their default positions.</Description>
     <Observable>Yes</Observable>
     <Response>
       <Identifier>HomeResult</Identifier>
       <DisplayName>Home Result</DisplayName>
-      <Description>Status after homing.</Description>
+      <Description>Status message.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
@@ -38,57 +93,56 @@
   <Command>
     <Identifier>EmergencyStop</Identifier>
     <DisplayName>Emergency Stop</DisplayName>
-    <Description>Immediately stop all robot operations.</Description>
+    <Description>MOVES HARDWARE. Stop the current run, force-drop any tips, and home.
+            Never reports success if the drop/home sequence itself failed &#8212; read
+            the response text before assuming the deck is safe.</Description>
     <Observable>No</Observable>
     <Response>
       <Identifier>StopResult</Identifier>
       <DisplayName>Stop Result</DisplayName>
-      <Description>Confirmation of emergency stop.</Description>
+      <Description>What was actually stopped, dropped and homed.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
     </Response>
   </Command>
   <Command>
-    <Identifier>GetStatus</Identifier>
-    <DisplayName>Get Status</DisplayName>
-    <Description>Get current robot status including active run information.</Description>
+    <Identifier>SetLights</Identifier>
+    <DisplayName>Set Lights</DisplayName>
+    <Description>Turn the deck lights on or off.</Description>
     <Observable>No</Observable>
+    <Parameter>
+      <Identifier>On</Identifier>
+      <DisplayName>On</DisplayName>
+      <Description>True to switch the lights on.</Description>
+      <DataType>
+        <Basic>Boolean</Basic>
+      </DataType>
+    </Parameter>
     <Response>
-      <Identifier>StatusResult</Identifier>
-      <DisplayName>Status</DisplayName>
-      <Description>Robot status as JSON.</Description>
+      <Identifier>LightsResult</Identifier>
+      <DisplayName>Lights Result</DisplayName>
+      <Description>Resulting light state.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
     </Response>
   </Command>
   <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
-  <!--                  HAL CONFIGURATION (3 commands)                     -->
+  <!--  HARDWARE CONFIGURATION (HAL)                                       -->
   <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
-  <Command>
-    <Identifier>ListHardwareConfigs</Identifier>
-    <DisplayName>List Configs</DisplayName>
-    <Description>List available HAL hardware configurations.</Description>
-    <Observable>No</Observable>
-    <Response>
-      <Identifier>ConfigList</Identifier>
-      <DisplayName>Config List</DisplayName>
-      <Description>JSON array of available configurations.</Description>
-      <DataType>
-        <Basic>String</Basic>
-      </DataType>
-    </Response>
-  </Command>
   <Command>
     <Identifier>LoadHardwareConfig</Identifier>
-    <DisplayName>Load HAL Config</DisplayName>
-    <Description>Load a hardware configuration (HAL) defining deck layout.</Description>
+    <DisplayName>Load Hardware Config</DisplayName>
+    <Description>Switch the active HAL configuration. Persists to
+            Library/HardwareConfig/.active, so it survives a server restart.
+            Recipes are not paired with a HAL: set it once, and every later
+            ExecuteRecipe runs against whatever is active.</Description>
     <Observable>No</Observable>
     <Parameter>
       <Identifier>ConfigName</Identifier>
       <DisplayName>Config Name</DisplayName>
-      <Description>Name of the HAL config file (without .yaml extension).</Description>
+      <Description>File name in Library/HardwareConfig.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
@@ -96,60 +150,99 @@
     <Response>
       <Identifier>LoadResult</Identifier>
       <DisplayName>Load Result</DisplayName>
-      <Description>Loaded configuration details.</Description>
-      <DataType>
-        <Basic>String</Basic>
-      </DataType>
-    </Response>
-  </Command>
-  <Command>
-    <Identifier>GetCurrentConfig</Identifier>
-    <DisplayName>Current Config</DisplayName>
-    <Description>Get the currently loaded HAL configuration.</Description>
-    <Observable>No</Observable>
-    <Response>
-      <Identifier>CurrentConfig</Identifier>
-      <DisplayName>Current Config</DisplayName>
-      <Description>Currently loaded configuration as JSON.</Description>
+      <Description>Status message.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
     </Response>
   </Command>
   <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
-  <!--                  RECIPE EXECUTION (5 commands)                      -->
+  <!--  RECIPE EXECUTION                                                   -->
   <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
-  <Command>
-    <Identifier>ListRecipes</Identifier>
-    <DisplayName>List Recipes</DisplayName>
-    <Description>List available JSON recipe files.</Description>
-    <Observable>No</Observable>
-    <Response>
-      <Identifier>RecipeList</Identifier>
-      <DisplayName>Recipe List</DisplayName>
-      <Description>JSON array of recipe names.</Description>
-      <DataType>
-        <Basic>String</Basic>
-      </DataType>
-    </Response>
-  </Command>
   <Command>
     <Identifier>ExecuteRecipe</Identifier>
     <DisplayName>Execute Recipe</DisplayName>
-    <Description>Execute a JSON recipe file on the robot.</Description>
+    <Description>MOVES HARDWARE. Run a saved recipe against the currently active HAL
+            configuration. Fails loudly if the run's own final state is anything
+            other than "succeeded" &#8212; a stopped or errored run is not a success.</Description>
     <Observable>Yes</Observable>
     <Parameter>
       <Identifier>RecipeName</Identifier>
       <DisplayName>Recipe Name</DisplayName>
-      <Description>Name of the recipe file (without .json extension).</Description>
+      <Description>File name in Library/Recipes.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
     </Parameter>
     <Response>
       <Identifier>RunId</Identifier>
-      <DisplayName>Run ID</DisplayName>
-      <Description>ID of the started run for tracking.</Description>
+      <DisplayName>Run Id</DisplayName>
+      <Description>The robot's own run id, for looking the run up later.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>RunSteps</Identifier>
+    <DisplayName>Run Steps</DisplayName>
+    <Description>MOVES HARDWARE. Run recipe steps supplied inline, without a saved
+            recipe file, against the active HAL configuration.
+
+            This is what makes atomic control possible without one SiLA2 command
+            per Opentrons primitive: pass a JSON array of recipe steps (the same
+            format as a recipe's "Steps") and any command the recipe format
+            supports &#8212; Transfer, Mix, MoveLabware, heater-shaker, Delay, and the
+            rest &#8212; becomes usable as a single workflow step. Previously the only
+            way to move one plate or mix one well was to author a recipe file.
+
+            Example: [{"Command": "Mix", "PipetteMount": "left",
+                       "Location": "MyPlate:A1", "Repetitions": 3, "Volume": 100}]</Description>
+    <Observable>Yes</Observable>
+    <Parameter>
+      <Identifier>StepsJson</Identifier>
+      <DisplayName>Steps (JSON)</DisplayName>
+      <Description>JSON array of recipe step objects.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Parameter>
+    <Parameter>
+      <Identifier>Description</Identifier>
+      <DisplayName>Description</DisplayName>
+      <Description>Label for the run archive. Optional.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Parameter>
+    <Response>
+      <Identifier>RunId</Identifier>
+      <DisplayName>Run Id</DisplayName>
+      <Description>The robot's own run id.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>ValidateRecipe</Identifier>
+    <DisplayName>Validate Recipe</DisplayName>
+    <Description>Check a recipe against the active HAL configuration without running
+            it: every labware the recipe requires must be present on the deck,
+            and the generated protocol must compile. Safe to call at any time.</Description>
+    <Observable>No</Observable>
+    <Parameter>
+      <Identifier>RecipeName</Identifier>
+      <DisplayName>Recipe Name</DisplayName>
+      <Description>File name in Library/Recipes.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Parameter>
+    <Response>
+      <Identifier>ValidationResult</Identifier>
+      <DisplayName>Validation Result</DisplayName>
+      <Description>JSON: {valid, errors, warnings}.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
@@ -158,12 +251,12 @@
   <Command>
     <Identifier>PauseRun</Identifier>
     <DisplayName>Pause Run</DisplayName>
-    <Description>Pause the currently executing recipe.</Description>
+    <Description>Pause the protocol currently running.</Description>
     <Observable>No</Observable>
     <Response>
       <Identifier>PauseResult</Identifier>
       <DisplayName>Pause Result</DisplayName>
-      <Description>Confirmation of pause.</Description>
+      <Description>Status message.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
@@ -172,12 +265,12 @@
   <Command>
     <Identifier>ResumeRun</Identifier>
     <DisplayName>Resume Run</DisplayName>
-    <Description>Resume a paused recipe.</Description>
+    <Description>MOVES HARDWARE. Resume a paused protocol.</Description>
     <Observable>No</Observable>
     <Response>
       <Identifier>ResumeResult</Identifier>
       <DisplayName>Resume Result</DisplayName>
-      <Description>Confirmation of resume.</Description>
+      <Description>Status message.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
@@ -186,43 +279,183 @@
   <Command>
     <Identifier>AbortRun</Identifier>
     <DisplayName>Abort Run</DisplayName>
-    <Description>Abort the current recipe execution.</Description>
+    <Description>MOVES HARDWARE. Abort the running protocol. Drops tips first when
+            safety.auto_drop_tip_on_abort is set.</Description>
     <Observable>No</Observable>
     <Response>
       <Identifier>AbortResult</Identifier>
       <DisplayName>Abort Result</DisplayName>
-      <Description>Confirmation of abort.</Description>
+      <Description>Status message; warns explicitly if the tip drop failed.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
     </Response>
   </Command>
   <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
-  <!--                   TIP MANAGEMENT (3 commands)                       -->
+  <!--  DECK AND MODULES                                                   -->
   <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
   <Command>
-    <Identifier>ListTipRacks</Identifier>
-    <DisplayName>List Tip Racks</DisplayName>
-    <Description>List all tip racks with current usage statistics.</Description>
-    <Observable>No</Observable>
+    <Identifier>MoveLabware</Identifier>
+    <DisplayName>Move Labware</DisplayName>
+    <Description>MOVES HARDWARE. Move a piece of labware to another deck slot using
+            the gripper. Implemented for a long time but not reachable: moving a
+            plate between slots required authoring a whole recipe file.</Description>
+    <Observable>Yes</Observable>
+    <Parameter>
+      <Identifier>LabwareName</Identifier>
+      <DisplayName>Labware Name</DisplayName>
+      <Description>Logical name from the active HAL config (e.g. MyPlate).</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Parameter>
+    <Parameter>
+      <Identifier>NewLocation</Identifier>
+      <DisplayName>New Location</DisplayName>
+      <Description>Destination deck slot (e.g. C2), or a module's logical name.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Parameter>
+    <Parameter>
+      <Identifier>UseGripper</Identifier>
+      <DisplayName>Use Gripper</DisplayName>
+      <Description>True to move with the gripper; false pauses for a manual move.</Description>
+      <DataType>
+        <Basic>Boolean</Basic>
+      </DataType>
+    </Parameter>
     <Response>
-      <Identifier>TipRackList</Identifier>
-      <DisplayName>Tip Rack List</DisplayName>
-      <Description>JSON array of tip rack info with usage counts.</Description>
+      <Identifier>MoveResult</Identifier>
+      <DisplayName>Move Result</DisplayName>
+      <Description>Status message.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
     </Response>
   </Command>
+  <Command>
+    <Identifier>SetModuleTemperature</Identifier>
+    <DisplayName>Set Module Temperature</DisplayName>
+    <Description>MOVES HARDWARE. Set a heater-shaker or temperature module's target
+            temperature. Set Celsius to 0 to deactivate heating.</Description>
+    <Observable>Yes</Observable>
+    <Parameter>
+      <Identifier>ModuleName</Identifier>
+      <DisplayName>Module Name</DisplayName>
+      <Description>Logical module name from the active HAL config.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Parameter>
+    <Parameter>
+      <Identifier>Celsius</Identifier>
+      <DisplayName>Target Temperature (C)</DisplayName>
+      <Description>Target temperature in degrees Celsius; 0 deactivates.</Description>
+      <DataType>
+        <Basic>Real</Basic>
+      </DataType>
+    </Parameter>
+    <Parameter>
+      <Identifier>WaitForTemperature</Identifier>
+      <DisplayName>Wait For Temperature</DisplayName>
+      <Description>Block until the target is reached.</Description>
+      <DataType>
+        <Basic>Boolean</Basic>
+      </DataType>
+    </Parameter>
+    <Response>
+      <Identifier>TemperatureResult</Identifier>
+      <DisplayName>Temperature Result</DisplayName>
+      <Description>Status message.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>ShakeModule</Identifier>
+    <DisplayName>Shake Module</DisplayName>
+    <Description>MOVES HARDWARE. Shake a heater-shaker for a set time. The latch must
+            be closed; set DurationSeconds to 0 to stop shaking immediately.</Description>
+    <Observable>Yes</Observable>
+    <Parameter>
+      <Identifier>ModuleName</Identifier>
+      <DisplayName>Module Name</DisplayName>
+      <Description>Logical module name from the active HAL config.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Parameter>
+    <Parameter>
+      <Identifier>RPM</Identifier>
+      <DisplayName>RPM</DisplayName>
+      <Description>Shake speed in revolutions per minute.</Description>
+      <DataType>
+        <Basic>Integer</Basic>
+      </DataType>
+    </Parameter>
+    <Parameter>
+      <Identifier>DurationSeconds</Identifier>
+      <DisplayName>Duration (s)</DisplayName>
+      <Description>How long to shake; 0 stops shaking.</Description>
+      <DataType>
+        <Basic>Integer</Basic>
+      </DataType>
+    </Parameter>
+    <Response>
+      <Identifier>ShakeResult</Identifier>
+      <DisplayName>Shake Result</DisplayName>
+      <Description>Status message.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <Command>
+    <Identifier>SetModuleLatch</Identifier>
+    <DisplayName>Set Module Latch</DisplayName>
+    <Description>MOVES HARDWARE. Open or close a heater-shaker's labware latch. It
+            must be closed before shaking and open before the gripper can place
+            or remove a plate.</Description>
+    <Observable>No</Observable>
+    <Parameter>
+      <Identifier>ModuleName</Identifier>
+      <DisplayName>Module Name</DisplayName>
+      <Description>Logical module name from the active HAL config.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Parameter>
+    <Parameter>
+      <Identifier>Open</Identifier>
+      <DisplayName>Open</DisplayName>
+      <Description>True to open the latch, false to close it.</Description>
+      <DataType>
+        <Basic>Boolean</Basic>
+      </DataType>
+    </Parameter>
+    <Response>
+      <Identifier>LatchResult</Identifier>
+      <DisplayName>Latch Result</DisplayName>
+      <Description>Status message.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
+  <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
+  <!--  TIPS                                                               -->
+  <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
   <Command>
     <Identifier>RefillTipRack</Identifier>
     <DisplayName>Refill Tip Rack</DisplayName>
-    <Description>Mark a tip rack as refilled/replaced.</Description>
+    <Description>Record that a tip rack has been physically refilled.</Description>
     <Observable>No</Observable>
     <Parameter>
       <Identifier>RackSlot</Identifier>
       <DisplayName>Rack Slot</DisplayName>
-      <Description>Slot where the tip rack is located (e.g., 'A1', 'B2').</Description>
+      <Description>Deck slot of the refilled rack (e.g. A1), or "all".</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
@@ -230,7 +463,7 @@
     <Response>
       <Identifier>RefillResult</Identifier>
       <DisplayName>Refill Result</DisplayName>
-      <Description>Confirmation and new tip count.</Description>
+      <Description>Status message.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
@@ -239,65 +472,54 @@
   <Command>
     <Identifier>ResetTipTracking</Identifier>
     <DisplayName>Reset Tip Tracking</DisplayName>
-    <Description>Reset all tip tracking counters to full.</Description>
+    <Description>Reset every tip-consumption counter to full.</Description>
     <Observable>No</Observable>
     <Response>
       <Identifier>ResetResult</Identifier>
       <DisplayName>Reset Result</DisplayName>
-      <Description>Confirmation of reset.</Description>
+      <Description>Status message.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
     </Response>
   </Command>
   <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
-  <!--                     MONITORING (3 commands)                         -->
+  <!--  CAMERA                                                             -->
   <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
   <Command>
-    <Identifier>SetLights</Identifier>
-    <DisplayName>Set Lights</DisplayName>
-    <Description>Turn deck lights on or off.</Description>
-    <Observable>No</Observable>
+    <Identifier>CaptureImage</Identifier>
+    <DisplayName>Capture Image</DisplayName>
+    <Description>Photograph the deck with the robot's on-board camera and save the
+            image under Results/Images, where the web interface serves it.
+
+            Two acquisition paths are tried. First the robot's HTTP camera
+            endpoint, which takes a picture without moving anything. If that is
+            unavailable, capture falls back to running a one-step protocol on
+            the robot &#8212; and starting a protocol HOMES THE ROBOT, so the fallback
+            is refused unless AllowRobotMotion is true. The response always says
+            which path was used and why the other was not.</Description>
+    <Observable>Yes</Observable>
     <Parameter>
-      <Identifier>On</Identifier>
-      <DisplayName>On</DisplayName>
-      <Description>True to turn lights on, false to turn off.</Description>
+      <Identifier>Label</Identifier>
+      <DisplayName>Label</DisplayName>
+      <Description>Short name for the image file. Optional.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Parameter>
+    <Parameter>
+      <Identifier>AllowRobotMotion</Identifier>
+      <DisplayName>Allow Robot Motion</DisplayName>
+      <Description>Permit the protocol-based fallback, which homes the robot.
+                Leave false unless someone is watching the deck.</Description>
       <DataType>
         <Basic>Boolean</Basic>
       </DataType>
     </Parameter>
     <Response>
-      <Identifier>LightsResult</Identifier>
-      <DisplayName>Lights Result</DisplayName>
-      <Description>Current light state.</Description>
-      <DataType>
-        <Basic>String</Basic>
-      </DataType>
-    </Response>
-  </Command>
-  <Command>
-    <Identifier>GetRobotInfo</Identifier>
-    <DisplayName>Robot Info</DisplayName>
-    <Description>Get robot model, serial number, firmware version.</Description>
-    <Observable>No</Observable>
-    <Response>
-      <Identifier>RobotInfo</Identifier>
-      <DisplayName>Robot Info</DisplayName>
-      <Description>Robot details as JSON.</Description>
-      <DataType>
-        <Basic>String</Basic>
-      </DataType>
-    </Response>
-  </Command>
-  <Command>
-    <Identifier>GetModulesStatus</Identifier>
-    <DisplayName>Modules Status</DisplayName>
-    <Description>Get status of all attached modules (heater/shaker, thermocycler, etc.).</Description>
-    <Observable>No</Observable>
-    <Response>
-      <Identifier>ModulesStatus</Identifier>
-      <DisplayName>Modules Status</DisplayName>
-      <Description>Modules status as JSON array.</Description>
+      <Identifier>CaptureResult</Identifier>
+      <DisplayName>Capture Result</DisplayName>
+      <Description>JSON: {saved, path, url, method, detail}.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>

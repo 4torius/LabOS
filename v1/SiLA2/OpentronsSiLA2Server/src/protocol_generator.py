@@ -324,7 +324,7 @@ COMMAND_SCHEMA = {
     "WaitForResume": {"required": [], "optional": ["Message"]},
     "SetRailLights": {"required": [], "optional": ["On"]},
     "SetStatusBar": {"required": [], "optional": ["Status", "Color"]},
-    "TakeSnapshot": {"required": [], "optional": ["Filename"]},
+    "TakeSnapshot": {"required": [], "optional": ["Filename", "Device"]},
     
     # ═══════════════════════════════════════════════════════════════════════
     #                    ADVANCED / CUSTOM
@@ -1175,10 +1175,18 @@ def run(ctx: protocol_api.ProtocolContext):
             ctx.set_rail_lights(on)
 
         elif cmd == "TakeSnapshot":
+            # Grab one frame from the robot's camera and smuggle it out through
+            # the run log: the protocol runs on the robot, so a file it writes
+            # there is not reachable from the orchestrator. IMG_START/IMG_END
+            # bracket the base64 payload; robot_client.extract_images_from_log()
+            # decodes it back into a real .jpg on this side.
             f = step.get("Filename", "snapshot.jpg"); p = f"/var/lib/jupyter/{f}"
-            subprocess.run(["gst-launch-1.0", "v4l2src", "device=/dev/video2", "num-buffers=1", "!", "jpegenc", "!", "filesink", f"location={p}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            dev = step.get("Device", "/dev/video2")
+            subprocess.run(["gst-launch-1.0", "v4l2src", f"device={dev}", "num-buffers=1", "!", "jpegenc", "!", "filesink", f"location={p}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if os.path.exists(p):
                 with open(p, "rb") as fh: ctx.comment(f"IMG_START:{f}"); ctx.comment(base64.b64encode(fh.read()).decode('utf-8')); ctx.comment("IMG_END")
+            else:
+                ctx.comment(f"TakeSnapshot: no frame captured from {dev}")
 
         # ═══════════════════════════════════════════════════════════════════
         #               DYNAMIC PIPETTING COMMANDS (API 2.27+)

@@ -53,6 +53,18 @@ directories:
   library: "../../Library"
   recipes: "../../Library/Recipes"
   results: "../../Results"
+
+# On-board camera (CaptureImage command).
+camera:
+  enabled: true
+  # V4L2 node read on the robot by the TakeSnapshot protocol step. If capture
+  # produces no frame, this is the value to check: list the robot's devices
+  # with `ls /dev/video*` over SSH.
+  device: "/dev/video2"
+  # Try the robot's own HTTP camera endpoint first. It takes a picture without
+  # moving anything, so it is always preferred; the protocol fallback homes the
+  # robot and is refused unless the caller passes AllowRobotMotion.
+  http_probe: true
   protocols: "../../Protocols"
 
 tip_tracking:
