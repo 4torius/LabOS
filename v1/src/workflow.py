@@ -722,6 +722,7 @@ class PnPWorkflowExecutor:
             ))
 
         known_numbers = {s.step_number for s in workflow.steps}
+        silent_servers: Set[str] = set()
         for step in workflow.steps:
             # Validate dependencies for all steps first.
             for dep in step.depends_on:
@@ -764,6 +765,28 @@ class PnPWorkflowExecutor:
                 ))
                 continue
             server = match.target
+
+            # A server that is announced but not answering has no feature
+            # metadata, so every action "does not exist" on it. Blaming the
+            # action there is actively misleading: validating a perfectly good
+            # workflow while the instruments are switched off reported four
+            # invented command errors instead of one true one.
+            if not server.get_all_commands():
+                # Once per instrument, not once per step: a ten-step workflow
+                # against one switched-off server produced ten copies of the
+                # same sentence, burying anything else wrong with the file.
+                if server.address not in silent_servers:
+                    silent_servers.add(server.address)
+                    errors.append(ValidationError(
+                        step_number=step.step_number,
+                        field="Instrument",
+                        message=(
+                            f"'{step.instrument}' published no commands — the server at "
+                            f"{server.address} is registered but not responding, so its "
+                            f"capabilities could not be read. Start it and try again."
+                        ),
+                    ))
+                continue
             
             # Find command
             command = None
