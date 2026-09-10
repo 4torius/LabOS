@@ -50,6 +50,26 @@ discovery, from `Library/`, or from the active hardware config. Hardcoded lists
 of instruments, labware and deck slots have all been removed for offering
 things that do not exist, and a test now guards each one.
 
+### Offering a parameter's values
+
+A parameter with a small fixed set of sensible values gets a dropdown by
+declaring them in the server's `library_catalog.json`:
+
+```json
+{ "hint": "tecan_connect_mode",
+  "values": ["", "usb", "dialog"],
+  "value_labels": { "usb": "usb - stored connection, then a fresh scan" },
+  "parameter_names": ["ConnectionString"] }
+```
+
+**Not** a SiLA2 `Constrained/Set`, tempting as that is. A Set is enforced by the
+framework before the server sees the call, so it rejects values the server still
+accepts — constraining `ConnectionString` to five keywords broke the empty
+string, which is the documented "use your configured default" and what a shipped
+workflow sends. Narrowing the protocol to gain a UI affordance costs more than
+it gives. Use a Set only when the value genuinely is invalid, not merely
+unlisted.
+
 There is no JS test runner here. `tests/unit/test_frontend_assets.py` checks
 what can be checked without a browser: that every module and every inline block
 is structurally sound, and that the removed affordances stay removed.
