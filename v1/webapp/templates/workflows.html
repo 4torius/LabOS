@@ -1424,8 +1424,8 @@ function renderProperties() {
         }
     }
     if (!cmd) cmd = inst.commands[0] || { id: step.command, label: step.command, parameters: [] };
-    applyRequiredConstrainedDefaults(step, cmd);
-    applyRequiredStringDefaults(step, cmd);
+    LabOS.params.applyRequiredSelectDefaults(step, cmd);
+    LabOS.params.applyRequiredStringDefaults(step, cmd);
 
     // Dynamic parameters with smart dropdowns
     // First check API parameters, then fallback to local cmd.params
@@ -1462,7 +1462,7 @@ function renderProperties() {
                     uiHint !== 'liquid_class' && uiHint !== 'mobile_task') {
                 // Server provided predefined options — shared with dashboard.html
                 // via /static/js/param-form-shared.js (see base.html).
-                html += buildConstrainedSelectHtml(param, paramObj.options, currentValue, paramObj.required, 'form-select form-select-sm param-input', true);
+                html += LabOS.params.buildSelect(param, paramObj, currentValue, paramObj.required, 'form-select form-select-sm param-input', true);
             } else if (uiHint === 'recipe' || RECIPE_PARAMS.indexOf(paramLower) !== -1) {
                 // Recipe dropdown
                 html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
@@ -1612,7 +1612,7 @@ function renderProperties() {
     }
 }
 
-// applyRequiredConstrainedDefaults() is defined once, shared with dashboard.html,
+// The parameter-form helpers live in /static/js/labos-params.js, shared with dashboard.html,
 // in /static/js/param-form-shared.js (loaded globally via base.html).
 
 // Steps rebuilt from a serialized source (Load, Template, Import) get their
@@ -1626,8 +1626,8 @@ function _applyRequiredDefaultsToAllSteps() {
         var inst = INSTRUMENTS[step.type];
         var cmd = inst && inst.commands && inst.commands.find(function(c) { return c.id === step.command; });
         if (cmd) {
-            applyRequiredConstrainedDefaults(step, cmd);
-            applyRequiredStringDefaults(step, cmd);
+            LabOS.params.applyRequiredSelectDefaults(step, cmd);
+            LabOS.params.applyRequiredStringDefaults(step, cmd);
         }
     });
 }
@@ -1640,8 +1640,8 @@ function updateCommand(cmdId) {
 
     var inst = INSTRUMENTS[step.type];
     var cmd = inst && inst.commands.find(function(c) { return c.id === cmdId; });
-    applyRequiredConstrainedDefaults(step, cmd);
-    applyRequiredStringDefaults(step, cmd);
+    LabOS.params.applyRequiredSelectDefaults(step, cmd);
+    LabOS.params.applyRequiredStringDefaults(step, cmd);
 
     step.params = normalizeStepParamsForCommand(step.command, step.params);
     renderSteps();

@@ -6,7 +6,6 @@ the gripper, the heater-shaker, the camera — were reachable only by authoring
 a recipe file. This checks the shape that replaced it, and the argument
 handling of the commands that are new.
 """
-import importlib
 import json
 import re
 import sys
@@ -82,22 +81,49 @@ class TestFeatureShape:
 
 class TestGeneratedBindingsMatchTheImplementation:
 
-    def test_no_abstract_method_is_left_unimplemented(self):
+    def test_every_abstract_method_is_implemented(self):
         """Codegen and implementation agree — otherwise the server cannot start.
 
-        Loaded through _pkg_loader: the Opentrons server ships a package
-        literally named `src`, same as v1's own, so importing it directly
-        collides with whichever one pytest cached first.
+        Checked by reading both files rather than importing them. Importing the
+        generated feature compiles its .proto into protobuf's *process-global*
+        descriptor pool, keyed by the file name "WorkflowAPI.proto". If
+        anything else in the same pytest session has already registered a
+        different build of that proto — and something does, whenever a real
+        Opentrons server is running on the machine and discovery fetches its
+        feature definition — the second registration silently wins and the
+        import fails with a KeyError on whichever message is new. The unit
+        suite must not depend on what happens to be running on the bench.
         """
         server_dir = V1_DIR / "SiLA2" / "OpentronsSiLA2Server"
-        if str(server_dir) not in sys.path:
-            sys.path.insert(0, str(server_dir))
-        from _pkg_loader import load_opentrons_src
+        base = (server_dir / "generated" / "workflowapi" / "workflowapi_base.py").read_text(
+            encoding="utf-8")
+        impl = (server_dir / "src" / "workflow_api_impl.py").read_text(encoding="utf-8")
 
-        ot_src = load_opentrons_src()
-        impl_module = importlib.import_module("_ot_src.workflow_api_impl")
-        missing = sorted(getattr(impl_module.WorkflowAPIImpl, "__abstractmethods__", set()))
-        assert missing == [], f"unimplemented: {missing}"
+        required = set(re.findall(r"@abstractmethod\s+def\s+(\w+)\s*\(", base))
+        assert required, "no abstract methods found — is the generated base intact?"
+
+        implemented = set(re.findall(r"^    def\s+(\w+)\s*\(", impl, re.M))
+        missing = sorted(required - implemented)
+        assert missing == [], f"declared in the FDL but not implemented: {missing}"
+
+    def test_the_generated_bindings_cover_the_feature_definition(self):
+        """Every command and property in the FDL reached codegen.
+
+        Catches the specific mistake of editing the feature definition and
+        forgetting to re-run `labos.py codegen`: the server then starts and
+        simply does not have the command.
+        """
+        base = (V1_DIR / "SiLA2" / "OpentronsSiLA2Server" / "generated" / "workflowapi"
+                / "workflowapi_base.py").read_text(encoding="utf-8")
+        for command in COMMANDS:
+            assert re.search(rf"def\s+{command}\s*\(", base), (
+                f"{command} is in the FDL but not in the generated bindings — "
+                f"run: python labos.py codegen OpentronsSiLA2Server"
+            )
+        for prop in PROPERTIES:
+            assert (f"get_{prop}" in base or f"update_{prop}" in base), (
+                f"property {prop} is in the FDL but not in the generated bindings"
+            )
 
 
 class TestRunStepsValidation:

@@ -126,46 +126,19 @@
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Shared modules. Loaded before the page scripts below, which use them.
+         These replace helpers that were copy-pasted into each template in
+         slightly different versions: three spellings of "escape this", two
+         date formatters, and a toast that only existed where somebody
+         remembered to paste it. -->
+    <script src="/static/js/labos-core.js"></script>
+    <script src="/static/js/labos-ws.js"></script>
+    <script src="/static/js/labos-params.js"></script>
     <script>
-        // WebSocket connection with error handling
-        let ws = null;
-        let wsConnected = false;
-        
-        function connectWebSocket() {
-            ws = new WebSocket(`ws://${window.location.host}/ws`);
-            
-            ws.onopen = () => {
-                wsConnected = true;
-                console.log('✅ WebSocket connected');
-            };
-            
-            ws.onmessage = (event) => {
-                // Handle ping/pong and non-JSON messages
-                if (event.data === 'pong' || event.data === 'ping') {
-                    return; // Ignore heartbeat messages
-                }
-                try {
-                    const data = JSON.parse(event.data);
-                    window.handleWebSocketMessage(data);
-                } catch (e) {
-                    console.log('Received non-JSON message:', event.data);
-                }
-            };
-            
-            ws.onerror = (error) => {
-                console.error('❌ WebSocket error:', error);
-            };
-            
-            ws.onclose = () => {
-                wsConnected = false;
-                console.log('⚠️ WebSocket disconnected, reconnecting in 3s...');
-                setTimeout(connectWebSocket, 3000);
-            };
-        }
-        
-        // Connect on load
-        connectWebSocket();
-        
+        // The socket lives in /static/js/labos-ws.js. This page subscribes to
+        // the message types it renders, instead of owning a single if/else
+        // chain over every type on behalf of every page.
+
         // Sync notification badge with server on page load
         function syncNotificationBadge() {
             fetch('/api/operator/pending')
@@ -203,51 +176,61 @@
         // Refresh badge every 5 seconds
         setInterval(syncNotificationBadge, 5000);
         
-        function handleWebSocketMessage(data) {
-            if (data.type === 'device_update') {
-                updateDeviceStatus(data.device_id, data.status);
-            } else if (data.type === 'operator_notification') {
-                showOperatorNotification(data);
-            } else if (data.type === 'workflow_start') {
-                showWorkflowStatus(data.workflow_name, 0, data.total_steps, 'Starting...');
-            } else if (data.type === 'workflow_progress') {
-                showWorkflowStatus(data.workflow_name, data.step, data.total, `${data.instrument} - ${data.action}`);
-            } else if (data.type === 'workflow_paused') {
-                showWorkflowPaused(data.message, data.step);
-            } else if (data.type === 'workflow_complete') {
-                showWorkflowComplete(data.workflow_name, data.message);
-            } else if (data.type === 'workflow_failed') {
-                const failMessage = data.message || data.error || (Array.isArray(data.errors) ? data.errors.join('; ') : data.errors);
-                showWorkflowFailed(data.workflow_name, data.step, data.reason, failMessage);
-            } else if (data.type === 'workflow_resumed') {
-                // Resume status bar animation
-                if (workflowStatusEl) {
-                    workflowStatusEl.style.borderTopColor = '#0d6efd';
-                    workflowStatusState.paused = false;
-                    workflowStatusState.action = data.message || workflowStatusState.action || 'Resumed';
-                    renderWorkflowStatusBar();
-                }
-            } else if (data.type === 'command_executed') {
-                if (typeof log === 'function') {
-                    log('[' + (data.device_name || data.device_id || 'device') + '] ' + data.command + ' completed: ' + (data.message || 'OK'), 'success');
-                }
-                showToast('success', 'Command completed', (data.device_name || data.device_id || 'Device') + ' - ' + data.command);
-            } else if (data.type === 'command_failed') {
-                if (typeof log === 'function') {
-                    log('[' + (data.device_name || data.device_id || 'device') + '] ' + data.command + ' failed: ' + (data.error || 'unknown error'), 'error');
-                }
-                showToast('error', 'Command failed', (data.device_name || data.device_id || 'Device') + ' - ' + (data.error || 'unknown error'));
-            } else if (data.type === 'emergency_stop') {
-                showEmergencyStop(data.message);
-            } else if (data.type === 'intervention_required') {
-                showInterventionRequired(data);
-            } else if (data.type === 'tip_refill_complete') {
-                showToast('success', 'Tips Reloaded', data.message || 'Tip rack reloaded successfully');
-            } else if (data.type === 'mobile_tasks_updated') {
-                if (typeof refreshMobileTasks === 'function') refreshMobileTasks();
+        LabOS.ws.on('device_update', function (d) { updateDeviceStatus(d.device_id, d.status); });
+        LabOS.ws.on('operator_notification', showOperatorNotification);
+        LabOS.ws.on('emergency_stop', function (d) { showEmergencyStop(d.message); });
+        LabOS.ws.on('intervention_required', showInterventionRequired);
+
+        LabOS.ws.on('workflow_start', function (d) {
+            showWorkflowStatus(d.workflow_name, 0, d.total_steps, 'Starting...');
+        });
+        LabOS.ws.on('workflow_progress', function (d) {
+            showWorkflowStatus(d.workflow_name, d.step, d.total, d.instrument + ' - ' + d.action);
+        });
+        LabOS.ws.on('workflow_paused', function (d) { showWorkflowPaused(d.message, d.step); });
+        LabOS.ws.on('workflow_complete', function (d) {
+            showWorkflowComplete(d.workflow_name, d.message);
+        });
+        LabOS.ws.on('workflow_failed', function (d) {
+            var failMessage = d.message || d.error ||
+                (Array.isArray(d.errors) ? d.errors.join('; ') : d.errors);
+            showWorkflowFailed(d.workflow_name, d.step, d.reason, failMessage);
+            // An instrument that did not confirm a stop is the one thing the
+            // operator has to act on physically, so it gets its own sticky
+            // warning rather than being folded into the failure message.
+            if (d.requires_attention) {
+                LabOS.toast('error', 'Abort incomplete — check the instruments',
+                            (d.abort_report || []).join('\n') ||
+                            'Some instruments did not confirm the stop',
+                            { sticky: true });
             }
-        }
-        
+        });
+        LabOS.ws.on('workflow_resumed', function (d) {
+            if (workflowStatusEl) {
+                workflowStatusEl.style.borderTopColor = '#0d6efd';
+                workflowStatusState.paused = false;
+                workflowStatusState.action = d.message || workflowStatusState.action || 'Resumed';
+                renderWorkflowStatusBar();
+            }
+        });
+
+        LabOS.ws.on('command_executed', function (d) {
+            var who = d.device_name || d.device_id || 'Device';
+            LabOS.log('[' + who + '] ' + d.command + ' completed: ' + (d.message || 'OK'), 'success');
+            showToast('success', 'Command completed', who + ' - ' + d.command);
+        });
+        LabOS.ws.on('command_failed', function (d) {
+            var who = d.device_name || d.device_id || 'Device';
+            LabOS.log('[' + who + '] ' + d.command + ' failed: ' + (d.error || 'unknown error'), 'error');
+            showToast('error', 'Command failed', who + ' - ' + (d.error || 'unknown error'));
+        });
+        LabOS.ws.on('tip_refill_complete', function (d) {
+            showToast('success', 'Tips Reloaded', d.message || 'Tip rack reloaded successfully');
+        });
+        LabOS.ws.on('mobile_tasks_updated', function () {
+            if (typeof refreshMobileTasks === 'function') refreshMobileTasks();
+        });
+
         function updateDeviceStatus(deviceId, status) {
             const card = document.querySelector(`[data-device-id="${deviceId}"]`);
             if (card) {
@@ -562,30 +545,13 @@
             }).catch(e => showToast('error', 'Error', e.message));
         }
         
-        function showToast(type, title, message) {
-            const toast = document.createElement('div');
-            toast.className = 'toast show position-fixed';
-            toast.style.cssText = 'top: 70px; right: 20px; z-index: 9999; min-width: 270px;';
-            const bgClass = type === 'success' ? 'bg-success'
-                          : (type === 'error' || type === 'danger') ? 'bg-danger'
-                          : type === 'warning' ? 'bg-warning text-dark'
-                          : 'bg-info';
-            const textClass = type === 'warning' ? '' : 'text-white';
-            toast.innerHTML = `
-                <div class="toast-header ${bgClass} ${textClass}">
-                    <strong class="me-auto">${title}</strong>
-                    <button type="button" class="btn-close btn-close-white" onclick="this.closest('.toast').remove()"></button>
-                </div>
-                <div class="toast-body">${message}</div>
-            `;
-            document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 5000);
+        // Kept as a name because the page templates call it in ~40 places;
+        // the implementation is shared (labos-core.js).
+        function showToast(type, title, message, opts) {
+            return LabOS.toast(type, title, message, opts);
         }
-        
-        // Keep connection alive
-        setInterval(() => ws.send('ping'), 30000);
+
     </script>
-    <script src="/static/js/param-form-shared.js"></script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

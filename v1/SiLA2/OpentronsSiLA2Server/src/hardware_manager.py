@@ -139,6 +139,105 @@ class HardwareManager:
             logger.error(f"Failed to switch config: {e}")
             return False
             
+    def record_labware_move(self, labware_name: str, new_location: str) -> str:
+        """Persist a completed gripper move into the active hardware config.
+
+        Without this the config lies the moment a plate is moved: it still
+        claims the labware is in the slot it started in, so the next recipe
+        generates `load_labware(..., "D2")` for a plate now sitting somewhere
+        else, and the deck the operator sees stops matching the deck the
+        software believes in.
+
+        `new_location` is either a deck slot ("C2") or the logical name of a
+        module on the deck. A module destination is recorded as `OnModule`,
+        which the protocol generator already understands — it loads such
+        labware with `module.load_labware()` instead of `ctx.load_labware()`.
+
+        Returns a human-readable description of what was recorded. Raises
+        ValueError if the labware or the destination is not in this config,
+        because silently recording a move that cannot be true is worse than
+        refusing.
+        """
+        labware = self._config.get("Labware", {})
+        if labware_name not in labware:
+            raise ValueError(
+                f"'{labware_name}' is not labware in hardware config "
+                f"'{self.get_current_config_name()}'. Known: "
+                f"{', '.join(sorted(labware)) or 'none'}"
+            )
+
+        entry = dict(labware[labware_name])
+        previous = f"{entry.get('OnModule')}" if entry.get("OnModule") else entry.get("Slot", "?")
+
+        modules = self._config.get("Modules", {})
+        if new_location in modules:
+            entry["OnModule"] = new_location
+            # Keep Slot in step with the module's own slot so anything reading
+            # Slot alone still gets the right physical position.
+            entry["Slot"] = modules[new_location].get("Slot", entry.get("Slot", ""))
+        else:
+            occupied = self._slot_occupants()
+            occupied.pop(labware_name, None)     # it is leaving its own slot
+            clash = next((name for name, slot in occupied.items() if slot == new_location), None)
+            if clash:
+                raise ValueError(
+                    f"Slot {new_location} is occupied by '{clash}' in hardware "
+                    f"config '{self.get_current_config_name()}'"
+                )
+            entry.pop("OnModule", None)
+            entry["Slot"] = new_location
+
+        labware[labware_name] = entry
+        self._config["Labware"] = labware
+        self._sync_slot_assignments()
+        self._save_current_config()
+
+        logger.info("HAL updated: %s moved %s -> %s", labware_name, previous, new_location)
+        return f"{labware_name}: {previous} -> {new_location}"
+
+    def _slot_occupants(self) -> Dict[str, str]:
+        """logical name -> slot, across labware, modules and trash."""
+        occupants: Dict[str, str] = {}
+        for section in ("Labware", "Modules", "Trash"):
+            for name, entry in (self._config.get(section) or {}).items():
+                if isinstance(entry, dict) and entry.get("Slot"):
+                    occupants[name] = entry["Slot"]
+        return occupants
+
+    def _sync_slot_assignments(self) -> None:
+        """Refresh Metadata.slot_assignments if the config carries one.
+
+        The Recipe Generator writes this map, and it goes stale the moment
+        anything moves — the shipped 01_SPAAC config already disagrees with its
+        own Labware section about where Source_1 is. It is descriptive, not
+        authoritative, but a stale copy is a trap for whoever reads it next.
+        """
+        metadata = self._config.get("Metadata")
+        if not isinstance(metadata, dict) or "slot_assignments" not in metadata:
+            return
+        metadata["slot_assignments"] = {
+            slot: name for name, slot in sorted(self._slot_occupants().items())
+        }
+
+    def _save_current_config(self) -> None:
+        """Write the in-memory config back, atomically."""
+        if not (self._config_folder and self._current_config_file):
+            logger.warning("No config file to save to — HAL change kept in memory only")
+            return
+        path = os.path.join(self._config_folder, self._current_config_file)
+        tmp = f"{path}.tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as handle:
+                json.dump(self._config, handle, indent=2, ensure_ascii=False)
+            os.replace(tmp, path)
+        except Exception:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+            raise
+
     def get_current_config_name(self) -> str:
         """Get the name of the currently loaded configuration."""
         return self._config.get('ConfigName', self._current_config_file or 'Unknown')

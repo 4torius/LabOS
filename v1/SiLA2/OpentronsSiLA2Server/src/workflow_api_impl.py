@@ -40,6 +40,7 @@ from generated.workflowapi import (
     WorkflowAPIBase,
     AbortRun_Responses,
     CaptureImage_Responses,
+    CaptureTimelapse_Responses,
     EmergencyStop_Responses,
     ExecuteRecipe_Responses,
     Home_Responses,
@@ -62,6 +63,11 @@ if TYPE_CHECKING:
     from .config import ServerConfig
 
 logger = logging.getLogger(__name__)
+
+#: Addressable Flex deck slots, plus the column-4 staging area the gripper can
+#: reach. Used only to say which slots are free when a move is refused.
+_FLEX_SLOTS = ("A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3",
+               "D1", "D2", "D3", "A4", "B4", "C4", "D4")
 
 
 class WorkflowAPIImpl(WorkflowAPIBase):
@@ -441,8 +447,34 @@ class WorkflowAPIImpl(WorkflowAPIBase):
         metadata: MetadataDict,
         instance: ObservableCommandInstance,
     ) -> MoveLabware_Responses:
+        ot = self._require_ot()
         instance.begin_execution()
         instance.progress = 0.05
+
+        # Check against the deck *before* the gripper moves. Both of these used
+        # to fail deep inside the generated protocol, after the run had already
+        # started and the robot had homed.
+        hardware = ot.hardware
+        if hardware is not None:
+            known_labware = hardware.get_labware() or {}
+            if LabwareName not in known_labware:
+                raise ValueError(
+                    f"'{LabwareName}' is not labware in the active hardware config "
+                    f"'{hardware.get_current_config_name()}'. On the deck: "
+                    f"{', '.join(sorted(known_labware)) or 'nothing'}"
+                )
+            modules = hardware.get_modules() or {}
+            if NewLocation not in modules:
+                occupied = {
+                    slot: name for name, slot in hardware._slot_occupants().items()
+                    if name != LabwareName
+                }
+                if NewLocation in occupied:
+                    raise ValueError(
+                        f"Slot {NewLocation} already holds '{occupied[NewLocation]}'. "
+                        f"Free slots: {', '.join(sorted(set(_FLEX_SLOTS) - set(occupied))) or 'none'}"
+                    )
+
         self._run_inline(
             [{
                 "Command": "MoveLabware",
@@ -452,10 +484,29 @@ class WorkflowAPIImpl(WorkflowAPIBase):
             }],
             f"MoveLabware {LabwareName} -> {NewLocation}",
         )
+        instance.progress = 0.9
+
+        # The plate has physically moved, so the config that describes the deck
+        # has to say so. Without this the next recipe loads it in the slot it
+        # started in, and the deck the operator sees stops matching the deck the
+        # software believes in.
+        hal_note = ""
+        if hardware is not None:
+            try:
+                hal_note = f"; hardware config updated ({hardware.record_labware_move(LabwareName, NewLocation)})"
+            except Exception as exc:
+                # The move succeeded; only the bookkeeping failed. Say so loudly
+                # rather than reporting a clean success over a config that is now
+                # wrong.
+                logger.error("Labware moved but the hardware config was not updated: %s", exc)
+                hal_note = (f"; WARNING the hardware config could NOT be updated ({exc}) — "
+                            f"it still shows the old position, fix it on the Hardware page")
+
         instance.progress = 1.0
+        self._publish_state()
         return MoveLabware_Responses(
             MoveResult=f"Moved {LabwareName} to {NewLocation}"
-                       f"{' with the gripper' if UseGripper else ' (manual move)'}"
+                       f"{' with the gripper' if UseGripper else ' (manual move)'}{hal_note}"
         )
 
     def SetModuleTemperature(
@@ -632,6 +683,96 @@ class WorkflowAPIImpl(WorkflowAPIBase):
             "method": "protocol", "run_id": run_id,
             "detail": (f"{http_detail}. Captured by running a one-step protocol "
                        f"(the robot was homed). {saved} image(s) extracted from the run log."),
+        }))
+
+    #: Bound on a timelapse. Each frame is a full-resolution JPEG carried
+    #: base64-encoded through the run log; a few hundred is already a very
+    #: large log, and a run that never ends is worse than a refused one.
+    MAX_TIMELAPSE_FRAMES = 240
+
+    def CaptureTimelapse(
+        self,
+        Count: int,
+        IntervalSeconds: int,
+        Label: str,
+        AllowRobotMotion: bool,
+        *,
+        metadata: MetadataDict,
+        instance: ObservableCommandInstance,
+    ) -> CaptureTimelapse_Responses:
+        """Photograph the deck repeatedly, in a single run.
+
+        The robot cannot hand back a video. A protocol executes *on* the robot,
+        and the only channel to this process is the run log, where each frame
+        travels base64-encoded — fine for one photograph, impractical for the
+        megabytes of a clip. A timelapse is the form this transport supports,
+        and for watching a gel set or a plate fill it is the more useful one:
+        frames at chosen moments, each a full-resolution still.
+
+        All frames come from one protocol run, so the robot homes once at the
+        start rather than once per frame.
+        """
+        ot = self._require_ot()
+        instance.begin_execution()
+        instance.progress = 0.02
+
+        if not getattr(self._config, "camera_enabled", True):
+            return CaptureTimelapse_Responses(TimelapseResult=json.dumps({
+                "saved": False, "frames": 0,
+                "detail": "Camera disabled in config.yaml (camera.enabled: false)",
+            }))
+
+        if Count < 1 or Count > self.MAX_TIMELAPSE_FRAMES:
+            raise ValueError(
+                f"Count must be between 1 and {self.MAX_TIMELAPSE_FRAMES}; got {Count}. "
+                f"Every frame is carried base64-encoded through the run log."
+            )
+        interval = max(0, int(IntervalSeconds))
+
+        # Running a protocol homes the robot, exactly as for CaptureImage —
+        # and here it is the only available path, since the HTTP camera
+        # endpoint takes one picture and cannot be scheduled.
+        if not AllowRobotMotion:
+            return CaptureTimelapse_Responses(TimelapseResult=json.dumps({
+                "saved": False, "frames": 0, "detail": (
+                    "A timelapse runs a protocol on the robot, which homes it. "
+                    "Refused because AllowRobotMotion is false. Set it true only "
+                    "with someone watching the deck."
+                ),
+            }))
+
+        label = "".join(c if c.isalnum() or c in "-_" else "_" for c in (Label or "timelapse"))
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        device = getattr(self._config, "camera_device", "/dev/video2")
+        target_dir = self._images_dir()
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        steps: List[Dict[str, Any]] = []
+        for frame in range(Count):
+            if frame and interval:
+                steps.append({"Command": "Delay", "Seconds": interval})
+            steps.append({
+                "Command": "TakeSnapshot",
+                "Filename": f"{stamp}_{label}_{frame + 1:03d}.jpg",
+                "Device": device,
+            })
+
+        instance.progress = 0.1
+        run_id = self._run_inline(steps, f"CaptureTimelapse {label} x{Count}")
+
+        saved = self._run_async(
+            ot.robot.extract_images_from_log(run_id, str(target_dir)), timeout=300
+        ) if ot.robot else 0
+        instance.progress = 1.0
+
+        return CaptureTimelapse_Responses(TimelapseResult=json.dumps({
+            "saved": bool(saved), "frames": saved, "requested": Count,
+            "path": str(target_dir), "url": "/api/images", "run_id": run_id,
+            "detail": (
+                f"{saved} of {Count} frame(s) captured at {interval}s intervals "
+                f"and extracted from the run log. The robot was homed once at "
+                f"the start of the run."
+            ),
         }))
 
     def _images_dir(self) -> Path:

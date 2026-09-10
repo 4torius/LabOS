@@ -360,6 +360,54 @@ class PnPClient:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _run_sync)
 
+    async def subscribe_property(
+        self,
+        server: PnPServer,
+        feature_name: str,
+        property_name: str,
+        on_value: Callable[[Any], None],
+    ) -> Optional[Any]:
+        """Subscribe to an observable property; return a handle with .cancel().
+
+        A SiLA2 observable property is *pushed*: the server sends a new value
+        whenever it changes. Until now this client could only `get()` one, so
+        the dashboard polled — asking four instruments for six values every few
+        seconds to learn that nothing had happened, and still showing a stale
+        value in between.
+
+        `on_value` is called with each new value. It runs on the sila2
+        library's own executor thread, so a caller that needs the asyncio loop
+        must marshal onto it itself (LabCore does).
+
+        Returns None when the property is not observable or the server cannot
+        be reached — a caller falling back to polling is a normal outcome, not
+        an error.
+        """
+        def _run_sync() -> Optional[Any]:
+            try:
+                sila_client = self._get_sila_client(server.host, server.port)
+                if sila_client is None:
+                    return None
+                feature_obj = getattr(sila_client, feature_name, None)
+                if feature_obj is None:
+                    return None
+                prop_obj = getattr(feature_obj, property_name, None)
+                if prop_obj is None or not hasattr(prop_obj, "subscribe"):
+                    return None      # unobservable: the caller polls instead
+                return prop_obj.subscribe(callbacks=[on_value])
+            except grpc.RpcError as exc:
+                logger.debug("Could not subscribe to %s.%s on %s: %s",
+                             feature_name, property_name, server.name, exc)
+                self._invalidate_sila_client(server.host, server.port)
+                return None
+            except Exception as exc:
+                logger.debug("Could not subscribe to %s.%s on %s: %s",
+                             feature_name, property_name, server.name, exc)
+                return None
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _run_sync)
+
     def _get_sila_client(self, host: str, port: int) -> Any:
         return get_shared_sila_client(host, port)
 

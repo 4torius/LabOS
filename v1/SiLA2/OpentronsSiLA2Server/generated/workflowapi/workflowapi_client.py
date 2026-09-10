@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from workflowapi_types import (
         AbortRun_Responses,
         CaptureImage_Responses,
+        CaptureTimelapse_Responses,
         EmergencyStop_Responses,
         ExecuteRecipe_Responses,
         Home_Responses,
@@ -290,6 +291,35 @@ class WorkflowAPIClient:
         the robot — and starting a protocol HOMES THE ROBOT, so the fallback
         is refused unless AllowRobotMotion is true. The response always says
         which path was used and why the other was not.
+
+        """
+        ...
+
+    def CaptureTimelapse(
+        self,
+        Count: int,
+        IntervalSeconds: int,
+        Label: str,
+        AllowRobotMotion: bool,
+        *,
+        metadata: Optional[Iterable[ClientMetadataInstance]] = None,
+    ) -> ClientObservableCommandInstance[CaptureTimelapse_Responses]:
+        """
+
+        MOVES HARDWARE. Take a series of photographs of the deck at a fixed
+        interval, in a single run.
+
+        The robot cannot send a video back. A protocol runs *on* the robot,
+        and the only channel to the orchestrator is the run log, where each
+        frame travels base64-encoded — fine for a photograph, impractical
+        for the megabytes of a clip. A timelapse is the form this transport
+        supports, and for watching a gel set or a plate fill it is the more
+        useful one anyway: frames at chosen moments, each a full-resolution
+        still.
+
+        All the frames come from one protocol run, so the robot homes once
+        at the start rather than once per photograph. That homing is why
+        AllowRobotMotion must be set: see CaptureImage.
 
         """
         ...

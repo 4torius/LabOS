@@ -50,6 +50,7 @@ from typing import Any, Callable, Dict, List, Optional, Awaitable, Tuple
 # Local imports
 try:
     from src.settings import get_settings
+    from src.deck import DECK_HINTS, options as deck_options
     from src.resolver import Resolution, resolve
     from src.discovery import PnPDiscovery, PnPServer, PnPCommand
     from src.client import PnPClient, PnPRegistry, CommandResult as PnPResult
@@ -66,6 +67,7 @@ try:
 except ImportError:
     # Running from different directory
     from settings import get_settings
+    from deck import DECK_HINTS, options as deck_options
     from resolver import Resolution, resolve
     from discovery import PnPDiscovery, PnPServer, PnPCommand
     from client import PnPClient, PnPRegistry, CommandResult as PnPResult
@@ -95,7 +97,8 @@ class CommandParameter:
     required: bool = True
     default_value: str = ""
     ui_hint: str = ""           # "recipe", "analysis", "hal_config", "liquid_class", "location", "labware"
-    options: List[str] = field(default_factory=list)  # Predefined options if any
+    options: List[str] = field(default_factory=list)          # values the UI may offer
+    options_detail: List[Dict[str, str]] = field(default_factory=list)  # {value,label} pairs
     
     def to_dict(self) -> Dict:
         return {
@@ -106,7 +109,11 @@ class CommandParameter:
             "required": self.required,
             "default": self.default_value,
             "ui_hint": self.ui_hint,
-            "options": self.options
+            "options": self.options,
+            # {value,label} pairs when the values are not self-explanatory: a
+            # deck slot is, "Source_1" is not. The form falls back to `options`
+            # when this is empty, so nothing has to special-case it.
+            "options_detail": self.options_detail,
         }
 
 
@@ -290,6 +297,11 @@ class LabCore:
         Returns:
             List of available options
         """
+        # Deck hints: what is actually on the deck, per the active hardware
+        # config. See src/deck.py for why these exist.
+        if ui_hint in DECK_HINTS:
+            return [o["value"] for o in deck_options(self._hal_dir(), ui_hint)]
+
         # Catalog-backed hints — handled natively before generic folder scan
         import json as _json
         if ui_hint == "plate":
@@ -301,6 +313,35 @@ class LabCore:
                 )
             except Exception:
                 return []
+        if ui_hint == "labware":
+            # Every load name this lab actually has a definition for. The
+            # dashboard used to offer six invented ones (tiprack_1000ul,
+            # wellplate_96, …) that match nothing Opentrons knows, so choosing
+            # any of them failed the run.
+            names = set()
+            labware_root = self.base_dir / "Library" / "Labware"
+            for plate in labware_root.glob("Plates/*.plate.json"):
+                try:
+                    names.add(_json.loads(plate.read_text(encoding="utf-8-sig"))["id"])
+                except Exception:
+                    continue
+            for reservoir in labware_root.glob("Reservoirs/*.json"):
+                try:
+                    data = _json.loads(reservoir.read_text(encoding="utf-8-sig"))
+                    load_name = (data.get("parameters") or {}).get("loadName") or data.get("id")
+                    if load_name:
+                        names.add(load_name)
+                except Exception:
+                    continue
+            tiprack_index = labware_root / "TipRacks" / "index.json"
+            if tiprack_index.exists():
+                try:
+                    names.update(_json.loads(
+                        tiprack_index.read_text(encoding="utf-8-sig")).get("load_names", []))
+                except Exception:
+                    pass
+            return sorted(names)
+
         if ui_hint == "tiprack":
             idx = self.base_dir / "Library" / "Labware" / "TipRacks" / "index.json"
             if idx.exists():
@@ -371,6 +412,20 @@ class LabCore:
 
         return []
     
+    def _hal_dir(self) -> Path:
+        return get_settings(self.base_dir).hardware_config_dir
+
+    def _option_pairs_for_hint(self, ui_hint: str) -> List[Dict[str, str]]:
+        """{value,label} pairs for hints whose values need explaining.
+
+        A deck slot speaks for itself; "Source_1" does not, and an operator
+        choosing what to move needs to see which plate that is and where it
+        currently sits.
+        """
+        if ui_hint in DECK_HINTS:
+            return deck_options(self._hal_dir(), ui_hint)
+        return []
+
     def get_dropdown_config(self) -> Dict[str, Any]:
         """
         Get the full dropdown configuration for frontend use.
@@ -644,8 +699,11 @@ class LabCore:
             for p in cmd.parameters:
                 ui_hint = param_hint_lookup.get(p.identifier) or p.infer_ui_hint()
                 options = p.constraints if p.constraints else []
+                detail: List[Dict[str, str]] = []
                 if not options and ui_hint:
-                    options = self._get_options_for_hint(ui_hint)
+                    detail = self._option_pairs_for_hint(ui_hint)
+                    options = ([d["value"] for d in detail] if detail
+                               else self._get_options_for_hint(ui_hint))
                 params.append(CommandParameter(
                     name=p.identifier,
                     display_name=p.display_name,
@@ -654,6 +712,7 @@ class LabCore:
                     required=p.required,
                     ui_hint=ui_hint,
                     options=options,
+                    options_detail=detail,
                 ))
             commands.append(Command(
                 id=cmd_id,

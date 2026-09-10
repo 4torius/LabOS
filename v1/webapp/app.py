@@ -125,6 +125,14 @@ def create_app() -> "FastAPI":
         except Exception as e:
             state.add_log("warning", f"Startup discovery failed: {e}")
 
+    # Property values pushed by the instruments, rather than polled for. The
+    # watcher owns the subscriptions; the webapp just forwards what it reports.
+    property_watcher = None
+
+    def _on_property_change(entry):
+        state.devices  # noqa: B018 - keep the closure's intent obvious
+        return ws_manager.broadcast({"type": "property_update", **entry.to_dict()})
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         state.add_log("info", "LabOS WebApp started")
@@ -138,7 +146,17 @@ def create_app() -> "FastAPI":
         discovery_task = asyncio.create_task(_run_startup_discovery())
         _background_tasks.add(discovery_task)
         discovery_task.add_done_callback(_background_tasks.discard)
-        yield
+
+        nonlocal property_watcher
+        if lab_core:
+            from src.property_watch import PropertyWatcher
+            property_watcher = PropertyWatcher(lab_core, _on_property_change)
+            await property_watcher.start()
+        try:
+            yield
+        finally:
+            if property_watcher is not None:
+                await property_watcher.stop()
 
     app = FastAPI(title="LabOS WebApp", description="Integrated Lab Automation Platform", version="2.0.0", lifespan=lifespan)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
@@ -255,6 +273,20 @@ def create_app() -> "FastAPI":
             return {"filename": filename, "format": fmt, "content": file_path.read_text(encoding="utf-8-sig"), "size": file_path.stat().st_size}
         except UnicodeDecodeError:
             return {"filename": filename, "format": fmt, "content": "(Binary file - download to view)", "size": file_path.stat().st_size, "binary": True}
+
+    @app.get("/api/properties")
+    async def get_property_snapshot(instrument_id: str = ""):
+        """Every instrument property value currently known.
+
+        A page loading mid-session reads this instead of waiting for the next
+        change, and instead of firing one HTTP request per property.
+        """
+        if property_watcher is None:
+            return {"properties": [], "watching": False}
+        return {
+            "properties": property_watcher.snapshot(instrument_id or None),
+            "watching": True,
+        }
 
     @app.get("/api/images")
     async def list_deck_images():

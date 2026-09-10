@@ -11,6 +11,7 @@ from sila2.server import FeatureImplementationBase, MetadataDict, ObservableComm
 from .workflowapi_types import (
     AbortRun_Responses,
     CaptureImage_Responses,
+    CaptureTimelapse_Responses,
     EmergencyStop_Responses,
     ExecuteRecipe_Responses,
     Home_Responses,
@@ -62,6 +63,8 @@ class WorkflowAPIBase(FeatureImplementationBase, ABC):
 
     CaptureImage_default_lifetime_of_execution: Optional[timedelta]
 
+    CaptureTimelapse_default_lifetime_of_execution: Optional[timedelta]
+
     def __init__(self, parent_server: Server):
         """
 
@@ -95,6 +98,7 @@ class WorkflowAPIBase(FeatureImplementationBase, ABC):
         self.SetModuleTemperature_default_lifetime_of_execution = None
         self.ShakeModule_default_lifetime_of_execution = None
         self.CaptureImage_default_lifetime_of_execution = None
+        self.CaptureTimelapse_default_lifetime_of_execution = None
 
     @abstractmethod
     def get_RobotInfo(self, *, metadata: MetadataDict) -> str:
@@ -706,6 +710,57 @@ class WorkflowAPIBase(FeatureImplementationBase, ABC):
         :return:
 
             - CaptureResult: JSON: {saved, path, url, method, detail}.
+
+
+        """
+
+    @abstractmethod
+    def CaptureTimelapse(
+        self,
+        Count: int,
+        IntervalSeconds: int,
+        Label: str,
+        AllowRobotMotion: bool,
+        *,
+        metadata: MetadataDict,
+        instance: ObservableCommandInstance,
+    ) -> CaptureTimelapse_Responses:
+        """
+
+            MOVES HARDWARE. Take a series of photographs of the deck at a fixed
+            interval, in a single run.
+
+            The robot cannot send a video back. A protocol runs *on* the robot,
+            and the only channel to the orchestrator is the run log, where each
+            frame travels base64-encoded — fine for a photograph, impractical
+            for the megabytes of a clip. A timelapse is the form this transport
+            supports, and for watching a gel set or a plate fill it is the more
+            useful one anyway: frames at chosen moments, each a full-resolution
+            still.
+
+            All the frames come from one protocol run, so the robot homes once
+            at the start rather than once per photograph. That homing is why
+            AllowRobotMotion must be set: see CaptureImage.
+
+
+
+        :param Count: How many photographs to take (1-240).
+
+        :param IntervalSeconds: Seconds between frames.
+
+        :param Label: Short name for the image files. Optional.
+
+        :param AllowRobotMotion:
+                Required. Running the protocol homes the robot; leave this
+                false unless someone is watching the deck.
+
+
+        :param metadata: The SiLA Client Metadata attached to the call
+        :param instance: The command instance, enabling sending status updates to subscribed clients
+
+        :return:
+
+            - TimelapseResult: JSON: {saved, frames, path, run_id, detail}.
 
 
         """

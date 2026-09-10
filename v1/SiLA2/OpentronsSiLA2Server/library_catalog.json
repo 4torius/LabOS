@@ -1,4 +1,5 @@
 {
+  "_comment": "Which Library/ file types and deck concepts this server's parameters refer to. The orchestrator reads this at discovery time and turns the named parameters into the right picker. Entries with \"dynamic\": true are not folder listings — they are resolved at runtime (the deck ones from the active hardware config, see v1/src/deck.py).",
   "library_types": [
     {
       "hint": "recipe",
@@ -20,6 +21,30 @@
       "folder": "Library/LiquidClasses",
       "file_extension": ".json",
       "parameter_names": ["LiquidClass"]
+    },
+    {
+      "hint": "hal_labware",
+      "display_name": "Labware on the deck",
+      "dynamic": true,
+      "folder": "",
+      "file_extension": "",
+      "parameter_names": ["LabwareName", "LabwareID"]
+    },
+    {
+      "hint": "deck_target",
+      "display_name": "Free deck slot or module",
+      "dynamic": true,
+      "folder": "",
+      "file_extension": "",
+      "parameter_names": ["NewLocation"]
+    },
+    {
+      "hint": "hal_module",
+      "display_name": "Module on the deck",
+      "dynamic": true,
+      "folder": "",
+      "file_extension": "",
+      "parameter_names": ["ModuleName", "ModuleID"]
     }
   ]
 }

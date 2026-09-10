@@ -91,7 +91,12 @@ var analyses = [];  // Tecan .mdfx files
 // invented storage racks; picking any of them produced a step that could only
 // fail. Populated by loadLocations() below, empty until discovery answers.
 var LOCATIONS = [];
-var LABWARE_TYPES = ['tiprack_1000ul', 'tiprack_200ul', 'tiprack_50ul', 'reservoir_12', 'wellplate_96', 'wellplate_384'];
+// Labware options come from the server: the real load names in Library/Labware,
+// and — for a parameter that means "something on the deck right now", such as
+// MoveLabware's — the labware the active hardware config declares. A hardcoded
+// array used to live here listing six load names (tiprack_1000ul, wellplate_96,
+// …) that match nothing Opentrons knows, so every one of them failed the run.
+var LABWARE_TYPES = [];
 
 // Real Tecan-compatible plate catalog (Library/Analysis/PlateTypes.json via
 // /api/tecan/plate-types) - distinct from the generic LABWARE_TYPES fallback
@@ -410,58 +415,109 @@ function loadLocations() {
 }
 
 function _propCellId(instrumentId, prop) {
-    return ('propval-' + instrumentId + '-' + prop.feature + '-' + prop.id)
-        .replace(/[^A-Za-z0-9_-]/g, '_');
+    return _safeId('propval-' + instrumentId + '-' + prop.feature + '-' + prop.id);
+}
+
+// Collapsed by default: the readings are worth having, but a card whose top
+// half is a table of them buries the commands underneath. Whether a card is
+// open is remembered per instrument for the session, so a refresh does not
+// close the one you were watching.
+var _openReadings = {};
+try {
+    _openReadings = JSON.parse(sessionStorage.getItem('labos.openReadings') || '{}');
+} catch (e) { _openReadings = {}; }
+
+function toggleProperties(instrumentId) {
+    var body = document.getElementById('props-' + _safeId(instrumentId));
+    var chevron = document.getElementById('propchev-' + _safeId(instrumentId));
+    if (!body) return;
+    var opening = body.hidden;
+    body.hidden = !opening;
+    if (chevron) chevron.className = 'bi bi-chevron-' + (opening ? 'down' : 'right');
+    _openReadings[instrumentId] = opening;
+    try {
+        sessionStorage.setItem('labos.openReadings', JSON.stringify(_openReadings));
+    } catch (e) { /* private window: the panel just won't be remembered */ }
+    if (opening) refreshProperties(instrumentId);
+}
+
+function _safeId(value) {
+    return String(value).replace(/[^A-Za-z0-9_-]/g, '_');
 }
 
 function buildPropertiesHtml(instrumentId, properties) {
     if (!properties || !properties.length) return '';
+    var open = !!_openReadings[instrumentId];
+
     var rows = properties.map(function(prop) {
         return '<div class="d-flex justify-content-between align-items-start gap-2 py-1 border-bottom">' +
             '<span class="text-muted small text-nowrap" title="' +
-                escapeAttr(prop.description || '') + '">' + (prop.name || prop.id) + '</span>' +
+                LabOS.escapeAttr(prop.description || '') + '">' +
+                LabOS.escapeHtml(prop.name || prop.id) + '</span>' +
             '<span class="small text-end font-monospace text-truncate" style="max-width:60%" ' +
                 'id="' + _propCellId(instrumentId, prop) + '">…</span>' +
             '</div>';
     }).join('');
 
-    return '<div class="mb-2 border rounded p-2 bg-body-tertiary">' +
-        '<div class="d-flex justify-content-between align-items-center mb-1">' +
+    return '<div class="mb-2 border rounded bg-body-tertiary">' +
+        '<div class="d-flex justify-content-between align-items-center px-2 py-1" ' +
+             'role="button" style="cursor:pointer" ' +
+             'onclick="toggleProperties(\'' + instrumentId + '\')">' +
         '<span class="small fw-semibold text-uppercase text-muted" style="font-size:.68rem;letter-spacing:.04em">' +
-        'Live readings</span>' +
+        '<i class="bi bi-chevron-' + (open ? 'down' : 'right') + '" id="propchev-' + _safeId(instrumentId) + '"></i> ' +
+        'Live readings <span class="badge bg-secondary-subtle text-secondary-emphasis">' +
+        properties.length + '</span></span>' +
         '<button class="btn btn-sm btn-link p-0 text-decoration-none" title="Refresh readings" ' +
-        'onclick="refreshProperties(\'' + instrumentId + '\'); return false;">' +
+        'onclick="event.stopPropagation(); refreshProperties(\'' + instrumentId + '\'); return false;">' +
         '<i class="bi bi-arrow-clockwise"></i></button>' +
-        '</div>' + rows + '</div>';
+        '</div>' +
+        '<div class="px-2 pb-2" id="props-' + _safeId(instrumentId) + '"' + (open ? '' : ' hidden') + '>' +
+        rows + '</div></div>';
 }
 
-function escapeAttr(value) {
-    return String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+// Shared with every other page (labos-core.js).
+var formatPropertyValue = LabOS.summarizeValue;
+
+// Values arrive two ways, and neither is this page polling for them.
+//
+// The server subscribes to every observable property of every instrument
+// (src/property_watch.py) and pushes each change over the websocket. On load,
+// one request fetches everything already known, so a card shows real values
+// immediately instead of dashes until something happens to change.
+//
+// The per-property GET below is only the manual refresh button: an explicit
+// "read it again now", not a timer.
+
+function _writeCell(cell, value, failed) {
+    if (!cell) return;
+    if (failed) {
+        cell.textContent = 'error';
+        cell.title = String(value || 'unknown error');
+        cell.classList.add('text-danger');
+        return;
+    }
+    cell.textContent = LabOS.summarizeValue(value);
+    cell.title = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    cell.classList.remove('text-danger');
 }
 
-function formatPropertyValue(value) {
-    if (value === null || value === undefined || value === '') return '—';
-    // Most properties carry JSON in a string. Show the interesting part rather
-    // than a wall of braces the card has no room for.
-    if (typeof value === 'string') {
-        var trimmed = value.trim();
-        if (trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') {
-            try { value = JSON.parse(trimmed); } catch (e) { return trimmed; }
-        } else {
-            return trimmed;
-        }
-    }
-    if (Array.isArray(value)) return value.length ? value.length + ' item(s)' : 'none';
-    if (typeof value === 'object') {
-        var preferred = ['state', 'name', 'status', 'value'];
-        for (var i = 0; i < preferred.length; i++) {
-            if (value[preferred[i]] !== undefined) return String(value[preferred[i]]);
-        }
-        var keys = Object.keys(value);
-        return keys.length ? keys.length + ' field(s)' : '—';
-    }
-    return String(value);
+function applyPropertySnapshot() {
+    LabOS.fetchJson('/api/properties')
+        .then(function (data) {
+            (data.properties || []).forEach(function (entry) {
+                _writeCell(document.getElementById(_propCellId(entry.instrument_id, {
+                    feature: entry.feature, id: entry.property
+                })), entry.value, false);
+            });
+        })
+        .catch(function (e) { console.warn('Could not read property snapshot:', e.message); });
 }
+
+LabOS.ws.on('property_update', function (entry) {
+    _writeCell(document.getElementById(_propCellId(entry.instrument_id, {
+        feature: entry.feature, id: entry.property
+    })), entry.value, false);
+});
 
 function refreshProperties(instrumentId) {
     var instrument = (window._instrumentCache || {})[instrumentId];
@@ -469,31 +525,23 @@ function refreshProperties(instrumentId) {
     instrument.properties.forEach(function(prop) {
         var cell = document.getElementById(_propCellId(instrumentId, prop));
         if (!cell) return;
-        fetch('/api/devices/' + encodeURIComponent(instrumentId) + '/property/' +
-              encodeURIComponent(prop.feature) + '/' + encodeURIComponent(prop.id))
-            .then(function(r) { return r.json(); })
+        LabOS.fetchJson('/api/devices/' + encodeURIComponent(instrumentId) + '/property/' +
+                        encodeURIComponent(prop.feature) + '/' + encodeURIComponent(prop.id))
             .then(function(result) {
                 if (result.status === 'completed') {
-                    cell.textContent = formatPropertyValue(result.result);
-                    cell.title = typeof result.result === 'string'
-                        ? result.result : JSON.stringify(result.result, null, 2);
-                    cell.classList.remove('text-danger');
+                    _writeCell(cell, result.result, false);
                 } else {
-                    cell.textContent = 'error';
-                    cell.title = result.error || 'unknown error';
-                    cell.classList.add('text-danger');
+                    _writeCell(cell, result.error, true);
                 }
             })
-            .catch(function(e) {
-                cell.textContent = 'error';
-                cell.title = e.message;
-                cell.classList.add('text-danger');
-            });
+            .catch(function(e) { _writeCell(cell, e.message, true); });
     });
 }
 
 function refreshAllProperties() {
-    Object.keys(window._instrumentCache || {}).forEach(refreshProperties);
+    // One request for every value the server already has, instead of one per
+    // property per instrument.
+    applyPropertySnapshot();
 }
 
 // ============================================================================
@@ -727,7 +775,10 @@ function showParameterModal(instrumentId, commandId) {
         else if (param.options && param.options.length > 0) {
             // Server provided predefined options — shared with workflows.html
             // via /static/js/param-form-shared.js (see base.html).
-            fieldsHtml += buildConstrainedSelectHtml(paramName, param.options, paramDefault, param.required, 'form-select param-input');
+            // Pass the whole parameter: it may carry options_detail, which is
+            // how "Source_1" gets shown as the plate it is and the slot it is
+            // in while still submitting "Source_1".
+            fieldsHtml += LabOS.params.buildSelect(paramName, param, paramDefault, param.required, 'form-select param-input');
         }
         // USE ui_hint FROM SERVER (preferred) or fallback to name matching
         else if (uiHint === 'recipe' || RECIPE_PARAMS.indexOf(paramLower) !== -1) {

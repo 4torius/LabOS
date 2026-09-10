@@ -124,11 +124,31 @@ class PlateReaderImpl(PlateReaderServiceBase):
 
     # ── commands ───────────────────────────────────────────────────────────
 
+    #: What the bridge's failure actually means, in the order it is usually
+    #: true. The C# message only says "check power and cable", which is the one
+    #: thing an operator has invariably already checked by the time they read
+    #: it — and is almost never the cause.
+    _CONNECT_HELP = (
+        "The Tecan SDK enumerated no USB reader. In order of likelihood:\n"
+        "  1. iControl (or Magellan) is open, or was opened since this server "
+        "started. It takes exclusive ownership of the USB connection and does "
+        "not always release it on close. Close it, then restart the Tecan "
+        "server so the bridge re-enumerates.\n"
+        "  2. The bridge started before the instrument finished powering up. "
+        "Restarting the Tecan server is enough.\n"
+        "  3. The instrument is genuinely off, unplugged, or on a USB port "
+        "Windows has suspended.\n"
+        "The server itself is fine — it answered this call. What failed is the "
+        "bridge's connection to the instrument."
+    )
+
     def Connect(self, ConnectionString: str, *, metadata: MetadataDict) -> Connect_Responses:
         cs = ConnectionString if ConnectionString else self._default_connection_string
         ok, msg = self._bridge.connect(cs)
         if not ok:
-            raise ConnectionFailed(msg)
+            logger.error("Connect failed (%s): %s", cs, msg)
+            raise ConnectionFailed(f"{msg}\n\n{self._CONNECT_HELP}")
+        logger.info("Connected to the instrument (connection string: %s)", cs)
         return Connect_Responses()
 
     def Disconnect(self, *, metadata: MetadataDict) -> Disconnect_Responses:
