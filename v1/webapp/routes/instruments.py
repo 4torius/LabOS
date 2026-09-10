@@ -169,16 +169,14 @@ def create_instruments_router(
         except Exception as e:
             state.add_log("warning", f"PnP discovery failed: {e}", "system")
 
-        config_path = BASE_DIR / "webapp" / "static" / "config" / "instruments.json"
-        try:
-            with open(config_path) as f:
-                config = json.load(f)
-            for key, inst in config.get("instruments", {}).items():
-                for cmd in inst.get("commands", []):
-                    cmd["important"] = True
-            return {"source": "config_file", "instruments": config.get("instruments", {})}
-        except Exception as e:
-            return {"source": "error", "error": str(e), "instruments": {}}
+        # No third fallback. A static webapp/static/config/instruments.json used
+        # to be served here when discovery failed — it advertised an "incubator"
+        # that does not exist and mobile-robot commands that were never
+        # implemented, so the Workflow Builder offered steps that could only
+        # fail at execution. An empty catalog is the honest answer: it makes the
+        # builder show "no instruments" instead of inventing some.
+        return {"source": "unavailable", "instruments": {},
+                "error": "No instrument could be discovered. Check that the SiLA2 servers are running."}
 
     # Execute command on device
 

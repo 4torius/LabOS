@@ -234,22 +234,6 @@ def print_status():
 
 #                              STUBS
 
-def ensure_stubs():
-    """Regenerate gRPC stubs if grpc_tools is available."""
-    try:
-        import grpc_tools  # noqa: F401
-        from regen_stubs import regenerate
-        info("Regenerating gRPC stubs...")
-        ok_result = regenerate()
-        if ok_result:
-            ok("gRPC stubs up to date")
-        else:
-            warn("Some stubs failed to generate — see above")
-    except ImportError:
-        warn("grpc_tools not installed, skipping stub generation")
-    except Exception as e:
-        warn(f"Stub generation skipped: {e}")
-
 #                              LAUNCHERS
 
 def start_servers(wait: bool = True, restart: bool = True):
@@ -518,9 +502,6 @@ Examples:
                         help='Stop all running processes')
     
     args = parser.parse_args()
-
-    if not args.status and not args.stop:
-        ensure_stubs()
 
     # Handle command line arguments
     if args.all:

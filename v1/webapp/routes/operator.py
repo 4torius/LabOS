@@ -1,6 +1,5 @@
 ﻿"""Operator notification and emergency control routes."""
 import asyncio
-import json
 import logging
 import sys
 from datetime import datetime
@@ -11,18 +10,6 @@ from fastapi import APIRouter, HTTPException, Request
 logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from src.config_schema import load_lab_config as _load_lab_config_schema
-
-
-def _load_server_endpoint_from_config(base_dir: Path, server_key: str, default_host: str, default_port: int) -> tuple[str, int]:
-    config_path = base_dir / "lab_config.yaml"
-    try:
-        config, _ = _load_lab_config_schema(config_path, apply_defaults=False, strict=False)
-        server_cfg = (config.get("servers") or {}).get(server_key, {})
-        return server_cfg.get("host", default_host), int(server_cfg.get("port", default_port))
-    except Exception as exc:
-        logger.warning(f"Unable to load endpoint for {server_key}: {exc}")
-    return default_host, default_port
 
 
 def create_operator_router(
@@ -35,9 +22,6 @@ def create_operator_router(
     WEBAPP_CONFIG: dict,
 ) -> APIRouter:
     router = APIRouter(tags=["operator"])
-
-    def _load_server_endpoint(server_key: str, default_host: str, default_port: int) -> tuple[str, int]:
-        return _load_server_endpoint_from_config(BASE_DIR, server_key, default_host, default_port)
 
     @router.get("/api/operator/pending")
     async def get_pending_actions():
@@ -89,25 +73,50 @@ def create_operator_router(
         state.add_log("info", f"Operator acknowledged action: {action_id}", "operator")
         await ws_manager.broadcast({"type": "action_acknowledged", "action_id": action_id, "title": action.get("title", "")})
 
-        # Confirm ManualStation task via gRPC if applicable
+        # Release the waiting task on whichever discovered server raised it.
+        #
+        # This used to hand-roll a gRPC call against ManualStationService stubs
+        # in src/pnp_stubs/ — stubs that do not exist in this tree, at a port
+        # (50360) that is not the one the server listens on (50500). Every
+        # confirmation therefore threw ImportError and was swallowed by the
+        # except below, so a RequestOperatorTask blocked until its own timeout
+        # no matter how many times the operator clicked Confirm.
+        #
+        # Now it goes through the same SiLA2 path as every other command, and
+        # finds the target by asking which discovered instrument exposes
+        # ConfirmTaskComplete rather than by hardcoding a server name.
         task_id = action.get("params", {}).get("task_id") if action else None
         if task_id and action.get("action") == "operator_task":
-            try:
-                import grpc
-                from src.pnp_stubs import ManualStationService_pb2 as manual_pb2
-                from src.pnp_stubs import ManualStationService_pb2_grpc as manual_pb2_grpc
-                host, port = _load_server_endpoint("manual_station", "localhost", 50360)
-                async with grpc.aio.insecure_channel(f'{host}:{port}') as channel:
-                    stub = manual_pb2_grpc.ManualStationServiceStub(channel)
-                    req = manual_pb2.ConfirmTaskCompleteRequest(
-                        task_id=task_id,
-                        notes=extra_data.get("notes", "Confirmed via WebApp")
+            if not lab_core:
+                state.add_log("warning", "Cannot confirm task: LabCore unavailable", "operator")
+            else:
+                try:
+                    target = next(
+                        (i for i in lab_core.list_instruments()
+                         if any(c.id == "ConfirmTaskComplete" for c in i.commands)),
+                        None,
                     )
-                    response = await stub.ConfirmTaskComplete(req)
-                    log_level = "info" if response.success else "warning"
-                    state.add_log(log_level, f"ManualStation task {task_id}: {response.message}", "operator")
-            except Exception as e:
-                state.add_log("warning", f"Could not confirm ManualStation task: {e}", "operator")
+                    if target is None:
+                        state.add_log(
+                            "warning",
+                            f"Task {task_id} acknowledged locally, but no online instrument "
+                            f"exposes ConfirmTaskComplete to release it",
+                            "operator",
+                        )
+                    else:
+                        result = await lab_core.execute_command(
+                            target.id, "ConfirmTaskComplete",
+                            {"TaskId": task_id,
+                             "Notes": extra_data.get("notes", "Confirmed via WebApp")},
+                        )
+                        state.add_log(
+                            "info" if result.success else "warning",
+                            f"ManualStation task {task_id}: "
+                            f"{result.message or result.error or 'confirmed'}",
+                            "operator",
+                        )
+                except Exception as e:
+                    state.add_log("warning", f"Could not confirm ManualStation task: {e}", "operator")
 
         # Update tip_state.json on tip refill acknowledgment
         if action and (action.get("action") == "RefillTipRack" or "refill" in str(action.get("title", "")).lower()):
@@ -192,15 +201,23 @@ async def _update_tip_state(BASE_DIR: Path, rack_type: str, state, ws_manager, l
 
     try:
         await core.discover()
-        opentrons = next(
-            (i for i in core.list_instruments() if "opentrons" in i.id.lower() or "opentrons" in i.name.lower()),
+        # Ask which instrument can actually refill tips rather than matching
+        # the substring "opentrons" — a second liquid handler, or a rename,
+        # would silently break the name match.
+        target = next(
+            (i for i in core.list_instruments()
+             if any(c.id == "RefillTipRack" for c in i.commands)),
             None,
         )
-        if opentrons is None:
-            state.add_log("error", "Error during tip refill: Opentrons instrument not found", "operator")
+        if target is None:
+            state.add_log(
+                "error",
+                "Error during tip refill: no online instrument exposes RefillTipRack",
+                "operator",
+            )
             return
 
-        result = await core.execute_command(opentrons.id, "RefillTipRack", {"RackSlot": rack_type})
+        result = await core.execute_command(target.id, "RefillTipRack", {"RackSlot": rack_type})
         if not result.success:
             state.add_log("error", f"Error during tip refill: {result.error}", "operator")
             return

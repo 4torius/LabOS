@@ -123,6 +123,14 @@ class WorkflowAPIImpl(WorkflowAPIBase):
 
     def stop(self) -> None:
         super().stop()
+        # Release the robot's HTTP session before tearing the loop down —
+        # OTServer.stop() was previously unreachable (nothing called it), so
+        # every shutdown leaked the connection.
+        if self._ot is not None:
+            try:
+                self._run_async(self._ot.stop(), timeout=10)
+            except Exception as exc:
+                logger.warning("Robot disconnect on shutdown failed: %s", exc)
         self._loop.call_soon_threadsafe(self._loop.stop)
 
     def _require_ot(self) -> "OTServer":

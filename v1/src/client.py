@@ -3,31 +3,29 @@
 Plug & Play Generic Client
 ==========================
 
-A GENERIC gRPC client that can execute commands on ANY SiLA2 server.
-NO HARDCODED COMMAND MAPPINGS - commands are executed based on server metadata.
-
-Execution strategies:
-0. sila2 library SilaClient - standard SiLA2 protocol (all sila2-compliant servers)
-1. Dynamic stub loading - load generated stubs at runtime (custom/non-sila2 servers)
+A GENERIC client that can execute commands on ANY SiLA2 server.
+NO HARDCODED COMMAND MAPPINGS - commands are executed based on metadata the
+server itself publishes (its FDL, fetched at runtime by the sila2 library's
+SilaClient).
 
 To add a new instrument:
 - Create a SiLA2 server with the sila2 library (sila2-codegen + FeatureImplementationBase)
-- The client automatically discovers and calls it via Strategy 0
+- The client discovers and calls it automatically
 
 NO CODE CHANGES NEEDED HERE.
 """
 
 import asyncio
-import importlib
 import logging
-import os
 import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-# Ensure grpc stubs can be imported
+# The SiLA2 server packages each ship a top-level module named `src`; keep both
+# this directory and the project root importable so relative and absolute forms
+# of the orchestrator's own imports resolve the same way.
 _src_dir = Path(__file__).parent.absolute()
 if str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
@@ -161,11 +159,15 @@ class PnPClient:
     """
     Generic Plug & Play client for ANY SiLA2 server.
     
-    Executes commands based on server metadata, not hardcoded mappings.
-    Uses multiple strategies to maximize compatibility:
+    Executes commands based on server metadata fetched from the server at
+    runtime, not on hardcoded mappings: the sila2 library's SilaClient pulls
+    the protobuf descriptor from the server itself, so this client never
+    imports instrument-specific stubs.
 
-    0. sila2 SilaClient - standard SiLA2 protocol (all sila2-compliant servers)
-    1. Dynamic stub loading - loads generated stubs at runtime (custom servers)
+    A second "dynamic stub loading" path for non-sila2 servers used to live
+    here. No such server was ever deployed, and carrying it meant a transport
+    failure looked like "try the other protocol" instead of an error. If a raw
+    gRPC instrument ever appears, give it a purpose-built adapter.
     """
     
     def __init__(self, base_dir: Optional[Path] = None):
@@ -173,11 +175,10 @@ class PnPClient:
         Initialize the client.
         
         Args:
-            base_dir: Base directory for finding stubs and configs
+            base_dir: Project root, used to resolve Library/ paths
         """
         self.base_dir = Path(base_dir) if base_dir else Path.cwd()
         self._channels: Dict[str, grpc.aio.Channel] = {}
-        self._stubs: Dict[str, Any] = {}
     
     async def connect(self, server: PnPServer, timeout: float = 5.0) -> bool:
         """
@@ -206,10 +207,7 @@ class PnPClient:
             
             self._channels[server.address] = channel
             server.server_online = True
-            
-            # Try to load stubs for this server
-            await self._load_stubs_for_server(server)
-            
+
             logger.info(f"Connected to {server.name} @ {server.address}")
             return True
             
@@ -231,8 +229,6 @@ class PnPClient:
             except Exception:
                 pass
             del self._channels[address]
-        if address in self._stubs:
-            del self._stubs[address]
         self._invalidate_sila_client(server.host, server.port)
         server.server_online = False
 
@@ -244,7 +240,6 @@ class PnPClient:
             except Exception:
                 pass
         self._channels = {}
-        self._stubs = {}
     
     #                         COMMAND EXECUTION
     
@@ -293,20 +288,18 @@ class PnPClient:
 
         feature_obj, cmd_obj = cmd_info
 
-        # Strategy 0: sila2 standard library SilaClient (primary path for all sila2-compliant servers)
         result = await self._execute_via_sila2_client(server, feature_obj, cmd_obj, params, timeout, on_progress)
         if result is not None:
             return result
 
-        # Strategy 1: Dynamic gRPC stubs (fallback for custom/non-sila2 servers — add stubs to pnp_stubs/)
-        result = await self._execute_via_stub(server, feature_obj, cmd_obj, params, timeout, on_progress)
-        if result is not None:
-            return result
-
+        # None means the transport itself failed (the SilaClient could not be
+        # built, or a grpc.RpcError invalidated it) — a real error, not a cue to
+        # try another protocol. There is no second protocol: every LabOS server
+        # is a standard SiLA2 server.
         return CommandResult(
             success=False,
-            error=f"Cannot execute {command} on {server.name}. "
-                  f"Server requires sila2 library or gRPC stubs in pnp_stubs/."
+            error=f"Cannot reach {server.name} at {server.address} to execute {command}. "
+                  f"The server is announced but its SiLA2 endpoint did not respond.",
         )
     
     async def get_property(
@@ -518,440 +511,6 @@ class PnPClient:
         except Exception as exc:
             logger.warning("sila2 client executor error: %s", exc, exc_info=True)
             return None
-
-    async def _execute_via_stub(
-        self,
-        server: PnPServer,
-        feature: PnPFeature,
-        command: PnPCommand,
-        params: Dict[str, Any],
-        timeout: Optional[float],
-        on_progress: Optional[Callable]
-    ) -> Optional[CommandResult]:
-        """
-        Execute via dynamically loaded stub.
-        
-        This finds and loads the appropriate _pb2.py and _pb2_grpc.py files
-        for the server at runtime.
-        """
-        try:
-            channel = self._channels.get(server.address)
-            if not channel:
-                return None
-            
-            # Get or create stub for this server
-            stub_info = self._stubs.get(server.address)
-            if not stub_info:
-                return None
-            
-            pb2 = stub_info.get("pb2")
-            stub_class = stub_info.get("stub_class")
-            
-            if not stub_class or not pb2:
-                return None
-            
-            # Create stub instance on-demand
-            stub = stub_info.get("stub")
-            if not stub:
-                try:
-                    stub = stub_class(channel)
-                    stub_info["stub"] = stub
-                except Exception as e:
-                    logger.debug(f"Failed to create stub instance: {e}")
-                    return None
-            
-            # Find the method on the stub
-            method = getattr(stub, command.identifier, None)
-            if not method:
-                # Try alternative names
-                for alt_name in [command.identifier, f"Get{command.identifier}", command.identifier.replace("Get", "")]:
-                    method = getattr(stub, alt_name, None)
-                    if method:
-                        break
-            
-            if not method:
-                return None
-            
-            # Build request message - try multiple naming conventions
-            request_class = None
-            
-            # Try exact match first: ExecuteRecipe -> ExecuteRecipeRequest
-            request_class_name = f"{command.identifier}Request"
-            request_class = getattr(pb2, request_class_name, None)
-            
-            if not request_class:
-                # Try shorter names: SwitchHardwareConfig -> SwitchConfigRequest
-                # Remove common middle words like "Hardware" 
-                base_name = command.identifier
-                for middle in ["Hardware", "Current", "Available", "Loaded"]:
-                    short_name = base_name.replace(middle, "")
-                    request_class = getattr(pb2, f"{short_name}Request", None)
-                    if request_class:
-                        logger.debug(f"Found request class by removing '{middle}': {short_name}Request")
-                        break
-            
-            if not request_class:
-                # Try common prefix patterns
-                base_name = command.identifier
-                for prefix in ["Get", "Set", "Switch", "Execute", "Run", "List"]:
-                    if base_name.startswith(prefix) and len(base_name) > len(prefix):
-                        short_name = base_name[len(prefix):]
-                        request_class = getattr(pb2, f"{prefix}{short_name}Request", None)
-                        if not request_class:
-                            request_class = getattr(pb2, f"{short_name}Request", None)
-                        if request_class:
-                            break
-            
-            if not request_class:
-                # Try to find any matching request class by word overlap
-                # Require at least 2 matching words OR the first verb must match
-                cmd_words = self._split_camel_case(command.identifier).lower().split()
-                cmd_word_set = set(cmd_words)
-                first_word = cmd_words[0] if cmd_words else ""
-                best_match = None
-                best_score = 0
-                
-                for name in dir(pb2):
-                    if name.endswith("Request"):
-                        req_words = self._split_camel_case(name.replace("Request", "")).lower().split()
-                        req_word_set = set(req_words)
-                        req_first = req_words[0] if req_words else ""
-                        
-                        # Count overlapping words
-                        overlap = len(cmd_word_set & req_word_set)
-                        
-                        # Require either 2+ matching words OR the first word (action verb) matches
-                        if overlap >= 2 or (overlap >= 1 and first_word == req_first):
-                            if overlap > best_score:
-                                best_score = overlap
-                                best_match = name
-                
-                if best_match:
-                    request_class = getattr(pb2, best_match)
-                    logger.debug(f"Found request class by word overlap ({best_score} words): {best_match}")
-            
-            if not request_class:
-                # Use empty request (for "Get" commands that take Empty)
-                try:
-                    from google.protobuf import empty_pb2
-                    request = empty_pb2.Empty()
-                except ImportError:
-                    return None
-            else:
-                # Build request with parameters
-                request = self._build_request(request_class, params)
-            
-            # Execute
-            try:
-                if command.observable:
-                    # Streaming response
-                    final_result = None
-                    last_response = None
-                    async for response in method(request):
-                        last_response = response
-                        # Try to detect intermediate vs final
-                        is_intermediate = getattr(response, 'is_intermediate', False)
-                        if on_progress and is_intermediate:
-                            progress = getattr(response, 'progress', 0)
-                            status = getattr(response, 'status', '')
-                            on_progress(progress, status)
-                        
-                        if not is_intermediate:
-                            final_result = response
-                            break
-
-                    if final_result is None and last_response is not None:
-                        status_text = str(getattr(last_response, 'status', '') or '').lower()
-                        progress_val = int(getattr(last_response, 'progress', 0) or 0)
-                        if status_text in {'complete', 'completed', 'done', 'success', 'succeeded', 'finished'} or progress_val >= 100:
-                            final_result = last_response
-                    
-                    return self._parse_response(final_result)
-                else:
-                    # Unary response.
-                    # Invariant: `timeout` here is always None or a positive float
-                    # (execute() normalizes <=0 to None before dispatch), so this
-                    # relies on asyncio.wait_for's native None="wait forever"
-                    # semantics. Do not pass a raw 0 through to this call — asyncio
-                    # treats timeout=0 as "cancel almost immediately", not unlimited.
-                    response = await asyncio.wait_for(method(request), timeout=timeout)
-                    return self._parse_response(response)
-                    
-            except grpc.RpcError as e:
-                details = e.details()
-                error_msg = details if details else str(e.code())
-                if e.code() == grpc.StatusCode.UNIMPLEMENTED or "not found" in error_msg.lower():
-                    return CommandResult(
-                        success=False, 
-                        error=f"Server doesn't implement '{command.identifier}'. "
-                              f"Restart the server if you recently added this method."
-                    )
-                return CommandResult(success=False, error=f"gRPC error: {error_msg}")
-            
-        except Exception as e:
-            logger.debug(f"Stub execution failed: {e}")
-            return None
-    
-    def _build_request(self, request_class: Any, params: Dict[str, Any]) -> Any:
-        """Build a protobuf request message from parameters."""
-        # Normalize parameter keys
-        params_normalized = {}
-        for key, value in params.items():
-            # Try different key formats
-            params_normalized[key] = value
-            params_normalized[key.lower()] = value
-            params_normalized[self._to_snake_case(key)] = value
-        
-        # Get field names from request class
-        try:
-            fields = request_class.DESCRIPTOR.fields_by_name.keys()
-        except Exception:
-            fields = []
-        
-        # Get field descriptors for type coercion
-        try:
-            field_descriptors = {f.name: f for f in request_class.DESCRIPTOR.fields}
-        except Exception:
-            field_descriptors = {}
-
-        # Build kwargs for request
-        kwargs = {}
-        for field_name in fields:
-            for param_key in [field_name, field_name.lower(), self._to_camel_case(field_name)]:
-                if param_key in params_normalized:
-                    value = params_normalized[param_key]
-                    # Coerce value to match proto field type
-                    fd = field_descriptors.get(field_name)
-                    if fd is not None:
-                        from google.protobuf.descriptor import FieldDescriptor as FD
-                        if fd.type == FD.TYPE_BOOL:
-                            if isinstance(value, str):
-                                value = value.lower() in ('true', '1', 'yes', 'on')
-                            else:
-                                value = bool(value)
-                        elif fd.type in (FD.TYPE_INT32, FD.TYPE_INT64, FD.TYPE_SINT32,
-                                         FD.TYPE_SINT64, FD.TYPE_UINT32, FD.TYPE_UINT64):
-                            try:
-                                value = int(value)
-                            except (TypeError, ValueError):
-                                pass
-                        elif fd.type in (FD.TYPE_FLOAT, FD.TYPE_DOUBLE):
-                            try:
-                                value = float(value)
-                            except (TypeError, ValueError):
-                                pass
-                        elif fd.type == FD.TYPE_STRING:
-                            value = str(value)
-                    kwargs[field_name] = value
-                    break
-
-        return request_class(**kwargs)
-    
-    def _parse_response(self, response: Any) -> CommandResult:
-        """Parse a protobuf response into CommandResult."""
-        if response is None:
-            return CommandResult(success=False, error="No response")
-        
-        # Check for success field
-        success = getattr(response, 'success', True)
-        
-        # Check for error field
-        error = getattr(response, 'error', None) or getattr(response, 'error_message', None)
-        
-        # Extract all fields as data
-        data = {}
-        try:
-            for field in response.DESCRIPTOR.fields:
-                value = getattr(response, field.name, None)
-                if value is not None:
-                    if hasattr(value, 'DESCRIPTOR'):
-                        # Nested message - convert to dict
-                        data[field.name] = self._message_to_dict(value)
-                    else:
-                        data[field.name] = value
-        except Exception:
-            # Fallback: just use the response
-            data = {"response": str(response)}
-        
-        return CommandResult(
-            success=success if not error else False,
-            data=data,
-            error=str(error) if error else None
-        )
-    
-    def _message_to_dict(self, message: Any) -> Dict:
-        """Convert protobuf message to dict."""
-        result = {}
-        try:
-            for field in message.DESCRIPTOR.fields:
-                value = getattr(message, field.name, None)
-                if value is not None:
-                    if hasattr(value, 'DESCRIPTOR'):
-                        result[field.name] = self._message_to_dict(value)
-                    else:
-                        result[field.name] = value
-        except Exception:
-            pass
-        return result
-    
-    def _to_snake_case(self, name: str) -> str:
-        """Convert CamelCase to snake_case."""
-        import re
-        s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
-        return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
-    
-    def _to_camel_case(self, name: str) -> str:
-        """Convert snake_case to CamelCase."""
-        components = name.split('_')
-        return components[0] + ''.join(x.title() for x in components[1:])
-    
-    def _split_camel_case(self, name: str) -> str:
-        """Split CamelCase into space-separated words. SwitchHardwareConfig -> Switch Hardware Config"""
-        import re
-        return re.sub('([a-z])([A-Z])', r'\1 \2', name)
-    
-    #                         STUB LOADING
-    
-    async def _load_stubs_for_server(self, server: PnPServer):
-        """
-        Load gRPC stubs for a server.
-        
-        Searches for _pb2.py and _pb2_grpc.py files in:
-        1. src/grpc/ directory
-        2. Server's own directory
-        """
-        if not server.features:
-            return
-        
-        # Determine possible stub module names
-        # Priority: feature names first, then server name patterns
-        possible_names = []
-        
-        # 1. From features (highest priority - most specific)
-        for feature in server.features:
-            possible_names.append(feature.identifier)
-            if not feature.identifier.endswith("Service"):
-                possible_names.append(f"{feature.identifier}Service")
-        
-        # 2. From server name - multiple patterns
-        server_key = server.name.lower().replace(" ", "").replace("-", "")
-        possible_names.append(f"{server_key}Service")
-        possible_names.append(server_key)
-        
-        # 3. Try first word: "My Custom Server" -> "MyService"
-        first_word = server.name.split()[0] if server.name else ""
-        if first_word:
-            possible_names.append(f"{first_word}Service")
-            possible_names.append(first_word)
-        
-        # Try to load stubs
-        logger.debug(f"Trying stub names for {server.name}: {possible_names[:5]}...")
-        for name in possible_names:
-            stub_info = self._try_load_stub(name, server)
-            if stub_info:
-                self._stubs[server.address] = stub_info
-                logger.info(f"Loaded stubs for {server.name}: {name}")
-                return
-        
-        logger.warning(f"Could not load stubs for {server.name} (tried {len(possible_names)} names)")
-    
-    def _try_load_stub(self, service_name: str, server: PnPServer) -> Optional[Dict]:
-        """Try to load a stub module by name."""
-        pb2 = None
-        pb2_grpc = None
-        
-        # Try direct import from pnp_stubs subpackage
-        try:
-            # This works when src is in sys.path
-            pb2 = importlib.import_module(f"pnp_stubs.{service_name}_pb2")
-            pb2_grpc = importlib.import_module(f"pnp_stubs.{service_name}_pb2_grpc")
-            logger.debug(f"Loaded stubs from pnp_stubs.{service_name}")
-        except ImportError as e1:
-            # Try from src.pnp_stubs
-            try:
-                pb2 = importlib.import_module(f"src.pnp_stubs.{service_name}_pb2")
-                pb2_grpc = importlib.import_module(f"src.pnp_stubs.{service_name}_pb2_grpc")
-                logger.debug(f"Loaded stubs from src.pnp_stubs.{service_name}")
-            except ImportError as e2:
-                logger.debug(f"Import failed for {service_name}: {e1}, {e2}")
-                return None
-        
-        if not pb2_grpc:
-            logger.debug(f"Could not load stubs for {service_name}")
-            return None
-        
-        # Find stub class
-        stub_class = None
-        for name in dir(pb2_grpc):
-            if name.endswith("Stub") and not name.startswith("_"):
-                stub_class = getattr(pb2_grpc, name)
-                break
-        
-        if not stub_class:
-            return None
-        
-        # Return modules and class - stub instance created on demand
-        return {
-            "pb2": pb2,
-            "pb2_grpc": pb2_grpc,
-            "stub_class": stub_class,
-            "stub": None  # Created on-demand when channel available
-        }
-    
-    #                         HEALTH CHECK
-    
-    async def check_health(self, server: PnPServer, timeout: float = 5.0) -> Dict:
-        """
-        Check server and hardware health.
-        
-        Returns:
-            Dict with server_online, hardware_online, hardware_status
-        """
-        result = {
-            "server_online": False,
-            "hardware_online": False,
-            "hardware_status": "unknown"
-        }
-        
-        if not GRPC_AVAILABLE:
-            return result
-        
-        # Check if server is reachable
-        try:
-            channel = self._channels.get(server.address)
-            if not channel:
-                channel = grpc.aio.insecure_channel(server.address)
-            
-            await asyncio.wait_for(channel.channel_ready(), timeout=timeout)
-            result["server_online"] = True
-            server.server_online = True
-            
-        except Exception:
-            server.server_online = False
-            return result
-        
-        # Try to get status via SiLA2Common
-        try:
-            from .pnp_stubs import SiLA2Common_pb2 as common_pb2
-            from .pnp_stubs import SiLA2Common_pb2_grpc as common_grpc
-            
-            stub = common_grpc.SiLA2ServerInfoStub(channel)
-            response = await asyncio.wait_for(
-                stub.GetStatus(common_pb2.GetStatusRequest()),
-                timeout=timeout
-            )
-            
-            result["hardware_online"] = response.hardware_online
-            result["hardware_status"] = response.hardware_status
-            server.hardware_online = response.hardware_online
-            server.hardware_status = response.hardware_status
-            
-        except Exception:
-            # SiLA2Common not available - try alternative methods
-            pass
-        
-        return result
-
 
 #                              REGISTRY INTEGRATION
 

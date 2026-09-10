@@ -20,13 +20,10 @@ import json
 import logging
 import os
 import shutil
-import subprocess
 import sys
 import time
-from concurrent import futures
 from typing import Any, Callable, Dict, List, Optional
 
-import grpc
 import httpx
 
 from .config import ServerConfig, setup_logging
@@ -36,393 +33,13 @@ _sila2_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__
 if _sila2_path not in sys.path:
     sys.path.insert(0, _sila2_path)
 
-# mDNS registration
-try:
-    from sila2_mdns_registry import SiLA2ServerRegistry
-    MDNS_AVAILABLE = True
-except ImportError:
-    MDNS_AVAILABLE = False
 from .robot_client import RobotClient
 from .protocol_generator import ProtocolGenerator
 from .hardware_manager import HardwareManager
 from .tip_tracker import TipTracker, MountedTipTracker, calculate_tips_from_recipe, reconstruct_tip_mount_state
 from .run_archive import RunArchive
 
-# ManualStation gRPC client for operator interactions
-try:
-    import importlib
-
-    # Ensure repository root is importable so "src.pnp_stubs" can be resolved.
-    _repo_root = os.path.dirname(_sila2_path)
-    if _repo_root not in sys.path:
-        sys.path.insert(0, _repo_root)
-
-    # Preferred path: shared stubs package used by webapp and clients.
-    manual_pb2 = importlib.import_module("src.pnp_stubs.ManualStationService_pb2")
-    manual_pb2_grpc = importlib.import_module("src.pnp_stubs.ManualStationService_pb2_grpc")
-    MANUAL_STATION_AVAILABLE = True
-except ImportError:
-    try:
-        import importlib
-
-        # Fallback path: stubs generated inside ManualStationSiLA2Server/src.
-        _manual_src = os.path.join(_sila2_path, "ManualStationSiLA2Server", "src")
-        if _manual_src not in sys.path:
-            sys.path.insert(0, _manual_src)
-
-        manual_pb2 = importlib.import_module("ManualStationService_pb2")
-        manual_pb2_grpc = importlib.import_module("ManualStationService_pb2_grpc")
-        MANUAL_STATION_AVAILABLE = True
-    except ImportError:
-        manual_pb2 = None
-        manual_pb2_grpc = None
-        MANUAL_STATION_AVAILABLE = False
-
-# Import SiLA2Common for plug-and-play support
-try:
-    import importlib.util
-    # Try to load from sibling SiLA2 directory
-    common_pb2_path = os.path.join(_sila2_path, "SiLA2Common_pb2.py")
-    if os.path.exists(common_pb2_path):
-        spec = importlib.util.spec_from_file_location("SiLA2Common_pb2", common_pb2_path)
-        if spec and spec.loader:
-            SiLA2Common_pb2 = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(SiLA2Common_pb2)
-            
-            grpc_path = os.path.join(_sila2_path, "SiLA2Common_pb2_grpc.py")
-            spec_grpc = importlib.util.spec_from_file_location("SiLA2Common_pb2_grpc", grpc_path)
-            if spec_grpc and spec_grpc.loader:
-                SiLA2Common_pb2_grpc = importlib.util.module_from_spec(spec_grpc)
-                spec_grpc.loader.exec_module(SiLA2Common_pb2_grpc)
-            else:
-                SiLA2Common_pb2_grpc = None
-        else:
-            SiLA2Common_pb2 = None
-            SiLA2Common_pb2_grpc = None
-    else:
-        SiLA2Common_pb2 = None
-        SiLA2Common_pb2_grpc = None
-    SILA2_COMMON_AVAILABLE = SiLA2Common_pb2_grpc is not None
-except Exception as e:
-    SiLA2Common_pb2 = None
-    SiLA2Common_pb2_grpc = None
-    SILA2_COMMON_AVAILABLE = False
-
 logger = logging.getLogger(__name__)
-
-
-#                    SILA2 COMMON ADAPTER (Plug & Play)
-
-class SiLA2CommonAdapter:
-    """
-    Adapter to provide SiLA2Common interface for plug-and-play discovery.
-    
-    This allows generic clients to:
-    1. Discover server capabilities via GetFeatures()
-    2. Execute any command via ExecuteCommand(feature, command, params)
-    """
-    
-    def __init__(self, server: 'OpentronsSiLA2Server'):
-        self._server = server
-        self._start_time = time.time()
-
-    @staticmethod
-    def _to_string_map(data: dict) -> dict:
-        """Convert any result payload to map<string, string> for SiLA2Common."""
-        if not isinstance(data, dict):
-            return {"value": str(data)}
-
-        converted = {}
-        for key, value in data.items():
-            if value is None:
-                converted[str(key)] = ""
-            elif isinstance(value, str):
-                converted[str(key)] = value
-            elif isinstance(value, (dict, list, tuple)):
-                converted[str(key)] = json.dumps(value, ensure_ascii=False)
-            else:
-                converted[str(key)] = str(value)
-        return converted
-        
-    async def GetServerInfo(self, request, context):
-        """Return server metadata for discovery."""
-        if SiLA2Common_pb2 is None:
-            raise RuntimeError("SiLA2Common_pb2 not available")
-        uptime = int(time.time() - self._start_time)
-        robot_info = {}
-
-        if self._server.robot and self._server.is_connected():
-            try:
-                health = await self._server.robot.get_health()
-                if health:
-                    robot_info = {
-                        "robot_name": health.get("name", ""),
-                        "robot_model": health.get("robot_model", "Opentrons Flex"),
-                        "serial": health.get("robot_serial", ""),
-                    }
-            except Exception:
-                pass
-
-        # Read description from .sila.xml
-        _features_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "features"
-        )
-        description = "SiLA2 Server for Opentrons Flex liquid handler"
-        try:
-            from sila2_xml_parser import features_from_xml_dir
-            xml_features = features_from_xml_dir(_features_dir)
-            if xml_features:
-                description = xml_features[0].get('description', description)
-        except Exception:
-            pass
-
-        return SiLA2Common_pb2.ServerInfoResponse(
-            server_name="OpentronsFlex",
-            server_type="liquid_handler",
-            vendor="Opentrons / BicoccaLab",
-            model=robot_info.get("robot_model", "Opentrons Flex"),
-            serial_number=robot_info.get("serial", ""),
-            server_version=self._server.config.version,
-            sila_version="2.0",
-            description=description,
-            host=self._server.config.host,
-            uptime_seconds=uptime,
-            capabilities=["liquid_handling", "module_control", "recipe_execution", "tip_tracking"]
-        )
-    
-    async def GetFeatures(self, request, context):
-        """Return available features — read from features/*.sila.xml."""
-        if SiLA2Common_pb2 is None:
-            raise RuntimeError("SiLA2Common_pb2 not available")
-        _features_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "features"
-        )
-        try:
-            from sila2_xml_parser import features_from_xml_dir, build_proto_features
-            xml_features = features_from_xml_dir(_features_dir)
-            proto_features = build_proto_features(xml_features, SiLA2Common_pb2)
-        except Exception as e:
-            logger.warning(f"Could not load features from XML: {e}")
-            proto_features = []
-        return SiLA2Common_pb2.FeaturesResponse(features=proto_features)
-    
-    async def GetStatus(self, request, context):
-        """Return current server status."""
-        if SiLA2Common_pb2 is None:
-            raise RuntimeError("SiLA2Common_pb2 not available")
-        connected = self._server.is_connected() if self._server else False
-        robot_status = self._server._status if self._server else "unknown"
-        is_busy = self._server._is_running if self._server else False
-
-        return SiLA2Common_pb2.StatusResponse(
-            status="running",
-            server_online=True,
-            hardware_online=connected,
-            hardware_status="connected" if connected else "disconnected",
-            details={
-                "robot_status": robot_status,
-                "current_run_id": self._server._current_run_id or "",
-                "is_busy": str(is_busy),
-            }
-        )
-    
-    async def ExecuteCommand(self, request, context):
-        """
-        Execute any command generically.
-        
-        This is the core of plug-and-play - allows execution without
-        knowing the specific protobuf types.
-        """
-        if SiLA2Common_pb2 is None:
-            raise RuntimeError("SiLA2Common_pb2 not available")
-        feature = request.feature
-        command = request.command
-        params = dict(request.parameters) if request.parameters else {}
-        
-        logger.info(f"[PnP] ExecuteCommand: {feature}.{command} params={list(params.keys())}")
-        
-        try:
-            # Route to appropriate handler based on command
-            result = await self._execute_command_internal(feature, command, params)
-            result_map = self._to_string_map(result)
-            
-            yield SiLA2Common_pb2.ExecuteCommandResponse(
-                success=True,
-                result=result_map,
-                is_intermediate=False,
-                progress=100
-            )
-            
-        except Exception as e:
-            logger.error(f"[PnP] ExecuteCommand failed: {e}")
-            yield SiLA2Common_pb2.ExecuteCommandResponse(
-                success=False,
-                error=str(e),
-                is_intermediate=False,
-                progress=0
-            )
-    
-    async def _execute_command_internal(self, feature: str, command: str, params: dict) -> dict:
-        """Internal command routing."""
-        
-        # Robot Control commands
-        if command == "Initialize":
-            result = await self._server.cmd_initialize()
-            return {"message": result}
-            
-        elif command == "Home":
-            result = await self._server.cmd_home()
-            return {"message": result}
-            
-        elif command == "EmergencyStop":
-            result = await self._server.cmd_emergency_stop()
-            return {"message": result}
-            
-        elif command == "RunProtocol":
-            content = params.get("protocol_content", "")
-            ptype = params.get("protocol_type", "python")
-            result = await self._server.cmd_run_protocol(content, ptype)
-            return {"run_id": result}
-            
-        elif command == "ExecuteRecipeByName" or command == "ExecuteRecipe":
-            # Accept RecipeName (from XML), recipe_name, Recipe, or recipe as parameter names
-            name = params.get("RecipeName", params.get("recipe_name", params.get("Recipe", params.get("recipe", ""))))
-            run_id, result = await self._server.cmd_execute_recipe_by_name(name)
-            return {"run_id": run_id, "result": result}
-            
-        elif command == "AbortRun":
-            result = await self._server.cmd_abort_run()
-            return {"message": result}
-            
-        elif command == "PauseRun":
-            result = await self._server.cmd_pause_run()
-            return {"message": result}
-            
-        elif command == "ResumeRun":
-            result = await self._server.cmd_resume_run()
-            return {"message": result}
-            
-        # Tip management
-        elif command == "RefillTipRack":
-            rack_name = params.get("rack_name", params.get("rack_type", ""))
-            result = await self._server.cmd_refill_tip_rack(rack_name)
-            return {"message": result}
-            
-        # Heater-Shaker commands
-        elif command == "HeaterShakerSetTemp":
-            temp = float(params.get("temperature", 25))
-            module_id = params.get("module_id", params.get("serial", ""))
-            result = await self._server.cmd_heater_shaker_set_temp(module_id, temp)
-            return {"message": result}
-            
-        elif command == "HeaterShakerShake":
-            rpm = int(params.get("rpm", 500))
-            module_id = params.get("module_id", params.get("serial", ""))
-            result = await self._server.cmd_heater_shaker_shake(module_id, rpm)
-            return {"message": result}
-            
-        elif command == "HeaterShakerStop":
-            module_id = params.get("module_id", params.get("serial", ""))
-            # Use deactivate with heater off but latch open (stops shaking)
-            result = await self._server.cmd_heater_shaker_deactivate(module_id, deactivate_heater=False, open_latch=False)
-            return {"message": result}
-            
-        elif command == "HeaterShakerOpenLatch":
-            module_id = params.get("module_id", params.get("serial", ""))
-            result = await self._server.cmd_heater_shaker_open_latch(module_id)
-            return {"message": result}
-            
-        elif command == "HeaterShakerCloseLatch":
-            module_id = params.get("module_id", params.get("serial", ""))
-            result = await self._server.cmd_heater_shaker_close_latch(module_id)
-            return {"message": result}
-        
-        # Status queries
-        elif command == "GetStatus" or command == "GetRobotInfo":
-            if self._server.robot and self._server.is_connected():
-                health = await self._server.robot.get_health()
-                return health or {"status": "connected"}
-            return {"status": "disconnected"}
-            
-        elif command == "GetTipStatus":
-            status = self._server.get_tip_status()
-            return json.loads(status) if isinstance(status, str) else status
-            
-        elif command == "ListHardwareConfigs":
-            configs = self._server.list_hardware_configs()
-            return {"configs": configs}
-            
-        elif command == "LoadHardwareConfig" or command == "SwitchHardwareConfig":
-            # Accept ConfigName (from XML), config_name, or config as parameter names
-            config_name = params.get("ConfigName", params.get("config_name", params.get("config", "")))
-            result = self._server.switch_hardware_config(config_name)
-            return {"message": result}
-        
-        elif command == "GetCurrentConfig":
-            config = self._server.get_current_hardware_config()
-            return {"config": config}
-        
-        elif command == "ListRecipes":
-            recipes = self._server.list_recipes()
-            return {"recipes": recipes}
-        
-        elif command == "ListTipRacks":
-            tip_status = self._server.get_tip_status()
-            return json.loads(tip_status) if isinstance(tip_status, str) else tip_status
-        
-        elif command == "ResetTipTracking":
-            result = self._server.reset_tip_tracking()
-            return {"message": result}
-        
-        elif command == "SetLights":
-            # Accept On (from XML), on, or lights as parameter names
-            on = params.get("On", params.get("on", params.get("lights", True)))
-            if isinstance(on, str):
-                on = on.lower() in ("true", "1", "yes", "on")
-            result = await self._server.cmd_set_lights(on)
-            return {"message": result, "lights_on": on}
-        
-        elif command == "GetModulesStatus":
-            modules = await self._server.cmd_get_modules_status()
-            return {"modules": modules}
-        
-        else:
-            raise ValueError(f"Unknown command: {feature}.{command}")
-    
-    async def GetProperty(self, request, context):
-        """Get a property value."""
-        if SiLA2Common_pb2 is None:
-            raise RuntimeError("SiLA2Common_pb2 not available")
-        prop_name = request.property_name
-        
-        if prop_name == "is_connected":
-            return SiLA2Common_pb2.PropertyResponse(
-                property_name=prop_name,
-                value=str(self._server.is_connected())
-            )
-        elif prop_name == "status":
-            return SiLA2Common_pb2.PropertyResponse(
-                property_name=prop_name,
-                value=self._server._status
-            )
-        elif prop_name == "current_run_id":
-            return SiLA2Common_pb2.PropertyResponse(
-                property_name=prop_name,
-                value=self._server._current_run_id or ""
-            )
-        elif prop_name == "hardware_config":
-            return SiLA2Common_pb2.PropertyResponse(
-                property_name=prop_name,
-                value=self._server.get_current_hardware_config()
-            )
-        else:
-            return SiLA2Common_pb2.PropertyResponse(
-                property_name=prop_name,
-                value="",
-                error=f"Unknown property: {prop_name}"
-            )
 
 
 class OpentronsSiLA2Server:
@@ -468,30 +85,6 @@ class OpentronsSiLA2Server:
         # to interrupt an in-progress run without waiting for it to finish.
         self._control_lock = asyncio.Lock()
 
-        # gRPC Server
-        self._grpc_server = None
-        
-        # mDNS Registry for automatic discovery
-        self._mdns_registry: Optional[SiLA2ServerRegistry] = None
-        if MDNS_AVAILABLE:
-            # Derive feature IDs from .sila.xml so TXT records stay in sync
-            _features_dir = str(Path(__file__).parent.parent / "features")
-            try:
-                from sila2_xml_parser import features_from_xml_dir
-                _feature_ids = [f['identifier'] for f in features_from_xml_dir(_features_dir)]
-            except Exception:
-                _feature_ids = ["WorkflowAPI"]
-            _feature_ids.append("SiLA2Common")
-
-            self._mdns_registry = SiLA2ServerRegistry(
-                name="OpentronsFlex",
-                port=config.port,
-                features=_feature_ids,
-                vendor="BicoccaLab",
-                version=config.version,
-                server_type="Real"
-            )
-        
     # ═══════════════════════════════════════════════════════════════════
     #                      INITIALIZATION
     # ═══════════════════════════════════════════════════════════════════
@@ -596,97 +189,22 @@ class OpentronsSiLA2Server:
     # ═══════════════════════════════════════════════════════════════════
     #                      SERVER LIFECYCLE
     # ═══════════════════════════════════════════════════════════════════
-        
-    async def start(self):
-        """Start the SiLA2 server."""
-        await self.initialize()
+    #
+    # This class is the Opentrons *domain* layer: it owns the robot client,
+    # the HAL, tip tracking and the recipe pipeline. It is NOT a server.
+    # main.py builds the SiLA2 server (sila2 library) and WorkflowAPIImpl
+    # drives this object. A second, hand-rolled grpc.aio server used to live
+    # here — with its own mDNS registration and a SiLA2Common adapter — that
+    # main.py never called. Removed; there is one server, and the sila2
+    # library owns it.
 
-        if self.robot is None:
-            raise RuntimeError("Robot client not initialized — call initialize() first")
-
-        # Connect to robot with retry
-        async def on_retry(attempt, max_attempts):
-            self.logger.info(f"Retry {attempt}/{max_attempts}...")
-
-        connected = await self.robot.connect_with_retry(
-            max_retries=self.config.connection_retry_count,
-            retry_delay=self.config.connection_retry_delay,
-            on_retry=on_retry
-        )
-
-        if connected:
-            health = await self.robot.get_health()
-            self.logger.info(f"Robot connected: {health.get('name', 'Unknown')}")
-            self._status = "idle"
-        else:
-            self.logger.error("Robot not found after 3 retries - server cannot start")
-            raise ConnectionError(f"Opentrons robot not found at {self.config.robot_ip}:{self.config.robot_port}. Ensure the robot is powered on and connected to the network.")
-            
-        # Create gRPC server
-        self._grpc_server = grpc.aio.server(
-            futures.ThreadPoolExecutor(max_workers=10)
-        )
-        
-        # Per-feature gRPC servicer registration used to happen here (legacy
-        # OpentronsServicer, never actually present in this repo — dead code,
-        # removed). All real RPC dispatch goes through the SiLA2CommonAdapter's
-        # generic ExecuteCommand below.
-
-        # Register SiLA2Common adapter for plug-and-play
-        if SILA2_COMMON_AVAILABLE:
-            if SiLA2Common_pb2_grpc is None:
-                raise RuntimeError("SiLA2Common_pb2_grpc not available")
-            self._common_adapter = SiLA2CommonAdapter(self)
-            SiLA2Common_pb2_grpc.add_SiLA2ServerInfoServicer_to_server(
-                self._common_adapter, self._grpc_server
-            )
-            self.logger.info("SiLA2Common adapter registered (Plug & Play enabled)")
-        else:
-            self.logger.warning("SiLA2Common not available - Plug & Play disabled")
-        
-        # Bind to port
-        address = f"{self.config.host}:{self.config.port}"
-        self._grpc_server.add_insecure_port(address)
-        
-        # Start server
-        self.logger.info(f"Starting SiLA2 server on {address}...")
-        await self._grpc_server.start()
-        
-        # Register on mDNS for automatic discovery
-        if self._mdns_registry:
-            await self._mdns_registry.register()
-        
-        self._print_banner()
-        
-        # Keep server running
-        await self._grpc_server.wait_for_termination()
-        
-    def _print_banner(self):
-        """Print server startup banner."""
-        self.logger.info("=" * 60)
-        self.logger.info(f"  OpentronsSiLA2Server v{self.config.version}")
-        self.logger.info(f"  gRPC: {self.config.host}:{self.config.port}")
-        self.logger.info(f"  Robot: {self.config.robot_ip}:{self.config.robot_port}")
-        if self.hardware:
-            self.logger.info(f"  Hardware: {self.hardware.get_current_config_name()}")
-        self.logger.info("=" * 60)
-        
     async def stop(self):
-        """Stop the server gracefully."""
-        self.logger.info("Shutting down...")
-        
-        # Unregister from mDNS
-        if self._mdns_registry:
-            await self._mdns_registry.unregister()
-        
+        """Release hardware resources. Called by WorkflowAPIImpl.stop()."""
+        self.logger.info("Shutting down Opentrons domain layer...")
         if self.robot:
             await self.robot.disconnect()
-            
-        if self._grpc_server:
-            await self._grpc_server.stop(grace=5)
-            
-        self.logger.info("Server stopped")
-        
+        self.logger.info("Stopped")
+
     # ═══════════════════════════════════════════════════════════════════
     #                 HARDWARE CONFIG MANAGEMENT
     # ═══════════════════════════════════════════════════════════════════
@@ -895,87 +413,18 @@ class OpentronsSiLA2Server:
         except Exception as e:
             self.logger.warning(f"Webapp notification failed: {e}, trying ManualStation...")
         
-        # Strategy 2: Fallback to ManualStation gRPC
-        if not MANUAL_STATION_AVAILABLE:
-            self.logger.warning("ManualStation not available - cannot request refill")
-            return False
+        # No fallback: the webapp notification above is the only operator
+        # channel. A ManualStation gRPC fallback used to live here, guarded by
+        # a MANUAL_STATION_AVAILABLE flag that was always False (its stubs
+        # exist nowhere in the tree) and spawning an operator_popup.py that
+        # does not exist. It could never run.
+        self.logger.error(
+            "Tip refill could not be confirmed: the webapp at %s did not "
+            "respond. Refill the rack and re-run, or confirm from the "
+            "Operator page once the webapp is back.", webapp_url,
+        )
+        return False
 
-        if manual_pb2 is None or manual_pb2_grpc is None:
-            raise RuntimeError("manual_pb2/manual_pb2_grpc not available")
-
-        try:
-            # Connect to ManualStation
-            channel = grpc.aio.insecure_channel("localhost:50360")
-            stub = manual_pb2_grpc.ManualStationServiceStub(channel)
-            
-            description = (
-                f"REFILL TIPRACK RICHIESTO\n\n"
-                f"Tipo: {rack_type}\n"
-                f"Posizione: {location}\n"
-                f"Tips necessari: {needed}\n"
-                f"Tips disponibili: {available}\n\n"
-                f"Sostituire il tiprack con uno pieno e confermare."
-            )
-            
-            request = manual_pb2.RequestOperatorTaskRequest(
-                task_type="tip_refill",
-                task_description=description,
-                source_instrument="Opentrons",
-                priority="high",
-                timeout_seconds=3600
-            )
-            
-            # Spawn popup
-            workspace_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-            popup_script = os.path.join(workspace_root, "operator_popup.py")
-
-            task_id = None
-            popup_opened = False
-
-            async for response in stub.RequestOperatorTask(request):
-                task_id = response.task_id
-
-                # Open popup on first response
-                if not popup_opened and response.status in ["pending", "created"]:
-                    popup_opened = True
-                    if not os.path.exists(popup_script):
-                        self.logger.error(f"Refill popup script not found: {popup_script}")
-                    else:
-                        try:
-                            # No shell=True: args passed as a list avoid shell
-                            # parsing/injection of task_id/description, and
-                            # CREATE_NEW_CONSOLE gives the same "own window" UX
-                            # as the old `start "..."` cmd.exe builtin.
-                            creationflags = subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
-                            subprocess.Popen(
-                                [sys.executable, popup_script, task_id, "tip_refill", description, "Opentrons", "high"],
-                                cwd=workspace_root,
-                                creationflags=creationflags,
-                            )
-                            self.logger.info(f"Opened refill popup for task {task_id}")
-                        except Exception as popup_exc:
-                            self.logger.error(f"Failed to open refill popup: {popup_exc}")
-                
-                if response.status == "completed":
-                    self.logger.info(f"Operator confirmed tip refill for {rack_type}")
-                    await channel.close()
-                    return True
-                elif response.status == "cancelled":
-                    self.logger.warning(f"Operator cancelled tip refill for {rack_type}")
-                    await channel.close()
-                    return False
-                elif response.status == "timeout":
-                    self.logger.warning(f"Tip refill request timed out for {rack_type}")
-                    await channel.close()
-                    return False
-                    
-            await channel.close()
-            return False
-            
-        except Exception as e:
-            self.logger.error(f"Failed to request tip refill: {e}")
-            return False
-        
     # ═══════════════════════════════════════════════════════════════════
     #                    OPENTRONS FLEX FEATURE
     # ═══════════════════════════════════════════════════════════════════
@@ -2200,43 +1649,3 @@ class OpentronsSiLA2Server:
             "Trash": {"Bin": {"Type": "TrashBin", "Slot": "A3"}},
             "Steps": []
         }
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-#                              MAIN ENTRY POINT
-# ═══════════════════════════════════════════════════════════════════════════
-
-async def main():
-    """Main entry point."""
-    print()
-    print("=" * 60)
-    print("  OPENTRONS SiLA2 SERVER")
-    print("  Python Implementation")
-    print("=" * 60)
-    print()
-    
-    # Load config
-    config = ServerConfig("config.yaml")
-    
-    # Validate
-    is_valid, error = config.validate()
-    if not is_valid:
-        print(f"Configuration error: {error}")
-        return
-    
-    # Create and start server
-    server = OpentronsSiLA2Server(config)
-    
-    try:
-        await server.start()
-        
-    except KeyboardInterrupt:
-        print("\nShutdown requested...")
-    except Exception as e:
-        print(f"Server error: {e}")
-    finally:
-        await server.stop()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
