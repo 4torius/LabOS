@@ -1,36 +1,52 @@
 {
   "WorkflowName": "Simple_PlateRead",
-  "Description": "Solo lettura piastra su Tecan (per test)",
-  "Author": "BicoccaLab", 
-  "Version": "1.0",
+  "Description": "Minimal Tecan-only example: connect, load the plate, read it with a saved .mdfx protocol, eject. Step 3 used to call ReadAbsorbance(Wavelength, PlateType), a command the Tecan server has never implemented, so this example could only ever fail at step 3. The reader takes a protocol file, not a wavelength: measurement parameters live in the .mdfx authored in iControl (see Library/Analysis/).",
+  "Author": "BicoccaLab",
+  "Version": "1.1",
+  "SchemaVersion": "1.0",
   "Steps": [
     {
       "StepNumber": 1,
-      "Instrument": "Tecan",
+      "Instrument": "tecan",
       "Action": "Connect",
-      "Description": "Connessione al lettore"
+      "Parameters": {
+        "ConnectionString": ""
+      },
+      "Description": "Connect to the reader (empty string = default USB connection)",
+      "DependsOn": []
     },
     {
       "StepNumber": 2,
-      "Instrument": "Tecan",
+      "Instrument": "tecan",
       "Action": "PlateIn",
-      "Description": "Inserimento piastra"
+      "Description": "Move the plate carrier in",
+      "DependsOn": [
+        1
+      ]
     },
     {
       "StepNumber": 3,
-      "Instrument": "Tecan",
-      "Action": "ReadAbsorbance",
+      "Instrument": "tecan",
+      "Action": "RunMeasurement",
       "Parameters": {
-        "Wavelength": 450,
-        "PlateType": "96_well"
+        "ProtocolFile": "Script1",
+        "PlateID": "",
+        "SampleSetID": "",
+        "PlateType": ""
       },
-      "Description": "Lettura assorbanza"
+      "Description": "Run a saved .mdfx protocol. PlateID is filled in automatically from the run context when an earlier step pipetted a plate; PlateType empty keeps whatever plate the .mdfx was authored for.",
+      "DependsOn": [
+        2
+      ]
     },
     {
       "StepNumber": 4,
-      "Instrument": "Tecan",
+      "Instrument": "tecan",
       "Action": "PlateOut",
-      "Description": "Espulsione piastra"
+      "Description": "Eject the plate carrier",
+      "DependsOn": [
+        3
+      ]
     }
   ]
 }

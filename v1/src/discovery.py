@@ -44,6 +44,7 @@ try:
 except ImportError:
     ZEROCONF_AVAILABLE = False
 
+from src.resolver import resolve
 from src.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -1003,32 +1004,18 @@ class PnPDiscovery:
     #                         PUBLIC API
     
     def get_server(self, name_or_key: str) -> Optional[PnPServer]:
+        """Find a discovered server by registry key or announced name.
+
+        Delegates to the shared resolver so this agrees with LabCore instead of
+        implementing its own substring rule (it used to return the first
+        partial match in dict order, which on a collision was effectively a
+        coin flip).
         """
-        Get a server by name or key.
-        
-        Supports:
-        - Exact key match: "tecan"
-        - Exact name match: "Tecan"
-        - Partial match: "tecan" matches "Tecan M200 Pro"
-        """
-        name_lower = name_or_key.lower()
-        
-        # Try exact key match
-        if name_lower in self.servers:
-            return self.servers[name_lower]
-        
-        # Try exact name match
-        for server in self.servers.values():
-            if server.name.lower() == name_lower:
-                return server
-        
-        # Try partial match
-        for server in self.servers.values():
-            if name_lower in server.name.lower():
-                return server
-        
-        return None
-    
+        return resolve(
+            name_or_key,
+            [(key, server.name, server) for key, server in self.servers.items()],
+        ).target
+
     def list_servers(self) -> List[PnPServer]:
         """List all discovered servers."""
         return list(self.servers.values())

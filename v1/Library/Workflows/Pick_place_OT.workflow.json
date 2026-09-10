@@ -3,7 +3,7 @@
   "Steps": [
     {
       "StepNumber": 1,
-      "Instrument": "GoFaGo Mobile Robot",
+      "Instrument": "mobile",
       "Action": "ExecuteTask",
       "Parameters": {
         "ExecutionMode": "Normal",
@@ -13,33 +13,40 @@
     },
     {
       "StepNumber": 2,
-      "Instrument": "GoFaGo Mobile Robot",
+      "Instrument": "mobile",
       "Action": "ExecuteTask",
       "Parameters": {
         "ExecutionMode": "Normal",
         "TaskId": "dxvadjvibetfceaybdybsqsqcmzimdfj"
       },
-      "DependsOn": []
+      "DependsOn": [
+        1
+      ]
     },
     {
       "StepNumber": 3,
-      "Instrument": "OpentronsFlex",
+      "Instrument": "opentrons",
       "Action": "ExecuteRecipe",
       "Parameters": {
         "RecipeName": "test_6.json"
       },
-      "DependsOn": []
+      "DependsOn": [
+        2
+      ]
     },
     {
       "StepNumber": 4,
-      "Instrument": "GoFaGo Mobile Robot",
+      "Instrument": "mobile",
       "Action": "ExecuteTask",
       "Parameters": {
         "ExecutionMode": "Normal",
         "TaskId": "qufptekmeyycpckgbvcpudozfdfkctba"
       },
-      "DependsOn": []
+      "DependsOn": [
+        3
+      ]
     }
   ],
-  "CreatedAt": "2026-08-05T14:51:19.265220"
+  "CreatedAt": "2026-08-05T14:51:19.265220",
+  "SchemaVersion": "1.0"
 }

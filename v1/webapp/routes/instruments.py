@@ -164,7 +164,6 @@ def create_instruments_router(
         data = await request.json()
         command = data.get("command")
         params = data.get("parameters", {})
-        normalized_id = device_id.lower().replace("-", "_")
 
         try:
             core = lab_core
@@ -173,9 +172,10 @@ def create_instruments_router(
                 core = get_lab_core(BASE_DIR)
 
             await core.discover()
-            instrument = core.get_instrument(normalized_id) or core.get_instrument(device_id)
-            if not instrument:
-                return {"status": "error", "error": f"Device '{device_id}' not found"}
+            match = core.resolve_instrument(device_id)
+            if not match:
+                return {"status": "error", "error": match.error}
+            instrument = match.target
 
             actual_id = instrument.id
             if actual_id in state.devices:

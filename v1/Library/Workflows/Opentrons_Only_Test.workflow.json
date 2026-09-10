@@ -6,12 +6,14 @@
   "Steps": [
     {
       "StepNumber": 1,
-      "Instrument": "Opentrons",
+      "Instrument": "opentrons",
       "Action": "ExecuteRecipe",
       "Parameters": {
         "RecipeName": "test_case1_requirements"
       },
-      "Description": "Esecuzione ricetta di test"
+      "Description": "Esecuzione ricetta di test",
+      "DependsOn": []
     }
-  ]
+  ],
+  "SchemaVersion": "1.0"
 }

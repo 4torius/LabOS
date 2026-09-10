@@ -6,9 +6,10 @@
   "Steps": [
     {
       "StepNumber": 1,
-      "Instrument": "Opentrons",
+      "Instrument": "opentrons",
       "Action": "Initialize",
-      "Description": "Inizializzazione Opentrons"
+      "Description": "Inizializzazione Opentrons",
+      "DependsOn": []
     },
     {
       "StepNumber": 2,
@@ -21,7 +22,10 @@
         "priority": "high",
         "timeout_seconds": 600
       },
-      "Description": "Richiesta refill tips - ATTESA CONFERMA OPERATORE"
+      "Description": "Richiesta refill tips - ATTESA CONFERMA OPERATORE",
+      "DependsOn": [
+        1
+      ]
     },
     {
       "StepNumber": 3,
@@ -30,7 +34,10 @@
       "Parameters": {
         "slot": "D3"
       },
-      "Description": "Conferma refill tip rack slot D3"
+      "Description": "Conferma refill tip rack slot D3",
+      "DependsOn": [
+        2
+      ]
     },
     {
       "StepNumber": 4,
@@ -41,7 +48,11 @@
         "level": "info",
         "source_instrument": "Opentrons Flex"
       },
-      "Description": "Notifica completamento refill"
+      "Description": "Notifica completamento refill",
+      "DependsOn": [
+        3
+      ]
     }
-  ]
+  ],
+  "SchemaVersion": "1.0"
 }

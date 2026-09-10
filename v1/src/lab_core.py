@@ -50,6 +50,7 @@ from typing import Any, Callable, Dict, List, Optional, Awaitable, Tuple
 # Local imports
 try:
     from src.settings import get_settings
+    from src.resolver import Resolution, resolve
     from src.discovery import PnPDiscovery, PnPServer, PnPCommand
     from src.client import PnPClient, PnPRegistry, CommandResult as PnPResult
     from src.workflow import (
@@ -65,6 +66,7 @@ try:
 except ImportError:
     # Running from different directory
     from settings import get_settings
+    from resolver import Resolution, resolve
     from discovery import PnPDiscovery, PnPServer, PnPCommand
     from client import PnPClient, PnPRegistry, CommandResult as PnPResult
     from workflow import (
@@ -704,6 +706,34 @@ class LabCore:
         """Get list of discovered instruments."""
         return list(self._instruments.values())
     
+    def resolve_instrument(self, name: str) -> "Resolution":
+        """Resolve a written instrument name to a discovered Instrument.
+
+        The single matcher for the whole stack — see src/resolver.py for why
+        the old per-call-site substring rules had to go. Returns a Resolution:
+        truthy when it matched, and carrying a ready-made `error` naming the
+        available instruments (or the colliding ones) when it did not.
+        """
+        return resolve(
+            name,
+            [(inst.id, inst.name, inst) for inst in self._instruments.values()],
+        )
+
+    def find_instrument(self, name: str) -> Optional[Instrument]:
+        """resolve_instrument() when the caller only wants the instrument."""
+        return self.resolve_instrument(name).target
+
+    def instruments_with_command(self, command_id: str) -> List[Instrument]:
+        """Every discovered instrument exposing `command_id`.
+
+        Capability lookup, for code that wants "whoever can refill tips"
+        rather than "the instrument named opentrons".
+        """
+        return [
+            inst for inst in self._instruments.values()
+            if any(cmd.id == command_id for cmd in inst.commands)
+        ]
+
     def get_instrument(self, instrument_id: str) -> Optional[Instrument]:
         """Get instrument by ID."""
         # Normalize ID

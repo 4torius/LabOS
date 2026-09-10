@@ -65,7 +65,7 @@ def _conn():
 #    are built around.
 # ─────────────────────────────────────────────────────────────────────────────
 
-AUTOMATION_TABLES = ("run_results",)
+AUTOMATION_TABLES = ("run_results", "run_steps")
 CHEMICAL_TABLES = (
     "protocols", "protocol_channels", "instrument_measurements",
     "plates", "reagent_catalog", "wells", "well_measurements",
@@ -91,6 +91,29 @@ CREATE TABLE IF NOT EXISTS run_results (
     steps_skipped     INTEGER,
     result_json       TEXT,
     created_at        TEXT DEFAULT (datetime('now'))
+);
+
+-- ── Per-step execution timeline ───────────────────────────────────────────────
+-- One row per step attempt (a retry is a new row, so the retry history stays
+-- visible instead of being overwritten). Written as the step starts and again
+-- as it ends, so a run that crashes mid-way still leaves a diagnosable trail:
+-- run_results alone only ever recorded a start and an end.
+CREATE TABLE IF NOT EXISTS run_steps (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id            TEXT NOT NULL,
+    step_number       INTEGER,
+    attempt           INTEGER DEFAULT 1,
+    instrument        TEXT,
+    action            TEXT,
+    parameters_json   TEXT,
+    status            TEXT,          -- pending/running/success/failed/skipped/waiting_intervention
+    started_at        TEXT,
+    ended_at          TEXT,
+    duration_seconds  REAL,
+    error             TEXT,
+    result_json       TEXT,
+    plate_id          TEXT,
+    FOREIGN KEY (run_id) REFERENCES run_results(run_id) ON DELETE CASCADE
 );
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -257,6 +280,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_wells_content    ON wells(plate_id, well_id
 CREATE INDEX IF NOT EXISTS idx_well_meas_plate        ON well_measurements(plate_id);
 CREATE INDEX IF NOT EXISTS idx_well_meas_protocol     ON well_measurements(protocol_id);
 CREATE INDEX IF NOT EXISTS idx_reagent_name           ON reagent_catalog(name);
+CREATE INDEX IF NOT EXISTS idx_run_steps_run          ON run_steps(run_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_run_step_attempt ON run_steps(run_id, step_number, attempt);
 """
 
 # Migration: add new columns to existing tables (idempotent ALTER TABLE)
@@ -350,6 +375,110 @@ def save_run(run_data: Dict[str, Any]) -> None:
         logger.error(f"Failed to save run to database: {e}")
 
 
+def save_run_step(step_data: Dict[str, Any]) -> None:
+    """Insert or update one step attempt.
+
+    Called twice per attempt: once when the step starts (status "running",
+    no end time) and once when it finishes. Keyed on
+    (run_id, step_number, attempt) so the second call updates the first row
+    rather than adding a duplicate, while a *retry* — a new attempt number —
+    gets its own row and the retry history stays readable.
+    """
+    try:
+        params = step_data.get("parameters")
+        result = step_data.get("result")
+        with _conn() as con:
+            con.execute(
+                """
+                INSERT INTO run_steps
+                    (run_id, step_number, attempt, instrument, action,
+                     parameters_json, status, started_at, ended_at,
+                     duration_seconds, error, result_json, plate_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id, step_number, attempt) DO UPDATE SET
+                    -- COALESCE on everything the completion call may legitimately
+                    -- omit: it reports an outcome, and must not blank out what the
+                    -- start call already recorded. Only status always wins.
+                    instrument       = COALESCE(excluded.instrument, run_steps.instrument),
+                    action           = COALESCE(excluded.action, run_steps.action),
+                    parameters_json  = COALESCE(excluded.parameters_json, run_steps.parameters_json),
+                    started_at       = COALESCE(run_steps.started_at, excluded.started_at),
+                    status           = excluded.status,
+                    ended_at         = COALESCE(excluded.ended_at, run_steps.ended_at),
+                    duration_seconds = COALESCE(excluded.duration_seconds, run_steps.duration_seconds),
+                    error            = COALESCE(excluded.error, run_steps.error),
+                    result_json      = COALESCE(excluded.result_json, run_steps.result_json),
+                    plate_id         = COALESCE(excluded.plate_id, run_steps.plate_id)
+                """,
+                (
+                    step_data.get("run_id"),
+                    step_data.get("step_number"),
+                    int(step_data.get("attempt", 1) or 1),
+                    step_data.get("instrument"),
+                    step_data.get("action"),
+                    json.dumps(params, default=str) if params is not None else None,
+                    step_data.get("status"),
+                    step_data.get("started_at"),
+                    step_data.get("ended_at"),
+                    step_data.get("duration_seconds"),
+                    step_data.get("error"),
+                    json.dumps(result, default=str) if result is not None else None,
+                    step_data.get("plate_id"),
+                ),
+            )
+    except Exception as e:
+        # Never let bookkeeping abort a run that is physically in progress.
+        logger.error(f"Failed to save run step: {e}")
+
+
+def get_run_steps(run_id: str) -> List[Dict[str, Any]]:
+    """Every recorded step attempt for a run, in execution order."""
+    try:
+        with _conn() as con:
+            rows = con.execute(
+                "SELECT * FROM run_steps WHERE run_id = ? ORDER BY step_number, attempt",
+                (run_id,),
+            ).fetchall()
+            steps = []
+            for row in rows:
+                step = dict(row)
+                for raw_key, key in (("parameters_json", "parameters"), ("result_json", "result")):
+                    if step.get(raw_key):
+                        try:
+                            step[key] = json.loads(step[raw_key])
+                        except (TypeError, ValueError):
+                            step[key] = None
+                steps.append(step)
+            return steps
+    except Exception as e:
+        logger.error(f"Failed to get steps for run {run_id}: {e}")
+        return []
+
+
+def update_run_status(run_id: str, status: str, **fields: Any) -> None:
+    """Patch a run's status (and any other run_results columns) in place.
+
+    Used by the run manager for the transitions a run goes through while it is
+    alive — running -> paused -> running -> completed/failed/aborted — without
+    rewriting the whole record through save_run().
+    """
+    allowed = {
+        "completed_at", "duration_seconds", "steps_total", "steps_completed",
+        "steps_failed", "steps_skipped", "result_json", "notes", "workflow_name",
+    }
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    updates["status"] = status
+    assignments = ", ".join(f"{k} = ?" for k in updates)
+    try:
+        with _conn() as con:
+            con.execute(
+                f"UPDATE run_results SET {assignments} WHERE run_id = ?",
+                (*updates.values(), run_id),
+            )
+    except Exception as e:
+        logger.error(f"Failed to update run {run_id}: {e}")
+
+
 def get_runs(
     limit: int = 100,
     offset: int = 0,
@@ -409,6 +538,7 @@ def get_run(run_id: str) -> Optional[Dict[str, Any]]:
                 (run_id,),
             ).fetchall()
             data["plates"] = [dict(p) for p in plates]
+            data["steps"] = get_run_steps(run_id)
             return data
     except Exception as e:
         logger.error(f"Failed to get run {run_id}: {e}")

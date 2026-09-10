@@ -303,3 +303,110 @@ class TestSearchPlates:
         fresh_db.save_plate({"plate_id": "A"})
         fresh_db.save_plate({"plate_id": "B"})
         assert len(fresh_db.search_plates()) == 2
+
+
+class TestRunSteps:
+    """Per-step execution timeline (run_steps).
+
+    run_results alone recorded a run's start and its end and nothing between,
+    so a run that crashed mid-way left no trace of where it got to.
+    """
+
+    def _seed_run(self, fresh_db, run_id="RUN-1"):
+        fresh_db.save_run({
+            "run_id": run_id, "workflow_name": "W",
+            "started_at": "2026-09-10T10:00:00", "status": "running",
+            "step_results": [],
+        })
+        return run_id
+
+    def test_start_then_finish_updates_the_same_row(self, fresh_db):
+        run_id = self._seed_run(fresh_db)
+        fresh_db.save_run_step({
+            "run_id": run_id, "step_number": 1, "attempt": 1,
+            "instrument": "opentrons", "action": "ExecuteRecipe",
+            "parameters": {"RecipeName": "x.json"},
+            "status": "running", "started_at": "t1",
+        })
+        fresh_db.save_run_step({
+            "run_id": run_id, "step_number": 1, "attempt": 1,
+            "status": "success", "ended_at": "t2", "duration_seconds": 12.5,
+            "result": {"RunId": "abc"}, "plate_id": "PLT-1",
+        })
+        steps = fresh_db.get_run_steps(run_id)
+        assert len(steps) == 1
+        assert steps[0]["status"] == "success"
+        assert steps[0]["duration_seconds"] == 12.5
+
+    def test_completion_does_not_blank_out_what_the_start_recorded(self, fresh_db):
+        """The finishing call reports an outcome and legitimately omits the
+        parameters; they must survive."""
+        run_id = self._seed_run(fresh_db)
+        fresh_db.save_run_step({
+            "run_id": run_id, "step_number": 1, "attempt": 1,
+            "instrument": "opentrons", "action": "ExecuteRecipe",
+            "parameters": {"RecipeName": "x.json"}, "status": "running",
+            "started_at": "t1",
+        })
+        fresh_db.save_run_step({
+            "run_id": run_id, "step_number": 1, "attempt": 1, "status": "success",
+        })
+        step = fresh_db.get_run_steps(run_id)[0]
+        assert step["parameters"] == {"RecipeName": "x.json"}
+        assert step["instrument"] == "opentrons"
+        assert step["action"] == "ExecuteRecipe"
+        assert step["started_at"] == "t1"
+
+    def test_a_retry_is_a_new_row_so_history_survives(self, fresh_db):
+        run_id = self._seed_run(fresh_db)
+        for attempt, status, err in ((1, "failed", "timeout"), (2, "success", None)):
+            fresh_db.save_run_step({
+                "run_id": run_id, "step_number": 3, "attempt": attempt,
+                "instrument": "tecan", "action": "RunMeasurement",
+                "status": status, "error": err,
+            })
+        steps = fresh_db.get_run_steps(run_id)
+        assert [(s["attempt"], s["status"]) for s in steps] == [(1, "failed"), (2, "success")]
+        assert steps[0]["error"] == "timeout"
+
+    def test_steps_are_ordered_by_step_then_attempt(self, fresh_db):
+        run_id = self._seed_run(fresh_db)
+        for number, attempt in ((2, 1), (1, 2), (1, 1)):
+            fresh_db.save_run_step({
+                "run_id": run_id, "step_number": number, "attempt": attempt,
+                "status": "success",
+            })
+        steps = fresh_db.get_run_steps(run_id)
+        assert [(s["step_number"], s["attempt"]) for s in steps] == [(1, 1), (1, 2), (2, 1)]
+
+    def test_get_run_carries_the_timeline(self, fresh_db):
+        run_id = self._seed_run(fresh_db)
+        fresh_db.save_run_step({
+            "run_id": run_id, "step_number": 1, "attempt": 1, "status": "success",
+        })
+        assert len(fresh_db.get_run(run_id)["steps"]) == 1
+
+    def test_update_run_status_patches_in_place(self, fresh_db):
+        run_id = self._seed_run(fresh_db)
+        fresh_db.update_run_status(run_id, "completed",
+                                   completed_at="t9", steps_completed=4)
+        run = fresh_db.get_run(run_id)
+        assert run["status"] == "completed"
+        assert run["completed_at"] == "t9"
+        assert run["steps_completed"] == 4
+        # the original workflow name is untouched
+        assert run["workflow_name"] == "W"
+
+    def test_update_run_status_ignores_unknown_columns(self, fresh_db):
+        """A caller passing a stray key must not produce broken SQL."""
+        run_id = self._seed_run(fresh_db)
+        fresh_db.update_run_status(run_id, "failed", not_a_column="x")
+        assert fresh_db.get_run(run_id)["status"] == "failed"
+
+    def test_deleting_a_run_deletes_its_steps(self, fresh_db):
+        run_id = self._seed_run(fresh_db)
+        fresh_db.save_run_step({
+            "run_id": run_id, "step_number": 1, "attempt": 1, "status": "success",
+        })
+        fresh_db.delete_run(run_id)
+        assert fresh_db.get_run_steps(run_id) == []

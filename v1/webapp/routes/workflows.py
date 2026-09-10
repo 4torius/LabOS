@@ -23,6 +23,7 @@ except ImportError:
 
 from src import plate_tracking
 from src.settings import get_settings, normalize_timeout
+from src.workflow import is_locally_handled
 
 logger = logging.getLogger(__name__)
 
@@ -342,23 +343,18 @@ def create_workflows_router(
             if hasattr(instr, '_server') and instr._server:
                 registry.register(instr.id, instr._server)
 
-        # Pre-flight: validate all instrument names before starting
-        _live_names = [i.name.lower() for i in _exec_core.list_instruments()]
-        _missing = []
+        # Pre-flight: every instrument name must resolve to exactly one live
+        # instrument before anything physical starts.
+        _problems = []
         for _step in data.get("Steps", []):
             _instr = (_step.get("Instrument") or "").strip()
-            _instr_lower = _instr.lower()
-            if not _instr_lower or _instr_lower in ("manual", "delay", "refill"):
+            if not _instr or is_locally_handled(_instr, _step.get("Action", "")):
                 continue
-            if not any(_instr_lower in n or n in _instr_lower for n in _live_names):
-                _missing.append(_instr)
-        if _missing:
-            _available = [i.name for i in _exec_core.list_instruments()]
-            return {
-                "status": "error",
-                "error": f"Instrument(s) not found: {', '.join(set(_missing))}. "
-                         f"Available: {', '.join(_available) or 'none'}",
-            }
+            _match = _exec_core.resolve_instrument(_instr)
+            if not _match and _match.error:
+                _problems.append(_match.error)
+        if _problems:
+            return {"status": "error", "error": " | ".join(dict.fromkeys(_problems))}
 
         executor = PnPWorkflowExecutor(registry)
         _wf_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -997,25 +993,22 @@ async def _execute_step(
             pending_operator_actions_lock, _timeouts(base_dir).tip_refill_timeout
         )
 
-    # Generic instrument via LabCore
-    matched_instr = None
-    if core:
-        for instr in core.list_instruments():
-            name_l = instr.name.lower()
-            id_l = instr.id.lower()
-            if (instrument_lower == id_l or instrument_lower == name_l
-                    or instrument_lower in name_l or name_l in instrument_lower
-                    or instrument_lower in id_l):
-                matched_instr = instr
-                break
-
-    if not matched_instr:
-        available = [f"{i.name} ({i.id})" for i in (core.list_instruments() if core else [])]
-        msg = f"Instrument '{instrument}' not found. Running: {available}"
+    # Generic instrument via LabCore, through the shared resolver: an ambiguous
+    # name is reported instead of being silently decided by dict ordering.
+    if not core:
+        msg = f"Cannot execute '{action}': LabCore is not available"
         logger.error(f"[WORKFLOW] {msg}")
         state.add_log("error", msg, "workflow")
         return {"status": "error", "error": msg}
 
+    match = core.resolve_instrument(instrument)
+    if not match:
+        msg = match.error or f"Instrument '{instrument}' not found"
+        logger.error(f"[WORKFLOW] {msg}")
+        state.add_log("error", msg, "workflow")
+        return {"status": "error", "error": msg}
+
+    matched_instr = match.target
     device_id = matched_instr.id
     if device_id in state.devices:
         state.devices[device_id].status = "busy"

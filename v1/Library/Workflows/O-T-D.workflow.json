@@ -3,7 +3,7 @@
   "Steps": [
     {
       "StepNumber": 1,
-      "Instrument": "GoFaGo Mobile Robot",
+      "Instrument": "mobile",
       "Action": "ExecuteTask",
       "Parameters": {
         "ExecutionMode": "Normal",
@@ -13,90 +13,108 @@
     },
     {
       "StepNumber": 2,
-      "Instrument": "GoFaGo Mobile Robot",
+      "Instrument": "mobile",
       "Action": "ExecuteTask",
       "Parameters": {
         "ExecutionMode": "Normal",
         "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh"
       },
-      "DependsOn": []
+      "DependsOn": [
+        1
+      ]
     },
     {
       "StepNumber": 3,
-      "Instrument": "GoFaGo Mobile Robot",
+      "Instrument": "mobile",
       "Action": "ExecuteTask",
       "Parameters": {
         "ExecutionMode": "Normal",
         "TaskId": "dxvadjvibetfceaybdybsqsqcmzimdfj"
       },
-      "DependsOn": []
+      "DependsOn": [
+        2
+      ]
     },
     {
       "StepNumber": 4,
-      "Instrument": "OpentronsFlex",
+      "Instrument": "opentrons",
       "Action": "ExecuteRecipe",
       "Parameters": {
         "RecipeName": "test_6.json"
       },
-      "DependsOn": []
+      "DependsOn": [
+        3
+      ]
     },
     {
       "StepNumber": 5,
-      "Instrument": "GoFaGo Mobile Robot",
+      "Instrument": "mobile",
       "Action": "ExecuteTask",
       "Parameters": {
         "ExecutionMode": "Normal",
         "TaskId": "qufptekmeyycpckgbvcpudozfdfkctba"
       },
-      "DependsOn": []
+      "DependsOn": [
+        4
+      ]
     },
     {
       "StepNumber": 6,
-      "Instrument": "GoFaGo Mobile Robot",
+      "Instrument": "mobile",
       "Action": "ExecuteTask",
       "Parameters": {
         "ExecutionMode": "Normal",
         "TaskId": "uecexrkwddbbvxsbgiqfakfhtskmahbz"
       },
-      "DependsOn": []
+      "DependsOn": [
+        5
+      ]
     },
     {
       "StepNumber": 7,
-      "Instrument": "TecanM200Pro",
+      "Instrument": "tecan",
       "Action": "PlateOut",
       "Parameters": {},
-      "DependsOn": []
+      "DependsOn": [
+        6
+      ]
     },
     {
       "StepNumber": 8,
-      "Instrument": "GoFaGo Mobile Robot",
+      "Instrument": "mobile",
       "Action": "ExecuteTask",
       "Parameters": {
         "ExecutionMode": "Normal",
         "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh"
       },
-      "DependsOn": []
+      "DependsOn": [
+        7
+      ]
     },
     {
       "StepNumber": 9,
-      "Instrument": "GoFaGo Mobile Robot",
+      "Instrument": "mobile",
       "Action": "ExecuteTask",
       "Parameters": {
         "ExecutionMode": "Normal",
         "TaskId": "rxzeeofvewbamneadgvdafucvefidfgb"
       },
-      "DependsOn": []
+      "DependsOn": [
+        8
+      ]
     },
     {
       "StepNumber": 10,
-      "Instrument": "TecanM200Pro",
+      "Instrument": "tecan",
       "Action": "PlateIn",
       "Parameters": {},
-      "DependsOn": []
+      "DependsOn": [
+        9
+      ]
     },
     {
       "StepNumber": 11,
-      "Instrument": "TecanM200Pro",
+      "Instrument": "tecan",
       "Action": "RunMeasurement",
       "Parameters": {
         "ProtocolFile": "Script1",
@@ -104,42 +122,53 @@
         "SampleSetID": "",
         "PlateType": ""
       },
-      "DependsOn": []
+      "DependsOn": [
+        10
+      ]
     },
     {
       "StepNumber": 12,
-      "Instrument": "TecanM200Pro",
+      "Instrument": "tecan",
       "Action": "PlateOut",
       "Parameters": {},
-      "DependsOn": []
+      "DependsOn": [
+        11
+      ]
     },
     {
       "StepNumber": 13,
-      "Instrument": "GoFaGo Mobile Robot",
+      "Instrument": "mobile",
       "Action": "ExecuteTask",
       "Parameters": {
         "ExecutionMode": "Normal",
         "TaskId": "nnegfohactaltbahtxfnejaaycafskaq"
       },
-      "DependsOn": []
+      "DependsOn": [
+        12
+      ]
     },
     {
       "StepNumber": 14,
-      "Instrument": "TecanM200Pro",
+      "Instrument": "tecan",
       "Action": "PlateIn",
       "Parameters": {},
-      "DependsOn": []
+      "DependsOn": [
+        13
+      ]
     },
     {
       "StepNumber": 15,
-      "Instrument": "GoFaGo Mobile Robot",
+      "Instrument": "mobile",
       "Action": "ExecuteTask",
       "Parameters": {
         "ExecutionMode": "Normal",
         "TaskId": "ryblhfukyhbioikvrbdtbxaryrketqek"
       },
-      "DependsOn": []
+      "DependsOn": [
+        14
+      ]
     }
   ],
-  "CreatedAt": "2026-08-05T15:51:38.305476"
+  "CreatedAt": "2026-08-05T15:51:38.305476",
+  "SchemaVersion": "1.0"
 }

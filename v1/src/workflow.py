@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 from src.discovery import PnPServer
 from src.client import PnPRegistry, CommandResult
+from src.resolver import resolve
 from src.settings import get_settings, normalize_timeout
 
 
@@ -356,6 +357,118 @@ ProgressCallback = Callable[[WorkflowProgress], None]
 #                           WORKFLOW EXECUTOR
 # =============================================================================
 
+#: Bumped when the on-disk workflow format changes in a way a reader must
+#: notice. Files without it are pre-versioned and read with the same rules.
+SCHEMA_VERSION = "1.0"
+
+#: Keys the Workflow Builder attaches to a step that are not SiLA2 parameters.
+#: The client drops them before dispatch; validation must not call them typos.
+_WORKFLOW_ONLY_PARAM_KEYS = frozenset({
+    "hal_config", "HALConfig", "UseHAL", "seconds", "rack_type", "notes",
+})
+
+
+def topological_waves(steps: List["WorkflowStep"]) -> List[List["WorkflowStep"]]:
+    """Group steps into dependency waves.
+
+    Wave 0 holds every step whose dependencies are already satisfied (usually:
+    that has none), wave 1 everything that depends only on wave 0, and so on.
+    Steps inside a wave are independent of each other, so they may run
+    concurrently, and they keep the order they were written in so sequential
+    execution stays predictable.
+
+    This is the single ordering used by both execution modes. It exists because
+    sequential execution used to walk the file top to bottom and mark a step
+    SKIPPED when its dependency happened to be written further down - a valid
+    workflow silently lost steps because of how it was typed.
+
+    A dependency on a step number that does not exist is ignored here (workflow
+    validation reports it as an error before execution). Steps left over after
+    no further wave can be formed are in a cycle; they are returned as a final
+    wave so nothing vanishes, and validation reports the cycle.
+    """
+    remaining = {s.step_number: s for s in steps}
+    order = {s.step_number: i for i, s in enumerate(steps)}
+    known = set(remaining)
+    satisfied: Set[int] = set()
+    waves: List[List[WorkflowStep]] = []
+
+    while remaining:
+        wave = [
+            step for step in remaining.values()
+            if all(dep in satisfied or dep not in known for dep in step.depends_on)
+        ]
+        if not wave:
+            # Cycle: emit whatever is left, in file order, so the caller still
+            # sees every step. validate_workflow() names the cycle.
+            waves.append(sorted(remaining.values(), key=lambda s: order[s.step_number]))
+            break
+        wave.sort(key=lambda s: order[s.step_number])
+        waves.append(wave)
+        for step in wave:
+            satisfied.add(step.step_number)
+            del remaining[step.step_number]
+
+    return waves
+
+
+def find_dependency_cycles(steps: List["WorkflowStep"]) -> List[List[int]]:
+    """Return one representative cycle per strongly-connected dependency loop.
+
+    Without this a cycle is not an error at all: the wave scheduler simply
+    never finds those steps runnable and the run ends early with them marked
+    skipped, which reads like a scheduling bug rather than a broken file.
+    """
+    edges = {s.step_number: [d for d in s.depends_on] for s in steps}
+    cycles: List[List[int]] = []
+    seen_signatures = set()
+    WHITE, GREY, BLACK = 0, 1, 2
+    colour = {number: WHITE for number in edges}
+
+    def walk(node: int, path: List[int]) -> None:
+        colour[node] = GREY
+        path.append(node)
+        for dep in edges.get(node, []):
+            if dep not in colour:
+                continue
+            if colour[dep] is GREY:
+                cycle = path[path.index(dep):] + [dep]
+                signature = frozenset(cycle)
+                if signature not in seen_signatures:
+                    seen_signatures.add(signature)
+                    cycles.append(cycle)
+            elif colour[dep] is WHITE:
+                walk(dep, path)
+        path.pop()
+        colour[node] = BLACK
+
+    for number in list(edges):
+        if colour[number] is WHITE:
+            walk(number, [])
+    return cycles
+
+
+def is_locally_handled(instrument: str, action: str = "") -> bool:
+    """True for steps that have no SiLA2 server behind them.
+
+    Delay, manual-operator and tip-refill steps are executed by the
+    orchestrator itself, so they must not be resolved against discovered
+    instruments and must not fail a pre-flight instrument check for being
+    absent. Shared with the webapp so both agree on what "local" means.
+    """
+    instrument_lower = (instrument or "").lower()
+    action_lower = (action or "").lower()
+    if "manual" in instrument_lower:
+        return True
+    if "delay" in instrument_lower or action_lower == "wait":
+        return True
+    if "refill" in instrument_lower:
+        return True
+    if action_lower in ("refilltiprack", "refill") or "refill" in action_lower:
+        return True
+    return False
+
+
 class PnPWorkflowExecutor:
     """
     Generic workflow executor using PnP architecture.
@@ -442,16 +555,8 @@ class PnPWorkflowExecutor:
         return self._error_config.retry_delay(attempt)
 
     def _is_locally_handled_step(self, step: WorkflowStep) -> bool:
-        """Return True for steps executed by web workflow helper logic (not via server metadata)."""
-        instrument_lower = (step.instrument or "").lower()
-        action_lower = (step.action or "").lower()
-        if "manual" in instrument_lower:
-            return True
-        if "delay" in instrument_lower or action_lower == "wait":
-            return True
-        if action_lower in ("refilltiprack", "refill") or "refill" in action_lower:
-            return True
-        return False
+        """Return True for steps the orchestrator executes itself."""
+        return is_locally_handled(step.instrument, step.action)
 
     def _normalize_params_for_validation(self, step: WorkflowStep, params: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -517,32 +622,72 @@ class PnPWorkflowExecutor:
         - Parameter types match
         """
         errors = []
-        
+
+        # Duplicate StepNumbers make DependsOn ambiguous and silently drop steps
+        # from the dependency map, so catch them before anything else.
+        seen_numbers: Dict[int, int] = {}
+        for step in workflow.steps:
+            seen_numbers[step.step_number] = seen_numbers.get(step.step_number, 0) + 1
+        for number, count in seen_numbers.items():
+            if count > 1:
+                errors.append(ValidationError(
+                    step_number=number,
+                    field="StepNumber",
+                    message=f"StepNumber {number} is used by {count} steps; each must be unique",
+                ))
+
+        # A dependency cycle would otherwise present at runtime as steps that
+        # simply never become runnable — a silent hang, not an error.
+        for cycle in find_dependency_cycles(workflow.steps):
+            errors.append(ValidationError(
+                step_number=cycle[0],
+                field="DependsOn",
+                message=f"Dependency cycle: {' -> '.join(str(n) for n in cycle)}",
+            ))
+
+        known_numbers = {s.step_number for s in workflow.steps}
         for step in workflow.steps:
             # Validate dependencies for all steps first.
             for dep in step.depends_on:
-                dep_step = next((s for s in workflow.steps if s.step_number == dep), None)
-                if not dep_step:
+                if dep not in known_numbers:
                     errors.append(ValidationError(
                         step_number=step.step_number,
                         field="DependsOn",
                         message=f"Dependency step {dep} does not exist"
+                    ))
+                elif dep == step.step_number:
+                    errors.append(ValidationError(
+                        step_number=step.step_number,
+                        field="DependsOn",
+                        message="A step cannot depend on itself",
                     ))
 
             # Some steps are handled by workflow orchestration logic, not by instrument RPC.
             if self._is_locally_handled_step(step):
                 continue
 
-            # Find server by name
-            server = self.registry.get_server_by_name(step.instrument)
-            
-            if not server:
+            if not step.action:
+                errors.append(ValidationError(
+                    step_number=step.step_number,
+                    field="Action",
+                    message="No Action given",
+                ))
+                continue
+
+            # Resolve the instrument through the shared resolver, so an
+            # ambiguous name is reported rather than silently decided.
+            match = resolve(
+                step.instrument,
+                [(key, srv.name, srv) for key, srv in self.registry.servers.items()],
+            )
+            if not match:
                 errors.append(ValidationError(
                     step_number=step.step_number,
                     field="Instrument",
-                    message=f"Instrument '{step.instrument}' not found"
+                    message=match.error or f"Instrument '{step.instrument}' not found",
                 ))
                 continue
+            server = match.target
             
             # Find command
             command = None
@@ -576,6 +721,22 @@ class PnPWorkflowExecutor:
                             field=f"Parameters.{param.identifier}",
                             message=f"Required parameter '{param.identifier}' not provided"
                         ))
+
+            declared = {p.identifier for p in command.parameters}
+            if declared:
+                unknown = [
+                    key for key in normalized_params
+                    if key not in declared and key not in _WORKFLOW_ONLY_PARAM_KEYS
+                ]
+                if unknown:
+                    errors.append(ValidationError(
+                        step_number=step.step_number,
+                        field="Parameters",
+                        message=(
+                            f"Unknown parameter(s) {', '.join(sorted(unknown))} for "
+                            f"'{step.action}'. Declared: {', '.join(sorted(declared)) or 'none'}"
+                        ),
+                    ))
 
             # Well-capacity check for ExecuteRecipe steps
             action_lower = (step.action or "").lower()
@@ -745,296 +906,210 @@ class PnPWorkflowExecutor:
             step_results=step_results
         )
     
-    async def _execute_sequential(
+    async def _execute_sequential(self, workflow: Workflow, context: WorkflowContext) -> tuple:
+        """Run one step at a time, in dependency order."""
+        return await self._execute_waves(workflow, context, parallel=False)
+
+    async def _execute_parallel(self, workflow: Workflow, context: WorkflowContext) -> tuple:
+        """Run each dependency wave concurrently."""
+        return await self._execute_waves(workflow, context, parallel=True)
+
+    async def _execute_waves(
         self,
         workflow: Workflow,
-        context: WorkflowContext
+        context: WorkflowContext,
+        parallel: bool,
     ) -> tuple:
-        """Execute steps sequentially with automatic plate_id propagation."""
-        completed = 0
-        failed = 0
-        skipped = 0
-        step_results = {}
-        errors = []
-        steps_by_number = {s.step_number: s for s in workflow.steps}
-        
-        for step in workflow.steps:
-            if self._abort_requested:
-                step.status = StepStatus.SKIPPED
-                skipped += 1
-                continue
+        """Execute a workflow in topological waves.
 
-            # Enforce dependencies also in sequential mode.
-            if step.depends_on:
-                missing_deps = [d for d in step.depends_on if d not in steps_by_number]
-                pending_deps = [
-                    d for d in step.depends_on
-                    if d in steps_by_number and steps_by_number[d].status in (StepStatus.PENDING, StepStatus.RUNNING)
-                ]
-                failed_deps = [
-                    d for d in step.depends_on
-                    if d in steps_by_number and steps_by_number[d].status in (StepStatus.FAILED, StepStatus.SKIPPED)
-                ]
+        Both execution modes share this one ordering. They used to be separate
+        implementations, and the sequential one simply iterated the steps in
+        file order: a step whose dependency appeared *later* in the file was
+        marked SKIPPED rather than reordered, so a perfectly valid workflow
+        silently lost steps depending on the order they happened to be written
+        in. Wave 0 is every step with no dependencies, wave 1 is everything
+        whose dependencies are all in wave 0, and so on; within a wave, file
+        order is preserved so two independent steps still run in the order the
+        author wrote them.
 
-                if missing_deps or pending_deps or failed_deps:
-                    msg_parts = []
-                    if missing_deps:
-                        msg_parts.append(f"missing={missing_deps}")
-                    if pending_deps:
-                        msg_parts.append(f"pending={pending_deps}")
-                    if failed_deps:
-                        msg_parts.append(f"failed_or_skipped={failed_deps}")
-                    dep_msg = ", ".join(msg_parts)
-                    err = f"Step {step.step_number}: dependencies not satisfied ({dep_msg})"
-                    errors.append(err)
-                    step.status = StepStatus.SKIPPED
-                    skipped += 1
-
-                    elapsed = (datetime.now() - workflow.start_time).total_seconds() if workflow.start_time else 0.0
-                    self._notify_progress(WorkflowProgress(
-                        workflow_name=workflow.name,
-                        current_step=step.step_number,
-                        total_steps=len(workflow.steps),
-                        step_instrument=step.instrument,
-                        step_action=step.action,
-                        step_status=StepStatus.SKIPPED,
-                        elapsed_seconds=elapsed,
-                        message=err
-                    ))
-                    continue
-            
-            # Resolve context variables in parameters (e.g., ${workflow.plate_id})
-            resolved_params = context.resolve_parameters(step.parameters)
-            
-            # Auto-inject plate_id for Tecan if not specified but available in context
-            if "tecan" in step.instrument.lower() and step.action in ["RunMeasurement", "RunAnalysis"]:
-                if not resolved_params.get("plate_id") and context.plate_id:
-                    resolved_params["plate_id"] = context.plate_id
-            
-            # Temporarily replace step parameters with resolved ones
-            original_params = step.parameters
-            step.parameters = resolved_params
-            
-            # Notify progress
-            elapsed = (datetime.now() - workflow.start_time).total_seconds() if workflow.start_time else 0.0
-            self._notify_progress(WorkflowProgress(
-                workflow_name=workflow.name,
-                current_step=step.step_number,
-                total_steps=len(workflow.steps),
-                step_instrument=step.instrument,
-                step_action=step.action,
-                step_status=StepStatus.RUNNING,
-                elapsed_seconds=elapsed,
-                message=f"Starting {step.action} on {step.instrument}"
-            ))
-            
-            # Execute with retry
-            result = await self._execute_step_with_retry(step, workflow.name, context)
-            step_results[step.step_number] = result
-            
-            # Restore original parameters
-            step.parameters = original_params
-            
-            # Update context based on result
-            if result.success:
-                # Auto-generate plate_id for Opentrons pipetting commands
-                if "opentrons" in step.instrument.lower() and step.action in ["ExecuteRecipe", "RunRecipe", "run_recipe"]:
-                    recipe_name = resolved_params.get("recipe", resolved_params.get("recipe_name", ""))
-                    if not context.plate_id:  # Only generate if not already set
-                        context.generate_plate_id(recipe_name)
-                        import logging
-                        logging.getLogger(__name__).info(f"Auto-generated plate_id: {context.plate_id}")
-                
-                # Store result in context for future reference
-                # (CommandResult.data is always Dict[str, Any], never optional)
-                result_data = result.data
-                result_data["plate_id"] = context.plate_id
-                context.step_results[step.step_number] = result_data
-            
-            if result.success:
-                completed += 1
-                step.status = StepStatus.SUCCESS
-            else:
-                step.status = StepStatus.FAILED
-                errors.append(f"Step {step.step_number}: {result.error}")
-                
-                if step.on_failure == "stop":
-                    failed += 1
-                    # Skip remaining steps
-                    for remaining in workflow.steps:
-                        if remaining.status == StepStatus.PENDING:
-                            remaining.status = StepStatus.SKIPPED
-                            skipped += 1
-                    break
-                elif step.on_failure == "skip":
-                    skipped += 1
-                else:  # continue
-                    failed += 1
-
-            # Notify final status for this step so UIs can show completion/failure
-            # and avoid looking stuck on the first running event.
-            elapsed = (datetime.now() - workflow.start_time).total_seconds() if workflow.start_time else 0.0
-            if step.status == StepStatus.SUCCESS:
-                step_msg = f"Completed {step.action} on {step.instrument}"
-            elif step.status == StepStatus.SKIPPED:
-                step_msg = f"Skipped {step.action} on {step.instrument}"
-            else:
-                step_msg = f"Failed {step.action} on {step.instrument}: {result.error or 'unknown error'}"
-
-            self._notify_progress(WorkflowProgress(
-                workflow_name=workflow.name,
-                current_step=step.step_number,
-                total_steps=len(workflow.steps),
-                step_instrument=step.instrument,
-                step_action=step.action,
-                step_status=step.status,
-                elapsed_seconds=elapsed,
-                message=step_msg
-            ))
-
-            # Pause point between steps
-            if self._pause_requested and self._resume_event and not self._abort_requested:
-                await self._resume_event.wait()
-
-        return completed, failed, skipped, step_results, errors
-    
-    async def _execute_parallel(
-        self,
-        workflow: Workflow,
-        context: WorkflowContext
-    ) -> tuple:
-        """Execute steps in parallel where dependencies allow.
-        
-        Note: Parallel execution has limited context propagation since
-        plate_id may not be available until after concurrent steps complete.
-        For full traceability, use sequential execution.
+        `parallel` only changes how a single wave is dispatched - concurrently,
+        or one step after another - never the ordering.
         """
-        completed = 0
-        failed = 0
-        skipped = 0
-        step_results = {}
-        errors = []
-        
-        pending = set(s.step_number for s in workflow.steps)
-        completed_steps: Set[int] = set()
-        failed_steps: Set[int] = set()
-        
-        while pending and not self._abort_requested:
-            # Find steps that can run (all dependencies satisfied)
-            runnable = []
-            elapsed = (datetime.now() - workflow.start_time).total_seconds() if workflow.start_time else 0.0
-            for step in workflow.steps:
-                if step.step_number not in pending:
-                    continue
+        completed = failed = skipped = 0
+        step_results: Dict[int, CommandResult] = {}
+        errors: List[str] = []
 
-                deps_satisfied = all(d in completed_steps for d in step.depends_on)
-                deps_failed = any(d in failed_steps for d in step.depends_on)
+        waves = topological_waves(workflow.steps)
+        done: Set[int] = set()
+        broken: Set[int] = set()
 
-                if deps_failed and step.on_failure == "stop":
-                    # Skip this step due to failed dependency
-                    step.status = StepStatus.SKIPPED
-                    pending.discard(step.step_number)
-                    skipped += 1
-                    err = f"Step {step.step_number} skipped: dependency failed"
-                    errors.append(err)
-                    self._notify_progress(WorkflowProgress(
-                        workflow_name=workflow.name,
-                        current_step=step.step_number,
-                        total_steps=len(workflow.steps),
-                        step_instrument=step.instrument,
-                        step_action=step.action,
-                        step_status=StepStatus.SKIPPED,
-                        elapsed_seconds=elapsed,
-                        message=err
-                    ))
-                elif deps_satisfied:
+        def _elapsed() -> float:
+            if not workflow.start_time:
+                return 0.0
+            return (datetime.now() - workflow.start_time).total_seconds()
+
+        def _notify(step: WorkflowStep, status: StepStatus, message: str) -> None:
+            self._notify_progress(WorkflowProgress(
+                workflow_name=workflow.name,
+                current_step=step.step_number,
+                total_steps=len(workflow.steps),
+                step_instrument=step.instrument,
+                step_action=step.action,
+                step_status=status,
+                elapsed_seconds=_elapsed(),
+                message=message,
+            ))
+
+        def _skip(step: WorkflowStep, reason: str) -> None:
+            nonlocal skipped
+            step.status = StepStatus.SKIPPED
+            skipped += 1
+            broken.add(step.step_number)
+            errors.append(reason)
+            _notify(step, StepStatus.SKIPPED, reason)
+
+        halt_reason: Optional[str] = None
+        for wave in waves:
+            if halt_reason or self._abort_requested:
+                break
+
+            runnable: List[WorkflowStep] = []
+            for step in wave:
+                unmet = [d for d in step.depends_on if d in broken or d not in done]
+                if unmet:
+                    # A dependency failed or was skipped. "stop"/"skip" both mean
+                    # this step must not run; "continue" is the author explicitly
+                    # saying the step does not really need its predecessor.
+                    if step.on_failure == "continue":
+                        runnable.append(step)
+                    else:
+                        _skip(step, f"Step {step.step_number} skipped: "
+                                    f"dependencies not satisfied ({unmet})")
+                else:
                     runnable.append(step)
 
             if not runnable:
-                # No steps can run - deadlock or all done
-                break
+                continue
 
-            # Notify RUNNING for all steps about to start in parallel
-            elapsed = (datetime.now() - workflow.start_time).total_seconds() if workflow.start_time else 0.0
-            for step in runnable:
-                self._notify_progress(WorkflowProgress(
-                    workflow_name=workflow.name,
-                    current_step=step.step_number,
-                    total_steps=len(workflow.steps),
-                    step_instrument=step.instrument,
-                    step_action=step.action,
-                    step_status=StepStatus.RUNNING,
-                    elapsed_seconds=elapsed,
-                    message=f"Starting {step.action} on {step.instrument}"
-                ))
+            if parallel and len(runnable) > 1:
+                for step in runnable:
+                    _notify(step, StepStatus.RUNNING,
+                            f"Starting {step.action} on {step.instrument}")
+                outcomes = await asyncio.gather(
+                    *[self._run_one(step, workflow, context) for step in runnable],
+                    return_exceptions=True,
+                )
+            else:
+                outcomes = []
+                for step in runnable:
+                    if self._abort_requested:
+                        outcomes.append(None)
+                        continue
+                    _notify(step, StepStatus.RUNNING,
+                            f"Starting {step.action} on {step.instrument}")
+                    try:
+                        outcomes.append(await self._run_one(step, workflow, context))
+                    except Exception as exc:  # pragma: no cover - defensive
+                        outcomes.append(exc)
+                    # Pause takes effect between steps; a wave dispatched
+                    # concurrently cannot be interrupted mid-wave.
+                    if self._pause_requested and self._resume_event and not self._abort_requested:
+                        await self._resume_event.wait()
 
-            # Run all runnable steps in parallel
-            tasks = [self._execute_step_with_retry(step, workflow.name, context) for step in runnable]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for step, outcome in zip(runnable, outcomes):
+                if outcome is None:  # aborted before it started
+                    _skip(step, f"Step {step.step_number} skipped: workflow aborted")
+                    continue
+                if isinstance(outcome, BaseException):
+                    outcome = CommandResult(success=False, error=str(outcome))
 
-            elapsed = (datetime.now() - workflow.start_time).total_seconds() if workflow.start_time else 0.0
-            for step, result in zip(runnable, results):
-                pending.discard(step.step_number)
+                step_results[step.step_number] = outcome
 
-                if isinstance(result, Exception):
-                    result = CommandResult(success=False, error=str(result))
-
-                step_results[step.step_number] = result
-
-                if result.success:
+                if outcome.success:
                     completed += 1
-                    completed_steps.add(step.step_number)
+                    done.add(step.step_number)
                     step.status = StepStatus.SUCCESS
-                    self._notify_progress(WorkflowProgress(
-                        workflow_name=workflow.name,
-                        current_step=step.step_number,
-                        total_steps=len(workflow.steps),
-                        step_instrument=step.instrument,
-                        step_action=step.action,
-                        step_status=StepStatus.SUCCESS,
-                        elapsed_seconds=elapsed,
-                        message=f"Completed {step.action} on {step.instrument}"
-                    ))
-                else:
-                    failed_steps.add(step.step_number)
-                    step.status = StepStatus.FAILED
-                    err = f"Step {step.step_number}: {result.error}"
-                    errors.append(err)
-                    self._notify_progress(WorkflowProgress(
-                        workflow_name=workflow.name,
-                        current_step=step.step_number,
-                        total_steps=len(workflow.steps),
-                        step_instrument=step.instrument,
-                        step_action=step.action,
-                        step_status=StepStatus.FAILED,
-                        elapsed_seconds=elapsed,
-                        message=f"Failed {step.action} on {step.instrument}: {result.error or 'unknown error'}"
-                    ))
+                    _notify(step, StepStatus.SUCCESS,
+                            f"Completed {step.action} on {step.instrument}")
+                    continue
 
-                    if step.on_failure == "skip":
-                        skipped += 1
-                    else:
-                        failed += 1
+                step.status = StepStatus.FAILED
+                broken.add(step.step_number)
+                error_text = outcome.error or "unknown error"
+                errors.append(f"Step {step.step_number}: {error_text}")
+                _notify(step, StepStatus.FAILED,
+                        f"Failed {step.action} on {step.instrument}: {error_text}")
 
-        # Mark remaining as skipped
-        elapsed = (datetime.now() - workflow.start_time).total_seconds() if workflow.start_time else 0.0
-        for step_num in pending:
-            step = next(s for s in workflow.steps if s.step_number == step_num)
-            step.status = StepStatus.SKIPPED
-            skipped += 1
-            self._notify_progress(WorkflowProgress(
-                workflow_name=workflow.name,
-                current_step=step.step_number,
-                total_steps=len(workflow.steps),
-                step_instrument=step.instrument,
-                step_action=step.action,
-                step_status=StepStatus.SKIPPED,
-                elapsed_seconds=elapsed,
-                message=f"Skipped {step.action} on {step.instrument}"
-            ))
+                if step.on_failure == "skip":
+                    skipped += 1
+                elif step.on_failure == "continue":
+                    failed += 1
+                else:  # "stop"
+                    failed += 1
+                    halt_reason = (
+                        f"workflow halted after step {step.step_number} "
+                        f"({step.action} on {step.instrument}) failed"
+                    )
+
+        # Anything never reached: aborted, or downstream of a halting failure.
+        # Always say why. A step marked "skipped" with no reason attached is one
+        # of the things that makes a failed run hard to read after the fact.
+        if self._abort_requested:
+            not_reached = "workflow aborted by operator"
+        else:
+            not_reached = halt_reason or "not reached"
+        for step in workflow.steps:
+            if step.status == StepStatus.PENDING:
+                step.status = StepStatus.SKIPPED
+                skipped += 1
+                reason = f"Step {step.step_number} skipped: {not_reached}"
+                errors.append(reason)
+                _notify(step, StepStatus.SKIPPED, reason)
 
         return completed, failed, skipped, step_results, errors
-    
+
+    async def _run_one(
+        self,
+        step: WorkflowStep,
+        workflow: Workflow,
+        context: WorkflowContext,
+    ) -> CommandResult:
+        """Resolve a step's parameters against the run context, execute it, and
+        feed the result back into the context.
+
+        Context propagation (a plate id generated by an Opentrons run being
+        picked up by a later Tecan read) used to exist only in the sequential
+        path, so the same workflow tracked plates or not depending on a config
+        flag. It now happens for both.
+        """
+        resolved = context.resolve_parameters(step.parameters)
+
+        # Carry a known plate id into a measurement that did not name one.
+        if "tecan" in step.instrument.lower() and step.action in ("RunMeasurement", "RunAnalysis"):
+            if not resolved.get("plate_id") and context.plate_id:
+                resolved["plate_id"] = context.plate_id
+
+        original = step.parameters
+        step.parameters = resolved
+        try:
+            result = await self._execute_step_with_retry(step, workflow.name, context)
+        finally:
+            step.parameters = original
+
+        if result.success:
+            if ("opentrons" in step.instrument.lower()
+                    and step.action in ("ExecuteRecipe", "RunRecipe", "run_recipe")
+                    and not context.plate_id):
+                recipe_name = resolved.get("RecipeName") or resolved.get("recipe") or ""
+                context.generate_plate_id(recipe_name)
+                logger.info(f"Auto-generated plate_id: {context.plate_id}")
+
+            result_data = result.data if isinstance(result.data, dict) else {}
+            result_data["plate_id"] = context.plate_id
+            context.step_results[step.step_number] = result_data
+
+        return result
+
     async def _execute_step_with_retry(
         self,
         step: WorkflowStep,

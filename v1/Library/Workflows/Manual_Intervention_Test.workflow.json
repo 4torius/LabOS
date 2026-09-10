@@ -6,12 +6,13 @@
   "Steps": [
     {
       "StepNumber": 1,
-      "Instrument": "Opentrons",
+      "Instrument": "opentrons",
       "Action": "ExecuteRecipe",
       "Parameters": {
         "RecipeName": "test_case3_selfcontained_no_pipettes"
       },
-      "Description": "Esegue ricetta Opentrons"
+      "Description": "Esegue ricetta Opentrons",
+      "DependsOn": []
     },
     {
       "StepNumber": 2,
@@ -24,38 +25,53 @@
         "priority": "high",
         "timeout_seconds": 1800
       },
-      "Description": "Attende che l'operatore trasferisca la piastra - IL WORKFLOW SI BLOCCA QUI FINO A CONFERMA"
+      "Description": "Attende che l'operatore trasferisca la piastra - IL WORKFLOW SI BLOCCA QUI FINO A CONFERMA",
+      "DependsOn": [
+        1
+      ]
     },
     {
       "StepNumber": 3,
-      "Instrument": "Tecan",
+      "Instrument": "tecan",
       "Action": "Connect",
       "Parameters": {
         "ConnectionMode": "usb_auto"
       },
-      "Description": "Connessione al Tecan"
+      "Description": "Connessione al Tecan",
+      "DependsOn": [
+        2
+      ]
     },
     {
       "StepNumber": 4,
-      "Instrument": "Tecan",
+      "Instrument": "tecan",
       "Action": "PlateIn",
-      "Description": "Inserimento piastra nel lettore"
+      "Description": "Inserimento piastra nel lettore",
+      "DependsOn": [
+        3
+      ]
     },
     {
       "StepNumber": 5,
-      "Instrument": "Tecan",
+      "Instrument": "tecan",
       "Action": "RunMeasurement",
       "Parameters": {
         "ProtocolFile": "Script1.mdfx",
         "ProtocolPath": "C:\\Users\\andre\\Desktop\\BicoccaLab\\v7\\Library\\Analysis\\Script1.mdfx"
       },
-      "Description": "Esegue analisi Script1"
+      "Description": "Esegue analisi Script1",
+      "DependsOn": [
+        4
+      ]
     },
     {
       "StepNumber": 6,
-      "Instrument": "Tecan",
+      "Instrument": "tecan",
       "Action": "PlateOut",
-      "Description": "Espulsione piastra dal lettore"
+      "Description": "Espulsione piastra dal lettore",
+      "DependsOn": [
+        5
+      ]
     },
     {
       "StepNumber": 7,
@@ -66,7 +82,11 @@
         "level": "info",
         "source_instrument": "Tecan"
       },
-      "Description": "Notifica completamento workflow"
+      "Description": "Notifica completamento workflow",
+      "DependsOn": [
+        6
+      ]
     }
-  ]
+  ],
+  "SchemaVersion": "1.0"
 }

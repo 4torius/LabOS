@@ -90,11 +90,7 @@ def create_operator_router(
                 state.add_log("warning", "Cannot confirm task: LabCore unavailable", "operator")
             else:
                 try:
-                    target = next(
-                        (i for i in lab_core.list_instruments()
-                         if any(c.id == "ConfirmTaskComplete" for c in i.commands)),
-                        None,
-                    )
+                    target = next(iter(lab_core.instruments_with_command("ConfirmTaskComplete")), None)
                     if target is None:
                         state.add_log(
                             "warning",
@@ -203,11 +199,7 @@ async def _update_tip_state(BASE_DIR: Path, rack_type: str, state, ws_manager, l
         # Ask which instrument can actually refill tips rather than matching
         # the substring "opentrons" — a second liquid handler, or a rename,
         # would silently break the name match.
-        target = next(
-            (i for i in core.list_instruments()
-             if any(c.id == "RefillTipRack" for c in i.commands)),
-            None,
-        )
+        target = next(iter(core.instruments_with_command("RefillTipRack")), None)
         if target is None:
             state.add_log(
                 "error",
