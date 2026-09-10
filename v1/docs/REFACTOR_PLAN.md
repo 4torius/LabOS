@@ -277,6 +277,88 @@ directory. `scripts/labos.py` provides `status`, `validate`, `run`,
 
 ---
 
+## Phase 11 — CI ✅
+
+`.github/workflows/tests.yml`: the unit suite on Python 3.11 and 3.12,
+`labos doctor`, a check that every server's generated bindings parse, a check
+that the saved workflows are current, and `compileall` over everything so a
+syntax error in a file no test imports still fails.
+
+Integration tests stay out of CI by construction — a workflow that moves a
+robot arm is not something to trigger from a push.
+
+---
+
+## What landed
+
+Eight commits on top of the `a214be9` baseline: **80 files, +8,259 / −5,550**.
+Unit suite **530 passing** (from 300), with no hardware required.
+
+| Before | After |
+|---|---|
+| 9 modules parsing `lab_config.yaml` independently | 1 (`settings.py`), cached, hot-reloaded on save |
+| 5 substring matchers for instrument names | 1 (`resolver.py`), ambiguity is an error |
+| 2 divergent execution paths, no topological sort | 1 wave ordering, both modes |
+| 3 FDL parsers, 2 execution strategies | 1 each |
+| Abort set a flag read between steps | Abort reaches the instrument and reports what happened |
+| A run lived and died with its HTTP request | A run is a background job with a queryable state |
+| `run_results`: a start row and an end row | `run_steps`: one row per attempt, written live |
+| Opentrons: 18 commands, 7 of which did nothing | 17 commands that act + 6 properties |
+| The camera: implemented, unreachable, unserved | `CaptureImage` + a gallery |
+| Adding an instrument: 9 manual steps | `labos.py new-server Centrifuge` |
+
+### Bugs this surfaced
+
+Not the goal, but the reason the goal was worth it. Each of these was found by
+consolidating something, and each was live:
+
+1. `workflow.default_timeout: null` was documented as unlimited; the executor
+   turned it into a hard 300 s, so no config value could produce an unlimited
+   step timeout — on the component that runs multi-hour protocols.
+2. `parallel_execution` defaulted to `True` in the schema while the config said
+   `False`, and no shipped workflow declared a dependency: deleting the key
+   would have dispatched fifteen simultaneous commands to instruments sharing
+   one plate.
+3. Sequential execution marked a step SKIPPED when its dependency was written
+   later in the file.
+4. Abort never told the robot anything.
+5. The Operator page's "Confirm" never released a ManualStation task: it
+   imported stubs that do not exist, at the wrong port, and the ImportError was
+   swallowed.
+6. Editing a timeout in Settings wrote to disk and did nothing until a restart.
+7. `launcher.py` crashed on startup whenever stdout was not a console.
+8. The robot's HTTP session was never released on shutdown.
+9. Validating a workflow with the instruments switched off blamed the commands
+   rather than saying the server was not responding.
+10. A parameter name the command does not declare was silently dropped, and the
+    command ran without it — `Opentrons_Refill_Test` passed `slot` where the
+    command declares `RackSlot`.
+11. `Simple_PlateRead`, a shipped example, called a Tecan command that has
+    never existed.
+
+---
+
+## Not done, and why
+
+- **Extracting the ~7,000 lines of inline JavaScript** from the Jinja
+  templates into modules. Real debt, and worth doing. It is pure refactor: no
+  behaviour changes, no test can prove it, and every regression lands directly
+  in front of an operator. It wants a browser and a person clicking, which this
+  pass did not have. The duplicated *logic* is already shared
+  (`param-form-shared.js`); what remains is layout code.
+- **Observable-property subscriptions in the orchestrator.** The properties are
+  declared observable and the servers push on every state change, but
+  `src/client.py` reads them one-shot. Subscribing would let the dashboard drop
+  its refresh entirely.
+- **Verifying the camera against the robot.** The protocol fallback homes the
+  robot, which needs someone at the bench. The HTTP path and the `/dev/video2`
+  device node are both unverified on this particular Flex, both are one config
+  value away, and the command reports exactly which path it took.
+- **A run queue.** One run at a time is right for shared physical instruments;
+  queueing is a product decision, not a technical gap.
+
+---
+
 ## Deliberately out of scope
 
 - **Authentication.** CORS is open and there is no token. On an isolated lab

@@ -1957,7 +1957,7 @@ function confirmExecution() {
         // that it finished. Completion arrives on the WebSocket
         // (workflow_complete / workflow_failed) and drives the status bar in
         // base.html, which is visible on every page.
-        if (result.status === 'started') {
+        if (result.started) {
             window._activeRunId = result.run_id;
             showNotification('Workflow started (' + (result.total_steps || 0) + ' steps). '
                              + 'Progress is shown in the status bar below.', 'success');

@@ -51,9 +51,14 @@ reply entirely.
 Starting a run returns:
 
 ```json
-{ "status": "started", "run_id": "20260910_142530_ELISA", "workflow_name": "ELISA",
-  "total_steps": 7, "active": true, "percent": 0 }
+{ "started": true, "run_id": "20260910_142530_ELISA", "workflow_name": "ELISA",
+  "status": "running", "total_steps": 7, "active": true, "percent": 0 }
 ```
+
+`status` carries the run's own state, in the same vocabulary
+`GET /api/runs/{id}` uses — `running`, `paused`, `completed`, `failed`,
+`aborted`, `error` — so a caller does not have to learn a second one. `started`
+says the request was accepted; `run_id` is the thing to hold on to.
 
 Or, when the instruments are busy:
 

@@ -343,7 +343,11 @@ def create_workflows_router(
                 "error": str(busy),
                 "active_run": busy.active.to_dict(),
             }
-        return {"status": "started", **run_state.to_dict()}
+        # `status` carries the run's own state ("running"), the same field and
+        # the same vocabulary GET /api/runs/{id} uses, so a caller does not have
+        # to learn a second one. `started` says the request was accepted; the
+        # thing to hold on to is `run_id`.
+        return {"started": True, **run_state.to_dict()}
 
     @router.post("/api/runs")
     async def start_run(request: Request):

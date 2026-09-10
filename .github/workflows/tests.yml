@@ -1,0 +1,85 @@
+name: tests
+
+# The unit suite needs no hardware and no running servers: it covers the
+# orchestration core, the SiLA2 feature surfaces, the recipe generator and the
+# whole HTTP API through FastAPI's test client. Integration tests, which do
+# need the instruments, stay out of CI by construction — a workflow that moves
+# a robot arm is not something to trigger from a push.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    defaults:
+      run:
+        working-directory: v1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            v1/requirements.txt
+            v1/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Check the installation
+        run: python labos.py doctor
+
+      - name: Unit tests
+        run: >
+          python -m pytest tests -q
+          -m "not integration and not tecan and not opentrons and not manual_station and not mobile"
+
+      - name: Every server's implementation matches its generated bindings
+        # A feature definition edited without re-running codegen, or a command
+        # added to the FDL without an implementation, leaves a server that
+        # cannot start. That is worth catching before it reaches the bench.
+        run: |
+          for server in SiLA2/*SiLA2Server SiLA2/_NewInstrumentTemplate; do
+            [ -f "$server/main.py" ] || continue
+            echo "-- $server"
+            (cd "$server" && python -c "
+          import ast, pathlib, sys
+          for path in pathlib.Path('generated').rglob('*_base.py'):
+              ast.parse(path.read_text(encoding='utf-8'))
+          print('   bindings parse')
+          ")
+          done
+
+      - name: Saved workflows are valid and current
+        run: python scripts/migrate_workflows.py
+
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Everything compiles
+        # Catches syntax errors in files no test imports.
+        run: |
+          python -m compileall -q src webapp scripts labos.py launcher.py
+          python -m compileall -q SiLA2 -x "generated|__pycache__"
