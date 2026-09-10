@@ -167,6 +167,29 @@ python labos.py instruments        # what the running servers actually offer
 
 ### Tecan: `Connect` fails, but iControl connects fine
 
+**First check whether the reader has been moved to a different USB port.**
+Windows creates a separate device instance per physical port, and the Tecan SDK
+connects using a stored "last connection" that then points at a port with
+nothing on it:
+
+```powershell
+Get-PnpDevice | Where-Object InstanceId -match 'VID_0C47' |
+    Select-Object Present, Status, InstanceId
+```
+
+More than one instance, with only one `Present = True`, means the instrument
+has been moved. Fix it once by calling `Connect` with
+`ConnectionString = "dialog"`, picking the reader in the window that appears:
+that re-records the last connection and plain `usb` works again.
+
+**Second, check the bridge actually restarted.** Restarting the Tecan server
+used to leave an orphaned bridge process from the previous run in place —
+adopting it instead of replacing it — so any bridge-level fault survived every
+restart. That is fixed, but if you are on an older build, confirm
+`TecanSiLA2Server.exe` in Task Manager is younger than the Python server.
+
+#### Other causes
+
 That combination is the symptom, not a contradiction: **iControl takes exclusive
 ownership of the USB connection**, and does not reliably release it on close.
 If it has been opened at any point since the Tecan server started, the bridge

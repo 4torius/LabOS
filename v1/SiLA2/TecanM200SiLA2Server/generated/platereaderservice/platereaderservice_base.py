@@ -23,11 +23,7 @@ from .platereaderservice_types import (
 
 if TYPE_CHECKING:
 
-    from typing import TypeVar
-
-    from sila2.server import SilaServer
-
-    Server = TypeVar("Server", bound=SilaServer)
+    from ...server import Server
 
 
 class PlateReaderServiceBase(FeatureImplementationBase, ABC):
@@ -213,7 +209,23 @@ class PlateReaderServiceBase(FeatureImplementationBase, ABC):
         Connect to the Tecan plate reader. Pass empty string for default USB connection.
 
 
-        :param ConnectionString: Connection string (e.g. "usb", "sim", "last"). Empty string uses USB default.
+        :param ConnectionString:
+        How the bridge should find the instrument. The Tecan SDK enumerates USB
+        devices when the bridge process starts, and connects using a stored
+        "last connection" — so if the reader has been moved to a different USB
+        port since that was recorded, the default finds nothing even though the
+        instrument is present and iControl connects to it perfectly well.
+
+          usb      (default) the stored last connection, USB only
+          dialog   force the SDK's instrument-selection window. Use this after
+                   the reader has been moved to a different USB port: picking
+                   it re-records the last connection, and "usb" works again
+          last     explicitly the last connected USB instrument
+          sim      the Tecan simulator, for working without hardware
+          any      USB or simulator - may silently connect to a simulator
+
+        Leave empty for the configured default (instrument.connection_string).
+
 
         :param metadata: The SiLA Client Metadata attached to the call
 

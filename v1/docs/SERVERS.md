@@ -349,6 +349,33 @@ instrument:
 
 ### When `Connect` fails
 
+Two facts about how this connects explain nearly every failure, and neither is
+about power or cabling:
+
+- **The SDK enumerates USB devices when the *bridge process* starts**, not when
+  you press Connect. A bridge that came up while iControl held the instrument,
+  or before it finished powering up, will never see it — retrying cannot help,
+  only a fresh bridge process can.
+- **It connects using a stored "last connection".** Move the reader to a
+  different USB port and that record is stale: the instrument is present,
+  iControl still connects to it, and this does not. Windows keeps a separate
+  device instance per physical port, so the old one becomes a ghost
+  (`Get-PnpDevice | ? InstanceId -match 'VID_0C47'` shows them, with `Present`
+  telling you which is real).
+
+**The fix for a moved reader** is to force a fresh enumeration once:
+
+```
+Connect(ConnectionString = "dialog")
+```
+
+That opens the SDK's instrument-selection window on the lab PC. Pick the
+reader; the selection is recorded as the new last connection, and plain `usb`
+works again afterwards. `ConnectionString` is a dropdown in the interface —
+`usb`, `dialog`, `last`, `sim`, `any`.
+
+#### Older guidance
+
 The bridge reports `ConnectionFailed`, and the server adds what that actually
 means, in the order it is usually true:
 

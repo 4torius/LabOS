@@ -8,6 +8,8 @@ and is started silently (no window) by the Python SiLA2 server.
 from __future__ import annotations
 
 import logging
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -43,10 +45,48 @@ class BridgeLauncher:
     # ── public API ─────────────────────────────────────────────────────────
 
     def start(self) -> bool:
-        """Build (if needed) and start the bridge. Returns True when ready."""
-        if self._probe():
-            logger.warning("Bridge already running on %s:%d; skipping start", self._host, self._port)
+        """Build (if needed) and start the bridge. Returns True when ready.
+
+        A bridge already listening on our port is only reused when it is *ours*
+        and still alive. Anything else is an orphan from a previous run of this
+        server, and it gets terminated rather than adopted.
+
+        Adopting it, which is what this used to do, quietly broke three things
+        at once. `self._proc` stayed None, so the health monitor skipped it
+        forever (`if self._proc is None: continue`) and it was never watched.
+        Its stdout was never pumped, so everything it logged — including the
+        SDK's own explanation of a failed connection — went nowhere. And most
+        of all, restarting the Tecan server did not restart the bridge, which
+        made the documented remedy for every bridge-level fault a no-op: the
+        stale process kept answering, with whatever broken instrument state it
+        had, for as long as the machine stayed up.
+
+        That last one is not hypothetical. A bridge that starts while iControl
+        holds the USB connection cannot enumerate the reader, and it never can
+        again — restarting the Tecan server left the same process in place, so
+        Connect kept failing with the instrument switched on, cabled, and
+        perfectly reachable from iControl.
+        """
+        if self.running and self._probe():
+            logger.debug("Bridge already running and responsive (PID %d)", self._proc.pid)
             return True
+
+        if self._probe():
+            logger.warning(
+                "A bridge is already listening on %s:%d but is not owned by this "
+                "server — an orphan from an earlier run. Terminating it so this "
+                "server starts, owns and can monitor its own.",
+                self._host, self._port,
+            )
+            if not self._terminate_orphan():
+                logger.error(
+                    "Could not stop the orphaned bridge on %s:%d. Kill it by hand "
+                    "(Task Manager: TecanSiLA2Server.exe) and restart this server; "
+                    "adopting it would leave the bridge unmonitored and unrestartable.",
+                    self._host, self._port,
+                )
+                return False
+
         if not _BRIDGE_EXE.exists():
             logger.info("Bridge exe not found — building with dotnet...")
             if not self._build():
@@ -99,6 +139,58 @@ class BridgeLauncher:
             except subprocess.TimeoutExpired:
                 self._proc.kill()
 
+    def _terminate_orphan(self, timeout: float = 10.0) -> bool:
+        """Kill whatever process is holding the bridge port, and wait for it.
+
+        The bridge is a stateless proxy in front of the instrument SDK — there
+        is no in-flight work to preserve, and a stale one is exactly what must
+        not survive.
+        """
+        pid = self._pid_on_port()
+        if pid is None:
+            # Nothing owns it any more; the probe may have raced a shutdown.
+            return not self._probe()
+
+        logger.info("Terminating orphaned bridge (PID %d)", pid)
+        try:
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                               capture_output=True, timeout=10)
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except Exception as exc:
+            logger.error("Failed to terminate orphaned bridge PID %d: %s", pid, exc)
+            return False
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not self._probe():
+                logger.info("Orphaned bridge stopped; port %d is free", self._port)
+                return True
+            time.sleep(0.3)
+        return False
+
+    def _pid_on_port(self) -> "int | None":
+        """PID listening on the bridge port, or None."""
+        try:
+            if sys.platform == "win32":
+                result = subprocess.run(["netstat", "-ano"], capture_output=True,
+                                        text=True, timeout=10)
+                for line in result.stdout.splitlines():
+                    if f":{self._port}" in line and "LISTENING" in line:
+                        parts = line.split()
+                        if parts and parts[-1].isdigit():
+                            return int(parts[-1])
+            else:
+                result = subprocess.run(["lsof", "-ti", f"tcp:{self._port}"],
+                                        capture_output=True, text=True, timeout=10)
+                first = result.stdout.strip().splitlines()
+                if first and first[0].isdigit():
+                    return int(first[0])
+        except Exception as exc:
+            logger.debug("Could not identify the process on port %d: %s", self._port, exc)
+        return None
+
     @property
     def running(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
@@ -131,7 +223,11 @@ class BridgeLauncher:
     def _monitor_loop(self, interval: float, max_restart_attempts: int) -> None:
         while not self._monitor_stop.wait(interval):
             if self._proc is None:
-                continue  # never started — nothing to do
+                # start() was never called, or it failed. It can no longer mean
+                # "we adopted somebody else's bridge": that path terminated the
+                # orphan and started one we own, precisely so this branch stops
+                # silently disabling the monitor.
+                continue
 
             if self._proc.poll() is None:
                 # Process is alive, but that alone doesn't mean it's responsive

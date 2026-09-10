@@ -447,7 +447,18 @@ def _codegen(folder: Path, name: str, package: str) -> int:
 
         produced = Path(tmp) / package / "generated" / package
         if not produced.is_dir():
-            bad(f"Generator produced no package at {produced}")
+            # sila2-codegen can exit 0 having written nothing — an invalid
+            # feature definition is the usual reason, and its complaint is on
+            # stdout. Saying only "produced no package" sends the reader
+            # looking at paths instead of at their own XML.
+            bad("Code generation produced nothing. The feature definition is "
+                "probably invalid — the generator said:")
+            for line in ((result.stdout or "") + (result.stderr or "")).splitlines()[-15:]:
+                if line.strip():
+                    info(line)
+            info("")
+            info("A common one: <Constraints> belongs *inside* a <Constrained>")
+            info("wrapper within <DataType>, not as a sibling of it.")
             return 1
         target = folder / "generated" / package
         target.mkdir(parents=True, exist_ok=True)

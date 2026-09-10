@@ -72,9 +72,38 @@
     <Observable>No</Observable>
     <Parameter>
       <Identifier>ConnectionString</Identifier>
-      <DisplayName>Connection String</DisplayName>
-      <Description>Connection string (e.g. "usb", "sim", "last"). Empty string uses USB default.</Description>
-      <DataType><Basic>String</Basic></DataType>
+      <DisplayName>How to connect</DisplayName>
+      <Description>
+        How the bridge should find the instrument. The Tecan SDK enumerates USB
+        devices when the bridge process starts, and connects using a stored
+        "last connection" — so if the reader has been moved to a different USB
+        port since that was recorded, the default finds nothing even though the
+        instrument is present and iControl connects to it perfectly well.
+
+          usb      (default) the stored last connection, USB only
+          dialog   force the SDK's instrument-selection window. Use this after
+                   the reader has been moved to a different USB port: picking
+                   it re-records the last connection, and "usb" works again
+          last     explicitly the last connected USB instrument
+          sim      the Tecan simulator, for working without hardware
+          any      USB or simulator - may silently connect to a simulator
+
+        Leave empty for the configured default (instrument.connection_string).
+      </Description>
+      <DataType>
+        <Constrained>
+          <DataType><Basic>String</Basic></DataType>
+          <Constraints>
+            <Set>
+              <Value>usb</Value>
+              <Value>dialog</Value>
+              <Value>last</Value>
+              <Value>sim</Value>
+              <Value>any</Value>
+            </Set>
+          </Constraints>
+        </Constrained>
+      </DataType>
     </Parameter>
     <DefinedExecutionErrors>
       <Identifier>ConnectionFailed</Identifier>

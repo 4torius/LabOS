@@ -128,18 +128,35 @@ class PlateReaderImpl(PlateReaderServiceBase):
     #: true. The C# message only says "check power and cable", which is the one
     #: thing an operator has invariably already checked by the time they read
     #: it — and is almost never the cause.
+    #: What the bridge's failure actually means. The C# message says only
+    #: "check power and cable", which is the one thing an operator has
+    #: invariably already checked, and is almost never the cause.
     _CONNECT_HELP = (
-        "The Tecan SDK enumerated no USB reader. In order of likelihood:\n"
-        "  1. iControl (or Magellan) is open, or was opened since this server "
-        "started. It takes exclusive ownership of the USB connection and does "
-        "not always release it on close. Close it, then restart the Tecan "
-        "server so the bridge re-enumerates.\n"
-        "  2. The bridge started before the instrument finished powering up. "
-        "Restarting the Tecan server is enough.\n"
-        "  3. The instrument is genuinely off, unplugged, or on a USB port "
+        "The Tecan SDK enumerated no USB reader.\n"
+        "\n"
+        "Two things about how this connects explain most failures:\n"
+        "  * The SDK enumerates USB devices when the BRIDGE process starts, "
+        "not when you press Connect. A bridge that started while iControl held "
+        "the instrument, or before it finished powering up, can never see it "
+        "however many times you retry. That state needs a fresh bridge "
+        "process, not another attempt.\n"
+        "  * It connects using a stored last connection. Moving the reader to "
+        "a different USB port invalidates that: the instrument is present and "
+        "iControl still connects to it, but this does not.\n"
+        "\n"
+        "What to try, in order:\n"
+        "  1. Connect again with ConnectionString = 'dialog'. That forces the "
+        "SDK's instrument-selection window, which enumerates afresh; picking "
+        "the reader re-records the last connection, and plain 'usb' works "
+        "again. This is the fix when the reader has been moved to another "
+        "USB port.\n"
+        "  2. Close iControl and Magellan, then restart the Tecan server so "
+        "the bridge starts fresh and re-enumerates.\n"
+        "  3. Check the instrument is on, cabled, and not on a USB port "
         "Windows has suspended.\n"
-        "The server itself is fine — it answered this call. What failed is the "
-        "bridge's connection to the instrument."
+        "\n"
+        "The SiLA2 server itself is fine - it answered this call. What failed "
+        "is the bridge's connection to the instrument."
     )
 
     def Connect(self, ConnectionString: str, *, metadata: MetadataDict) -> Connect_Responses:
