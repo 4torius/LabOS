@@ -22,6 +22,7 @@ except ImportError:
     _db = None
 
 from src import plate_tracking
+from src.settings import get_settings, normalize_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +101,6 @@ def create_workflows_router(
     pending_interventions: dict,
     BASE_DIR: Path,
     LIBRARY_DIR: Path,
-    WEBAPP_CONFIG: dict,
 ) -> APIRouter:
     router = APIRouter(tags=["workflows"])
     active_executor = None
@@ -396,7 +396,7 @@ def create_workflows_router(
             result_dict = await _execute_step(
                 step.instrument, step.action, step.parameters,
                 state, ws_manager, _exec_core, shared_wf_ctx,
-                pending_operator_actions, pending_operator_actions_lock, WEBAPP_CONFIG,
+                pending_operator_actions, pending_operator_actions_lock,
                 base_dir=BASE_DIR,
             )
 
@@ -486,7 +486,7 @@ def create_workflows_router(
                 "workflow_name": workflow_name
             })
             try:
-                timeout = float(WEBAPP_CONFIG.get("intervention_timeout", 3600))
+                timeout = get_settings(BASE_DIR).webapp.timeouts.intervention_timeout
                 return await asyncio.wait_for(future, timeout=timeout)
             except asyncio.TimeoutError:
                 from src.lab_core import InterventionAction
@@ -495,14 +495,7 @@ def create_workflows_router(
 
         executor.set_intervention_callback(on_intervention)
 
-        # Read parallel_execution from lab_config
-        _parallel = False
-        try:
-            from src.config_schema import load_lab_config
-            _cfg, _ = load_lab_config(BASE_DIR / "lab_config.yaml", apply_defaults=False, strict=False)
-            _parallel = bool(_cfg.get("workflow", {}).get("parallel_execution", False))
-        except Exception:
-            pass
+        _parallel = get_settings(BASE_DIR).workflow.parallel_execution
 
         try:
             # Validate upfront so dependency/instrument/command issues are explicit
@@ -769,14 +762,7 @@ def create_workflows_router(
         batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         workflow_name = workflow_def.get("WorkflowName", "Batch")
 
-        # Read parallel_execution from lab_config (same logic as regular run)
-        _parallel = False
-        try:
-            from src.config_schema import load_lab_config
-            _cfg, _ = load_lab_config(BASE_DIR / "lab_config.yaml", apply_defaults=False, strict=False)
-            _parallel = bool(_cfg.get("workflow", {}).get("parallel_execution", False))
-        except Exception:
-            pass
+        _parallel = get_settings(BASE_DIR).workflow.parallel_execution
 
         state.add_log("info", f"Batch started: {batch_id} ({len(samples)} samples)", "workflow")
         await ws_manager.broadcast({
@@ -833,7 +819,7 @@ def create_workflows_router(
                         r = await _execute_step(
                             step.instrument, step.action, step.parameters,
                             state, ws_manager, _exec_core, _sc,
-                            pending_operator_actions, pending_operator_actions_lock, WEBAPP_CONFIG,
+                            pending_operator_actions, pending_operator_actions_lock,
                             base_dir=BASE_DIR,
                         )
                         if isinstance(r, dict):
@@ -886,7 +872,7 @@ def create_workflows_router(
                             "batch_id": batch_id,
                         })
                         try:
-                            timeout = float(WEBAPP_CONFIG.get("intervention_timeout", 3600))
+                            timeout = get_settings(BASE_DIR).webapp.timeouts.intervention_timeout
                             return await asyncio.wait_for(future, timeout=timeout)
                         except asyncio.TimeoutError:
                             pending_interventions.pop(iid, None)
@@ -967,6 +953,12 @@ def _create_version_snapshot(LIBRARY_DIR: Path, workflow_id: str, data: dict, no
 
 # execute_step: shared step execution logic
 
+def _timeouts(base_dir: Optional[Path]):
+    """Operator-facing timeouts, read at call time so a Settings edit applies
+    to the next step without restarting the webapp."""
+    return get_settings(base_dir).webapp.timeouts
+
+
 async def _execute_step(
     instrument: str,
     action: str,
@@ -977,7 +969,6 @@ async def _execute_step(
     workflow_context: dict,
     pending_operator_actions: list,
     pending_operator_actions_lock: asyncio.Lock,
-    WEBAPP_CONFIG: dict,
     base_dir: Optional[Path] = None,
 ) -> dict:
     """Execute one workflow step: delay, manual, refill, or instrument command."""
@@ -995,7 +986,7 @@ async def _execute_step(
     if "manual" in instrument_lower:
         return await _wait_operator(
             action, params, state, ws_manager, pending_operator_actions,
-            pending_operator_actions_lock, WEBAPP_CONFIG["manual_action_timeout"]
+            pending_operator_actions_lock, _timeouts(base_dir).manual_action_timeout
         )
 
     # Explicit RefillTipRack step
@@ -1003,7 +994,7 @@ async def _execute_step(
         rack_type = params.get("rack_type", "tiprack")
         return await _wait_refill(
             rack_type, state, ws_manager, pending_operator_actions,
-            pending_operator_actions_lock, WEBAPP_CONFIG["tip_refill_timeout"]
+            pending_operator_actions_lock, _timeouts(base_dir).tip_refill_timeout
         )
 
     # Generic instrument via LabCore
@@ -1098,7 +1089,7 @@ async def _execute_step(
             if "insufficient tips" in error_msg.lower() or "refill cancelled" in error_msg.lower():
                 await _wait_refill(
                     "all", state, ws_manager, pending_operator_actions,
-                    pending_operator_actions_lock, WEBAPP_CONFIG["tip_refill_timeout"],
+                    pending_operator_actions_lock, _timeouts(base_dir).tip_refill_timeout,
                     context_msg=error_msg
                 )
                 retry = await core.execute_command(device_id, action, params)
@@ -1141,19 +1132,20 @@ async def _wait_operator(action, params, state, ws_manager, pending_operator_act
     await ws_manager.broadcast(notification)
     state.add_log("warning", f"Waiting for operator: {action}", "workflow")
 
-    timeout_val = (
-        params.get("TimeoutSeconds")
-        or params.get("timeout_seconds")
-        or params.get("timeout")
-        or timeout
+    # A step's own TimeoutSeconds wins; 0 means "wait indefinitely" (a manual
+    # step can legitimately sit overnight), which normalize_timeout maps to None.
+    _explicit = next(
+        (params[k] for k in ("TimeoutSeconds", "timeout_seconds", "timeout") if k in params),
+        None,
     )
+    timeout_val = normalize_timeout(_explicit) if _explicit is not None else timeout
     start = datetime.now()
     while True:
         async with lock:
             if notification_id not in [int(a.get("id", 0)) for a in pending_operator_actions]:
                 break
         await asyncio.sleep(1)
-        if (datetime.now() - start).total_seconds() > timeout_val:
+        if timeout_val is not None and (datetime.now() - start).total_seconds() > timeout_val:
             async with lock:
                 pending_operator_actions[:] = [a for a in pending_operator_actions if int(a.get("id", 0)) != notification_id]
             raise TimeoutError(f"Operator did not confirm '{action}' within {timeout_val}s")
@@ -1183,7 +1175,7 @@ async def _wait_refill(rack_type, state, ws_manager, pending_operator_actions, l
             if notification_id not in [int(a.get("id", 0)) for a in pending_operator_actions]:
                 break
         await asyncio.sleep(1)
-        if (datetime.now() - start).total_seconds() > timeout:
+        if timeout is not None and (datetime.now() - start).total_seconds() > timeout:
             async with lock:
                 pending_operator_actions[:] = [a for a in pending_operator_actions if int(a.get("id", 0)) != notification_id]
             raise TimeoutError(f"Operator did not refill tips within {timeout}s")

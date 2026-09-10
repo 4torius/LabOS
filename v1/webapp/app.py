@@ -42,7 +42,8 @@ except ImportError:
     _DB_AVAILABLE = False
 
 from webapp.models import DeviceState, AppState
-from src.config_schema import DEFAULT_CONFIG, load_lab_config, validate_lab_config, _deep_merge
+from src.config_schema import load_lab_config, validate_lab_config, _deep_merge
+from src.settings import get_settings, reload_settings
 
 logger = logging.getLogger(__name__)
 
@@ -60,30 +61,6 @@ TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 (STATIC_DIR / "css").mkdir(exist_ok=True)
 (STATIC_DIR / "js").mkdir(exist_ok=True)
-
-def load_webapp_config() -> dict:
-    # Single source of truth for these defaults is config_schema.DEFAULT_CONFIG —
-    # a local copy here previously drifted out of sync (e.g. discovery_timeout).
-    defaults = {
-        **DEFAULT_CONFIG["webapp"]["timeouts"],
-        "nodered_url": DEFAULT_CONFIG["webapp"]["nodered_url"],
-    }
-    try:
-        config_path = BASE_DIR / "lab_config.yaml"
-        config, validation = load_lab_config(config_path, apply_defaults=True, strict=False)
-        for warning in validation.warnings:
-            logger.warning(f"Config warning: {warning}")
-        if not validation.ok:
-            logger.error(f"Configuration errors: {'; '.join(validation.errors)}")
-        webapp_cfg = config.get("webapp", {})
-        timeouts = webapp_cfg.get("timeouts", {})
-        return {**defaults, **timeouts, "nodered_url": webapp_cfg.get("nodered_url", defaults["nodered_url"])}
-    except Exception as e:
-        logger.warning(f"Failed to load webapp config: {e}")
-    return defaults
-
-
-WEBAPP_CONFIG = load_webapp_config()
 
 # ==============================================================================
 # WebSocket manager
@@ -136,7 +113,9 @@ def create_app() -> "FastAPI":
         if not lab_core:
             return
         try:
-            instruments = await lab_core.discover(timeout=float(WEBAPP_CONFIG.get("discovery_timeout", 3.0)))
+            instruments = await lab_core.discover(
+                timeout=get_settings(BASE_DIR).webapp.timeouts.discovery_timeout
+            )
             for inst in instruments:
                 state.devices[inst.id] = DeviceState(
                     id=inst.id, name=inst.name, type=inst.type,
@@ -192,7 +171,10 @@ def create_app() -> "FastAPI":
             })
             state.add_log("warning", f"Intervention required for step {request.step_number}: {request.error.message}", "workflow")
             try:
-                return await asyncio.wait_for(future, timeout=float(WEBAPP_CONFIG["intervention_timeout"]))
+                return await asyncio.wait_for(
+                    future,
+                    timeout=get_settings(BASE_DIR).webapp.timeouts.intervention_timeout,
+                )
             except asyncio.TimeoutError:
                 state.add_log("error", "Intervention timed out, aborting", "workflow")
                 return InterventionAction.ABORT  # type: ignore[union-attr]
@@ -227,7 +209,7 @@ def create_app() -> "FastAPI":
     async def workflows_page(request: Request):
         return templates.TemplateResponse(request, "workflows.html", {
             "request": request, "title": "Workflows",
-            "nodered_url": WEBAPP_CONFIG.get("nodered_url", "http://localhost:1880")
+            "nodered_url": get_settings(BASE_DIR).webapp.nodered_url
         })
 
     @app.get("/results", response_class=HTMLResponse)
@@ -389,6 +371,9 @@ def create_app() -> "FastAPI":
                 with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
                     yaml.dump(existing, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
                 os.replace(tmp_path, config_path)
+                # Invalidate the cached snapshot so the new values take effect
+                # without a restart.
+                reload_settings(BASE_DIR)
             except Exception:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
@@ -459,9 +444,9 @@ def create_app() -> "FastAPI":
     app.include_router(create_workflows_router(
         state, ws_manager, lab_core,
         pending_operator_actions, pending_operator_actions_lock, pending_interventions,
-        BASE_DIR, LIBRARY_DIR, WEBAPP_CONFIG
+        BASE_DIR, LIBRARY_DIR
     ))
-    app.include_router(create_operator_router(state, ws_manager, lab_core, pending_operator_actions, pending_operator_actions_lock, BASE_DIR, WEBAPP_CONFIG))
+    app.include_router(create_operator_router(state, ws_manager, lab_core, pending_operator_actions, pending_operator_actions_lock, BASE_DIR))
     app.include_router(create_hardware_router(BASE_DIR, LIBRARY_DIR, lab_core))
     if _DB_AVAILABLE:
         app.include_router(create_db_router(_db, RESULTS_DIR, state))

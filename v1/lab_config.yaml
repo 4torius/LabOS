@@ -1,7 +1,6 @@
 system:
   name: LabOS
   version: 2.0.0
-  language: en
   log_level: INFO
   auto_start_servers: true
 paths:

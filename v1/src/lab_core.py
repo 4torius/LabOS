@@ -49,6 +49,7 @@ from typing import Any, Callable, Dict, List, Optional, Awaitable, Tuple
 
 # Local imports
 try:
+    from src.settings import get_settings
     from src.discovery import PnPDiscovery, PnPServer, PnPCommand
     from src.client import PnPClient, PnPRegistry, CommandResult as PnPResult
     from src.workflow import (
@@ -63,6 +64,7 @@ try:
     )
 except ImportError:
     # Running from different directory
+    from settings import get_settings
     from discovery import PnPDiscovery, PnPServer, PnPCommand
     from client import PnPClient, PnPRegistry, CommandResult as PnPResult
     from workflow import (
@@ -220,51 +222,26 @@ class LabCore:
     #                           CONFIGURATION
     
     def _load_config(self):
-        """Load configuration from lab_config.yaml."""
-        from src.config_schema import load_lab_config
-        config_path = self.base_dir / "lab_config.yaml"
-        self._ui_dropdowns = {}
-        try:
-            config, _ = load_lab_config(config_path, apply_defaults=False, strict=False)
-            self._ui_dropdowns = config.get("ui_dropdowns", {})
-            self._discovery_cache_ttl = float(
-                config.get("discovery", {}).get("scan_interval", 30)
-            )
-        except Exception as e:
-            logger.warning(f"Error loading config: {e}")
+        """Take a settings snapshot (parsed once, shared process-wide)."""
+        settings = get_settings(self.base_dir)
+        # A mutable copy: _server_to_instrument() merges each server's
+        # LabOSLibraryProvider catalog into this map as instruments are
+        # discovered, and must not write into the shared frozen snapshot.
+        self._ui_dropdowns = dict(settings.ui_dropdowns)
+        self._discovery_cache_ttl = settings.discovery.scan_interval
 
     def _command_timeout(self) -> Optional[float]:
-        """Max seconds to wait for a single command/step to finish.
+        """Max seconds to wait for a single command to finish.
 
-        Reuses workflow.default_timeout — the same "how long do we wait for
-        one hardware operation" knob already used by the workflow executor —
-        rather than introducing a second, easy-to-desync config value. 0 or
-        null means unlimited (client.execute() normalizes it to None, which
-        every timeout call site below treats as "wait forever") — useful for
-        an ad-hoc single-command run of a long protocol from the UI, though
-        the per-step TimeoutSeconds override on a saved workflow step is the
-        recommended way to do this for most cases.
+        Reuses workflow.default_timeout — the same "how long do we wait for one
+        hardware operation" knob the workflow executor uses — rather than a
+        second, easy-to-desync value. Already normalized: None means unlimited.
+
+        This used to re-open and re-parse lab_config.yaml on every single
+        command execution, and it turned an explicit null (documented as
+        "unlimited") into a hard 300 s.
         """
-        try:
-            from src.config_schema import load_lab_config
-            config, _ = load_lab_config(self.base_dir / "lab_config.yaml", apply_defaults=False, strict=False)
-            raw_timeout = config.get("workflow", {}).get("default_timeout", 300.0)
-            # Bug fixed: `raw_timeout is None` means the key IS PRESENT in
-            # yaml set to `null` (a real config key absent from the dict
-            # entirely would already have fallen back to the .get() default
-            # above, 300.0, and never reach this branch at all) - i.e. an
-            # explicit "unlimited" request from config.yaml. The old code
-            # returned 300.0 here instead of None, silently overriding the
-            # documented "0 or null means unlimited" behavior with a bounded
-            # timeout no config setting could ever turn off. `0` is left as
-            # a raw float(0.0), unchanged - client.execute() is already the
-            # single place responsible for normalizing 0 to None (see its
-            # own docstring), so it isn't duplicated here too.
-            if raw_timeout is None:
-                return None
-            return float(raw_timeout)
-        except Exception:
-            return 300.0
+        return get_settings(self.base_dir).workflow.default_timeout
 
     def _get_options_for_hint(self, ui_hint: str) -> List[str]:
         """
@@ -570,20 +547,9 @@ class LabCore:
 
     def _build_port_to_key(self) -> Tuple[Dict[int, str], Dict[int, str]]:
         """Build port → lab_config key and port → configured host maps for stable instrument IDs."""
-        port_to_key: Dict[int, str] = {}
-        port_to_host: Dict[int, str] = {}
-        try:
-            import yaml as _yaml
-            raw = _yaml.safe_load((self.base_dir / "lab_config.yaml").read_text())
-            for k, v in (raw or {}).get("servers", {}).items():
-                p = int((v or {}).get("port", 0))
-                if p:
-                    port_to_key[p] = k
-                    h = (v or {}).get("host")
-                    if h:
-                        port_to_host[p] = h
-        except Exception:
-            pass
+        port_map = get_settings(self.base_dir).port_map()
+        port_to_key = {port: spec.key for port, spec in port_map.items()}
+        port_to_host = {port: spec.host for port, spec in port_map.items() if spec.host}
         return port_to_key, port_to_host
 
     def _server_to_instrument(
@@ -1080,12 +1046,7 @@ class LabCore:
 
         # Determine parallel flag: caller overrides config; config overrides default False
         if parallel is None:
-            try:
-                from src.config_schema import load_lab_config
-                _cfg, _ = load_lab_config(self.base_dir / "lab_config.yaml", apply_defaults=False, strict=False)
-                parallel = bool(_cfg.get("workflow", {}).get("parallel_execution", False))
-            except Exception:
-                parallel = False
+            parallel = get_settings(self.base_dir).workflow.parallel_execution
 
         try:
             result = await self._workflow_executor.execute(workflow_obj, validate=False, parallel=parallel)

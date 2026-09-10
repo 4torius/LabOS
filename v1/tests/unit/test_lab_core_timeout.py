@@ -55,10 +55,15 @@ class TestExecuteCommandTimeout:
         assert kwargs["timeout"] > 0
 
     @pytest.mark.asyncio
-    async def test_zero_default_timeout_means_unlimited_and_is_passed_through(self, tmp_path):
-        """default_timeout: 0 means unlimited and must reach client.execute() as
-        0 (not silently replaced by a finite fallback) — client.execute() is
-        responsible for normalizing 0 to None, not _command_timeout()."""
+    async def test_zero_default_timeout_means_unlimited(self, tmp_path):
+        """default_timeout: 0 means unlimited, and must not be silently replaced
+        by a finite fallback.
+
+        None is the unlimited sentinel every layer understands. It used to be
+        passed through as a literal 0 and normalized inside client.execute();
+        src.settings.normalize_timeout now does it once, when the config value
+        is read, so 0 and null cannot diverge.
+        """
         core = _make_core_with_instrument(tmp_path, default_timeout=0)
         mock_client = MagicMock()
         mock_client.connect = AsyncMock()
@@ -68,7 +73,7 @@ class TestExecuteCommandTimeout:
         await core.execute_command("instr1", "DoThing", {})
 
         _, kwargs = mock_client.execute.call_args
-        assert kwargs["timeout"] == 0.0
+        assert kwargs["timeout"] is None
 
     @pytest.mark.asyncio
     async def test_null_default_timeout_means_unlimited(self, tmp_path):

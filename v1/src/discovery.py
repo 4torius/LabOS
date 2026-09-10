@@ -26,7 +26,6 @@ import logging
 import re
 import socket
 import xml.etree.ElementTree as ET
-import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Callable
@@ -45,22 +44,12 @@ try:
 except ImportError:
     ZEROCONF_AVAILABLE = False
 
+from src.settings import get_settings
+
 logger = logging.getLogger(__name__)
 
 
 #                           CONFIGURATION
-
-def _load_discovery_config() -> Dict[str, Any]:
-    """Load discovery configuration from lab_config.yaml."""
-    from src.config_schema import DEFAULT_CONFIG, load_lab_config
-    config_path = Path(__file__).parent.parent / "lab_config.yaml"
-    defaults = DEFAULT_CONFIG["discovery"]
-    try:
-        config, _ = load_lab_config(config_path, apply_defaults=False, strict=False)
-        return config.get("discovery", defaults)
-    except Exception:
-        return defaults
-
 
 #                           DATA STRUCTURES
 
@@ -400,7 +389,10 @@ class PnPDiscovery:
         self.base_dir = Path(base_dir).absolute() if base_dir else Path.cwd()
         self.xml_parser = SiLAXMLParser()
         self.servers: Dict[str, PnPServer] = {}
-        self._discovery_config = _load_discovery_config()
+        self._settings = get_settings(
+            self.base_dir if (self.base_dir / "lab_config.yaml").exists() else None
+        )
+        self._discovery_config = self._settings.discovery
         
         # mDNS discovery state
         self._zeroconf: Optional[Any] = None
@@ -475,7 +467,7 @@ class PnPDiscovery:
         await self._bootstrap_from_config(timeout)
 
         # Phase 2: mDNS (primary SiLA2-standard runtime discovery)
-        if use_mdns and ZEROCONF_AVAILABLE and self._discovery_config.get("enabled", True):
+        if use_mdns and ZEROCONF_AVAILABLE and self._discovery_config.enabled:
             await self._discover_via_mdns(timeout)
 
         # Fetch full metadata from each online server via SiLAService
@@ -493,29 +485,15 @@ class PnPDiscovery:
         is taken from config; all capability metadata is fetched from the
         running server via SiLAService in _query_server_metadata().
         """
-        config_path = self.base_dir / "lab_config.yaml"
-        if not config_path.exists():
-            return
-
         try:
-            with open(config_path) as f:
-                config = yaml.safe_load(f)
-
-            servers_config = config.get("servers", {})
             loop = asyncio.get_running_loop()
 
-            async def _check_one(srv_key: str, srv_config: dict):
-                if not srv_config.get("enabled", True):
-                    return
-
-                host = srv_config.get("host", "localhost")
-                port = srv_config.get("port", 0)
-                name = srv_config.get("name", srv_key)
-
+            async def _check_one(spec):
+                host, port, name = spec.host, spec.port, spec.name
                 if not port:
                     return
 
-                server_key = self._make_server_key(srv_key)
+                server_key = self._make_server_key(spec.key)
 
                 # Skip if already in registry (e.g. found by mDNS first)
                 if server_key in self.servers:
@@ -538,7 +516,9 @@ class PnPDiscovery:
                 self.servers[server_key] = server
                 logger.info(f"Bootstrap: {name} ({host}:{port}) — {'ONLINE' if is_online else 'OFFLINE'}")
 
-            await asyncio.gather(*[_check_one(k, v) for k, v in servers_config.items()])
+            await asyncio.gather(
+                *[_check_one(spec) for spec in self._settings.enabled_servers().values()]
+            )
 
         except Exception as e:
             logger.warning(f"Error bootstrapping from config: {e}")
@@ -554,7 +534,7 @@ class PnPDiscovery:
             logger.info("Zeroconf not available, skipping mDNS discovery")
             return
         
-        service_type = self._discovery_config.get("service_type", "_sila2._tcp.local.")
+        service_type = self._discovery_config.service_type
         logger.info(f"Starting mDNS discovery for {service_type}")
         
         discovered = []
@@ -722,7 +702,7 @@ class PnPDiscovery:
         if self._zeroconf:
             return True  # Already running
         
-        service_type = self._discovery_config.get("service_type", "_sila2._tcp.local.")
+        service_type = self._discovery_config.service_type
         loop = asyncio.get_event_loop()
 
         class ContinuousListener(ServiceListener):

@@ -19,7 +19,6 @@ def create_operator_router(
     pending_operator_actions: list,
     pending_operator_actions_lock: asyncio.Lock,
     BASE_DIR: Path,
-    WEBAPP_CONFIG: dict,
 ) -> APIRouter:
     router = APIRouter(tags=["operator"])
 

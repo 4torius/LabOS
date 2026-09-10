@@ -13,39 +13,18 @@ logger = logging.getLogger(__name__)
 
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from src.config_schema import load_lab_config as _load_lab_config_schema
+from src.settings import get_settings
 from src import plate_tracking
 
 
-def _load_lab_config(base_dir: Path) -> dict:
-    config_path = base_dir / "lab_config.yaml"
-    try:
-        config, _ = _load_lab_config_schema(config_path, apply_defaults=False, strict=False)
-        return config
-    except Exception as exc:
-        logger.warning(f"Unable to load lab_config.yaml: {exc}")
-    return {}
-
-
 def _resolve_library_path(base_dir: Path, config_key: str, default_relative: str) -> Path:
-    config = _load_lab_config(base_dir)
-    configured = ((config.get("paths") or {}).get(config_key) or default_relative)
-    path = Path(configured)
-    if path.is_absolute():
-        return path
-    return base_dir / path
+    """Absolute path for a `paths:` entry in lab_config.yaml."""
+    return get_settings(base_dir).path(config_key, default_relative)
 
 
 def _load_server_endpoint(base_dir: Path, server_key: str, default_host: str, default_port: int) -> tuple[str, int]:
-    try:
-        config = _load_lab_config(base_dir)
-        server_cfg = (config.get("servers") or {}).get(server_key, {})
-        host = server_cfg.get("host", default_host)
-        port = int(server_cfg.get("port", default_port))
-        return host, port
-    except Exception as exc:
-        logger.warning(f"Unable to load endpoint for {server_key}: {exc}")
-    return default_host, default_port
+    """(host, port) for a configured server, or the supplied defaults."""
+    return get_settings(base_dir).endpoint(server_key, default_host, default_port)
 
 
 def create_instruments_router(
@@ -77,19 +56,19 @@ def create_instruments_router(
         except Exception as e:
             state.add_log("warning", f"LabCore discovery failed: {e}", "discovery")
 
+        # Discovery found nothing: fall back to the configured bootstrap seeds so
+        # the dashboard at least shows which instruments are expected, marked
+        # "unknown" rather than pretending they are online.
         try:
-            config = _load_lab_config(BASE_DIR)
-            servers = config.get("servers", {})
-            state.devices = {}
-            for key, srv in servers.items():
-                if srv.get("enabled", True):
-                    from webapp.models import DeviceState
-                    device_id = key.lower().replace("-", "_")
-                    state.devices[device_id] = DeviceState(
-                        id=device_id, name=srv.get("name", key),
-                        type=srv.get("type", "instrument"), status="unknown",
-                        host=srv.get("host", "localhost"), port=srv.get("port", 50051)
-                    )
+            from webapp.models import DeviceState
+            state.devices = {
+                spec.key: DeviceState(
+                    id=spec.key, name=spec.name,
+                    type=str(spec.extra.get("type", "instrument")), status="unknown",
+                    host=spec.host, port=spec.port,
+                )
+                for spec in get_settings(BASE_DIR).enabled_servers().values()
+            }
             state.add_log("info", f"Loaded {len(state.devices)} devices from config", "config")
         except Exception as e:
             state.add_log("error", f"Failed to load devices: {e}", "config")

@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 from src.discovery import PnPServer
 from src.client import PnPRegistry, CommandResult
+from src.settings import get_settings, normalize_timeout
 
 
 # =============================================================================
@@ -355,46 +356,6 @@ ProgressCallback = Callable[[WorkflowProgress], None]
 #                           WORKFLOW EXECUTOR
 # =============================================================================
 
-def _load_executor_config() -> tuple:
-    """Load error handling + default timeout from lab_config.yaml in a single read.
-
-    Returns:
-        (error_config dict, default_step_timeout float)
-    """
-    from src.config_schema import load_lab_config
-    config_path = Path(__file__).parent.parent / "lab_config.yaml"
-    _error_defaults = {
-        "retry_strategy": "exponential",
-        "base_delay_seconds": 1.0,
-        "max_delay_seconds": 60.0,
-        "max_retries": 3,
-        "enable_human_intervention": True,
-    }
-    try:
-        config, _ = load_lab_config(config_path, apply_defaults=False, strict=False)
-        error_cfg = config.get("error_handling", _error_defaults)
-        # workflow.default_timeout: 0 or null in lab_config.yaml means "no default
-        # timeout" for any step that doesn't set its own TimeoutSeconds. Prefer
-        # leaving this finite (it's the safety net that detects a hung/crashed
-        # instrument across all step types) and instead set TimeoutSeconds: 0 on
-        # the one step that's genuinely long-running (e.g. a multi-day
-        # incubation), so other steps keep hang detection.
-        raw_timeout = config.get("workflow", {}).get("default_timeout", 300.0)
-        timeout = 300.0 if raw_timeout is None else float(raw_timeout)
-        return error_cfg, timeout
-    except Exception:
-        return _error_defaults, 300.0
-
-
-# Legacy aliases kept for backwards compatibility with any external code that imports them.
-def _load_error_handling_config() -> Dict[str, Any]:
-    return _load_executor_config()[0]
-
-
-def _load_default_step_timeout() -> float:
-    return _load_executor_config()[1]
-
-
 class PnPWorkflowExecutor:
     """
     Generic workflow executor using PnP architecture.
@@ -417,8 +378,13 @@ class PnPWorkflowExecutor:
         self._resume_event: Optional[asyncio.Event] = None
         self._step_executor_fn: Optional[Callable] = None  # async fn(step, context) -> CommandResult
 
-        # Load error handling config + default timeout in a single file read
-        self._error_config, self._default_step_timeout = _load_executor_config()
+        # One shared settings snapshot instead of re-reading lab_config.yaml.
+        # Note the behaviour change this fixes: the old loader turned a
+        # default_timeout of null into a hard 300 s, silently contradicting the
+        # documented "0 or null means unlimited" and capping long protocols.
+        _settings = get_settings(self.base_dir)
+        self._error_config = _settings.error_handling
+        self._default_step_timeout = _settings.workflow.default_timeout
 
     def set_step_executor(self, fn: Callable):
         """Override step execution. fn must be: async (step: WorkflowStep, context: WorkflowContext) -> CommandResult."""
@@ -473,18 +439,7 @@ class PnPWorkflowExecutor:
     
     def _calculate_retry_delay(self, attempt: int) -> float:
         """Calculate delay before retry using configured strategy."""
-        strategy = self._error_config.get("retry_strategy", "exponential")
-        base = self._error_config.get("base_delay_seconds", 1.0)
-        max_delay = self._error_config.get("max_delay_seconds", 60.0)
-        
-        if strategy == "none":
-            return 0.0
-        elif strategy == "linear":
-            delay = base * (attempt + 1)
-        else:  # exponential
-            delay = base * (2 ** attempt)
-        
-        return min(delay, max_delay)
+        return self._error_config.retry_delay(attempt)
 
     def _is_locally_handled_step(self, step: WorkflowStep) -> bool:
         """Return True for steps executed by web workflow helper logic (not via server metadata)."""
@@ -1100,12 +1055,16 @@ class PnPWorkflowExecutor:
 
         last_result = None
         last_error: Optional[CategorizedError] = None
-        retry_count = step.retry_count if step.retry_count is not None else self._error_config.get("max_retries", 3)
+        retry_count = step.retry_count if step.retry_count is not None else self._error_config.max_retries
         max_attempts = retry_count + 1
-        # step.timeout_seconds == 0 means "unlimited" and must be respected as-is
-        # (client.py normalizes 0/negative to None downstream) — `or` would wrongly
-        # fall back to the default here since 0 is falsy in Python.
-        step_timeout = step.timeout_seconds if step.timeout_seconds is not None else self._default_step_timeout
+        # A step's own TimeoutSeconds wins when present, including 0, which
+        # means unlimited (normalize_timeout turns it into None). `or` would be
+        # wrong here: 0 is falsy, so it would fall through to the default.
+        step_timeout = (
+            normalize_timeout(step.timeout_seconds)
+            if step.timeout_seconds is not None
+            else self._default_step_timeout
+        )
         context = f"{step.action} on {step.instrument}"
 
         for attempt in range(max_attempts):
@@ -1171,7 +1130,7 @@ class PnPWorkflowExecutor:
         
         # All retries exhausted - try human intervention if enabled
         if (self._intervention_callback and 
-            self._error_config.get("enable_human_intervention", True) and
+            self._error_config.enable_human_intervention and
             last_error):
             
             step.status = StepStatus.WAITING_INTERVENTION

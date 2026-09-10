@@ -37,7 +37,7 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "integration: requires running SiLA2 servers")
     config.addinivalue_line("markers", "tecan: requires Tecan server on port 50051")
     config.addinivalue_line("markers", "opentrons: requires Opentrons server on port 50302")
-    config.addinivalue_line("markers", "manual_station: requires ManualStation server on port 50360")
+    config.addinivalue_line("markers", "manual_station: requires ManualStation server on port 50500")
     config.addinivalue_line("markers", "mobile: requires the remote MobileSiLA2Server reachable on the network")
 
 
@@ -62,7 +62,7 @@ def tecan_available():
 
 @pytest.fixture(scope="session")
 def manual_station_available():
-    return is_port_open("localhost", 50360)
+    return is_port_open("localhost", 50500)
 
 
 @pytest.fixture(scope="session")

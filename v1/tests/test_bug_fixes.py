@@ -28,12 +28,22 @@ def _make_registry():
 
 
 def _make_executor(registry=None, error_config=None, default_timeout=None):
-    """Create PnPWorkflowExecutor with optional config overrides."""
+    """Create PnPWorkflowExecutor with optional config overrides.
+
+    `error_config` is accepted as a plain dict for convenience and adapted to
+    the typed ErrorHandlingSettings the executor now holds.
+    """
     from src.workflow import PnPWorkflowExecutor
+    from src.settings import ErrorHandlingSettings
     if registry is None:
         registry = _make_registry()
     executor = PnPWorkflowExecutor(registry)
     if error_config is not None:
+        if isinstance(error_config, dict):
+            error_config = ErrorHandlingSettings(
+                **{k: v for k, v in error_config.items()
+                   if k in ErrorHandlingSettings.__dataclass_fields__}
+            )
         executor._error_config = error_config
     if default_timeout is not None:
         executor._default_step_timeout = default_timeout
@@ -196,7 +206,11 @@ class TestDefaultTimeout:
 
         registry.execute.assert_called_once()
         _, kwargs = registry.execute.call_args
-        assert kwargs.get("timeout") == 0
+        # TimeoutSeconds: 0 means unlimited, and None is the sentinel for that
+        # everywhere downstream. It used to be passed through as a literal 0 and
+        # normalized later inside the client; normalize_timeout now does it once,
+        # at the point the step's own value is resolved.
+        assert kwargs.get("timeout") is None
 
     def test_load_default_step_timeout_function(self, tmp_path):
         """_load_default_step_timeout reads workflow.default_timeout from yaml."""

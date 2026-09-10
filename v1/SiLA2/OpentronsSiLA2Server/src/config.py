@@ -180,7 +180,7 @@ class ServerConfig:
     
     # Server settings
     host: str = "0.0.0.0"
-    port: int = 50052
+    port: int = 50302
     name: str = "OpentronsSiLA2Server"
     description: str = "SiLA2 Server for Opentrons Flex"
     vendor: str = "ChemicalLab"
