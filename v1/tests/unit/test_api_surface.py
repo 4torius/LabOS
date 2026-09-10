@@ -172,3 +172,80 @@ class TestHardwareApi:
     def test_a_config_outside_the_folder_is_refused(self, client):
         response = client.get("/api/hardware/configs/..%2F..%2Flab_config.yaml")
         assert response.status_code in (403, 404)
+
+
+class TestBackgroundRunEndToEnd:
+    """A whole run through the real HTTP surface, with no instruments.
+
+    `delay` steps are executed by the orchestrator itself, so this exercises
+    the complete path — start, background execution, ordering, persistence,
+    completion, slot release — without a single server running.
+    """
+
+    WORKFLOW = {
+        "WorkflowName": "E2E_BackgroundRun",
+        "SchemaVersion": "1.0",
+        "Steps": [
+            # deliberately written 1, 3, 2: step 3 depends on step 2, which
+            # appears after it in the file
+            {"StepNumber": 1, "Instrument": "delay", "Action": "Wait",
+             "Parameters": {"seconds": 0}, "DependsOn": []},
+            {"StepNumber": 3, "Instrument": "delay", "Action": "Wait",
+             "Parameters": {"seconds": 0}, "DependsOn": [2]},
+            {"StepNumber": 2, "Instrument": "delay", "Action": "Wait",
+             "Parameters": {"seconds": 0}, "DependsOn": [1]},
+        ],
+    }
+
+    @staticmethod
+    def _await_finish(client, run_id, tries=80):
+        import time
+        for _ in range(tries):
+            state = client.get(f"/api/runs/{run_id}").json()
+            if not state.get("active"):
+                return state
+            time.sleep(0.1)
+        pytest.fail(f"run {run_id} never finished")
+
+    def test_the_whole_pipeline(self, client):
+        import time
+        started_at = time.time()
+        start = client.post("/api/workflows/execute", json=self.WORKFLOW).json()
+        elapsed = time.time() - started_at
+
+        # The request must not wait for the run.
+        assert start["started"] is True
+        assert start["run_id"]
+        assert elapsed < 2.0, f"POST blocked for {elapsed:.1f}s"
+        run_id = start["run_id"]
+
+        state = self._await_finish(client, run_id)
+        assert state["status"] == "completed"
+        assert state["completed_steps"] == 3
+        assert state["percent"] == 100
+
+        steps = client.get(f"/api/runs/{run_id}/steps").json()["steps"]
+        assert len(steps) == 3, "the step timeline was lost"
+
+        # Written 1, 3, 2 — must have *run* 1, 2, 3.
+        order = [s["step_number"] for s in sorted(steps, key=lambda s: s["started_at"])]
+        assert order == [1, 2, 3], f"topological order violated: {order}"
+
+        # Parameters survive the completion write.
+        assert all(s["parameters"] == {"seconds": 0} for s in steps)
+
+        assert client.get("/api/runs").json()["active"] is None, "run slot not released"
+
+    def test_a_second_run_is_refused_by_name_while_one_is_active(self, client):
+        slow = {**self.WORKFLOW, "WorkflowName": "E2E_Slow",
+                "Steps": [{"StepNumber": 1, "Instrument": "delay", "Action": "Wait",
+                           "Parameters": {"seconds": 3}, "DependsOn": []}]}
+        first = client.post("/api/workflows/execute", json=slow).json()
+        try:
+            second = client.post("/api/workflows/execute", json=slow).json()
+            assert second["status"] == "busy"
+            assert first["run_id"] in second["error"]
+            assert second["active_run"]["run_id"] == first["run_id"]
+        finally:
+            client.post(f"/api/runs/{first['run_id']}/abort")
+            self._await_finish(client, first["run_id"])

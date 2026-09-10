@@ -410,3 +410,57 @@ class TestRunSteps:
         })
         fresh_db.delete_run(run_id)
         assert fresh_db.get_run_steps(run_id) == []
+
+    def test_archiving_a_run_does_not_delete_its_steps(self, fresh_db):
+        """The bug this guards against, found by running a real workflow.
+
+        run_steps references run_results(run_id) ON DELETE CASCADE, and
+        save_run() used INSERT OR REPLACE — which in SQLite is a DELETE
+        followed by an INSERT. The archive step at the end of every run
+        therefore re-saved the run row and silently took the entire step
+        timeline with it. The run reported 3/3 completed and its timeline was
+        empty.
+        """
+        run_id = self._seed_run(fresh_db, "RUN-ARCHIVE")
+        for number in (1, 2, 3):
+            fresh_db.save_run_step({
+                "run_id": run_id, "step_number": number, "attempt": 1,
+                "instrument": "delay", "action": "Wait", "status": "success",
+            })
+        assert len(fresh_db.get_run_steps(run_id)) == 3
+
+        # what _save_run_archive() does when the run finishes
+        fresh_db.save_run({
+            "run_id": run_id, "workflow_name": "W", "started_at": "t0",
+            "status": "completed", "steps_completed": 3,
+            "step_results": [{"step": 1}, {"step": 2}, {"step": 3}],
+        })
+
+        assert len(fresh_db.get_run_steps(run_id)) == 3, "archiving destroyed the timeline"
+        assert fresh_db.get_run(run_id)["status"] == "completed"
+
+    def test_resaving_a_plate_does_not_delete_its_wells(self, fresh_db):
+        """Same hazard on the chemical side: wells, instrument_measurements and
+        well_measurements all reference plates(plate_id)."""
+        fresh_db.save_plate({"plate_id": "PLT-1", "plate_type": "corning_96",
+                             "rows": 8, "columns": 12, "status": "prepared"})
+        fresh_db.save_wells([{"plate_id": "PLT-1", "well_id": "A1",
+                              "reagent_name": "water", "volume_ul": 100}])
+        assert fresh_db.get_plate("PLT-1")["wells"]
+
+        fresh_db.save_plate({"plate_id": "PLT-1", "plate_type": "corning_96",
+                             "rows": 8, "columns": 12, "status": "measured"})
+
+        plate = fresh_db.get_plate("PLT-1")
+        assert plate["wells"], "re-saving the plate destroyed its contents"
+        assert plate["status"] == "measured"
+
+    def test_resaving_a_plate_keeps_fields_the_second_write_omits(self, fresh_db):
+        fresh_db.save_plate({"plate_id": "PLT-2", "plate_type": "corning_96",
+                             "recipe_name": "elisa.json", "hal_config": "Standard.json",
+                             "status": "prepared"})
+        fresh_db.save_plate({"plate_id": "PLT-2", "status": "measured"})
+        plate = fresh_db.get_plate("PLT-2")
+        assert plate["recipe_name"] == "elisa.json"
+        assert plate["hal_config"] == "Standard.json"
+        assert plate["status"] == "measured"

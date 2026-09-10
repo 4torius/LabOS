@@ -349,13 +349,30 @@ def save_run(run_data: Dict[str, Any]) -> None:
     try:
         steps = run_data.get("step_results", [])
         with _conn() as con:
+            # ON CONFLICT ... DO UPDATE, never INSERT OR REPLACE.
+            #
+            # In SQLite, INSERT OR REPLACE is DELETE followed by INSERT. run_steps
+            # references run_results(run_id) ON DELETE CASCADE, so re-saving a run
+            # at the end of its execution — which is exactly what the archive step
+            # does — silently deleted every step row written while it was running.
+            # The run finished, reported 3/3 completed, and its timeline was empty.
             con.execute(
                 """
-                INSERT OR REPLACE INTO run_results
+                INSERT INTO run_results
                     (run_id, workflow_name, started_at, completed_at, status,
                      duration_seconds, steps_total, steps_completed, steps_failed,
                      steps_skipped, result_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    workflow_name    = excluded.workflow_name,
+                    completed_at     = excluded.completed_at,
+                    status           = excluded.status,
+                    duration_seconds = excluded.duration_seconds,
+                    steps_total      = excluded.steps_total,
+                    steps_completed  = excluded.steps_completed,
+                    steps_failed     = excluded.steps_failed,
+                    steps_skipped    = excluded.steps_skipped,
+                    result_json      = excluded.result_json
                 """,
                 (
                     run_data.get("run_id"),
@@ -920,17 +937,45 @@ def get_reagents() -> List[Dict[str, Any]]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def save_plate(plate_data: Dict[str, Any]) -> None:
-    """Insert or replace a plate record."""
+    """Insert a plate record, or update the one already there.
+
+    ON CONFLICT ... DO UPDATE rather than INSERT OR REPLACE, for the same
+    reason as save_run(): INSERT OR REPLACE is a DELETE plus an INSERT, and
+    wells, instrument_measurements and well_measurements all reference
+    plates(plate_id). Re-saving a plate that already had wells would either
+    fail the foreign-key check outright or, with a cascade, quietly take the
+    well contents with it.
+    """
     try:
         with _conn() as con:
             con.execute(
                 """
-                INSERT OR REPLACE INTO plates
+                INSERT INTO plates
                     (plate_id, run_id, plate_type, display_name, rows, columns,
                      total_wells, max_volume_ul, working_volume_ul, well_shape,
                      well_depth_mm, bottom_type, brand, tecan_compatible,
                      labware_slot, hal_config, recipe_name, prepared_at, status, notes)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(plate_id) DO UPDATE SET
+                    run_id            = COALESCE(excluded.run_id, plates.run_id),
+                    plate_type        = COALESCE(excluded.plate_type, plates.plate_type),
+                    display_name      = COALESCE(excluded.display_name, plates.display_name),
+                    rows              = COALESCE(excluded.rows, plates.rows),
+                    columns           = COALESCE(excluded.columns, plates.columns),
+                    total_wells       = COALESCE(excluded.total_wells, plates.total_wells),
+                    max_volume_ul     = COALESCE(excluded.max_volume_ul, plates.max_volume_ul),
+                    working_volume_ul = COALESCE(excluded.working_volume_ul, plates.working_volume_ul),
+                    well_shape        = COALESCE(excluded.well_shape, plates.well_shape),
+                    well_depth_mm     = COALESCE(excluded.well_depth_mm, plates.well_depth_mm),
+                    bottom_type       = COALESCE(excluded.bottom_type, plates.bottom_type),
+                    brand             = COALESCE(excluded.brand, plates.brand),
+                    tecan_compatible  = excluded.tecan_compatible,
+                    labware_slot      = COALESCE(excluded.labware_slot, plates.labware_slot),
+                    hal_config        = COALESCE(excluded.hal_config, plates.hal_config),
+                    recipe_name       = COALESCE(excluded.recipe_name, plates.recipe_name),
+                    prepared_at       = COALESCE(plates.prepared_at, excluded.prepared_at),
+                    status            = excluded.status,
+                    notes             = COALESCE(excluded.notes, plates.notes)
                 """,
                 (
                     plate_data.get("plate_id"),
