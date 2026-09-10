@@ -206,5 +206,9 @@ The launcher is still starting up (takes ~10 seconds for all servers). Refresh a
 **Server shows as online but commands fail with "Feature not found"**
 The orchestrator uses Strategy 0 (sila2 SilaClient) for all current servers. If a server was recently rebuilt, the cached SilaClient may be stale. Restart the orchestrator to invalidate the client cache.
 
-**"Strategy 0 failed, trying Strategy 1" in logs**
-This means the sila2 library could not connect to the server. Check that the server is a modern `sila2`-library server (has `generated/` directory with codegen output). If it is a non-sila2 custom server, Strategy 1 (dynamic stub loading from `src/pnp_stubs/`) is used instead — this is expected behaviour, not an error, for that kind of server. No current LabOS instrument actually needs this fallback.
+**"Cannot reach <server> ... its SiLA2 endpoint did not respond"**
+The server is announced (mDNS, or a bootstrap seed in `lab_config.yaml`) but its
+gRPC endpoint is not answering. Check the process is running and the port
+matches: `python labos.py status`. There is no second protocol to fall back to —
+every LabOS instrument is a standard SiLA2 server — so this message means the
+server itself, not a protocol mismatch.

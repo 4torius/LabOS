@@ -8,93 +8,197 @@ All four instrument servers are registered by the PnP discovery engine. Opentron
 
 **Location**: `v1/SiLA2/OpentronsSiLA2Server/`
 **Port**: `50302` (config.yaml `server.port`)
-**Feature**: `WorkflowAPI` — 17 commands, 0 properties (status is read via `GetStatus`, not a SiLA2 Property)
+**Feature**: `WorkflowAPI` v1.1 — 17 commands, 6 properties
 
 ### Starting
 ```bash
 cd v1/SiLA2/OpentronsSiLA2Server
 python main.py
 ```
-Or via `python launcher.py --all` from `v1/`.
+Or `python launcher.py --all` from `v1/`.
+
+### Two rules shape this surface
+
+**Commands do something; readings are Properties.** `GetStatus`,
+`GetCurrentConfig`, `GetRobotInfo` and `GetModulesStatus` used to be commands,
+so asking "which config is loaded?" appeared in the UI as an operation to run.
+They are properties now. `ListRecipes` and `ListHardwareConfigs` are gone
+entirely: they asked the robot to list files the web interface already reads
+from `Library/` far more cheaply, and can read while the robot is off.
+`Initialize` is gone because `start()` already connects with retry.
+
+**One command takes steps inline rather than one command per primitive.**
+`RunSteps` accepts a JSON array of recipe steps, so every command the recipe
+format supports becomes usable as a single workflow step.
+
+### Properties (read, never act)
+
+| Property | Observable | Contents |
+|----------|-----------|----------|
+| `Status` | yes | JSON: `state`, `run_id`, `connected`, `config` |
+| `CurrentRunId` | yes | The run in progress, empty when idle |
+| `ActiveConfig` | yes | JSON `{name, config}` — the HAL `ExecuteRecipe` runs against |
+| `TipsAvailable` | yes | JSON array: per rack, load name, slot, used, remaining |
+| `RobotInfo` | no | JSON: name, model, serial, firmware |
+| `ModulesStatus` | no | JSON array of attached modules |
+
+The observable ones are pushed on every state change, so a subscribed client
+does not poll. Read one from the CLI with
+`python labos.py read opentrons Status`, or over REST at
+`/api/devices/opentrons/property/WorkflowAPI/Status`.
 
 ### Commands
 
-**Robot Control**
-| Command | Parameters | Description |
-|---------|-----------|--------------|
-| `Initialize` | — | Verify the connection to the robot is ready |
-| `Home` (Observable) | — | Home all robot axes |
-| `EmergencyStop` | — | Stop current run, force-drop tips, home. Never silently reports success if the drop/home sequence itself fails — check the response text |
-| `GetStatus` | — | Current status + active-run info (JSON) |
+Descriptions beginning **MOVES HARDWARE** physically move the robot.
 
-**HAL Configuration**
-| Command | Parameters | Description |
-|---------|-----------|--------------|
-| `ListHardwareConfigs` | — | Available HAL configs (JSON array) |
-| `LoadHardwareConfig` | `ConfigName` | Switch the active HAL config. Persists to `Library/HardwareConfig/.active` — survives a restart |
-| `GetCurrentConfig` | — | Currently active HAL config (JSON) |
+**Robot control**
 
-**Recipe Execution**
 | Command | Parameters | Description |
 |---------|-----------|--------------|
-| `ListRecipes` | — | Available recipes (JSON array) |
-| `ExecuteRecipe` (Observable) | `RecipeName` | Run a recipe against the **currently active** HAL config (HAL is not a per-call parameter — set it once via `LoadHardwareConfig`) |
+| `Home` (obs) | — | MOVES HARDWARE. Home all axes |
+| `EmergencyStop` | — | MOVES HARDWARE. Stop the run, force-drop tips, home. Never reports success if the drop/home itself failed — read the response before assuming the deck is safe |
+| `SetLights` | `On` | Deck lights |
+
+**Hardware configuration**
+
+| Command | Parameters | Description |
+|---------|-----------|--------------|
+| `LoadHardwareConfig` | `ConfigName` | Switch the active HAL config. Persists to `Library/HardwareConfig/.active`, so it survives a restart |
+
+**Recipe execution**
+
+| Command | Parameters | Description |
+|---------|-----------|--------------|
+| `ExecuteRecipe` (obs) | `RecipeName` | MOVES HARDWARE. Run a saved recipe against the active HAL. Fails loudly if the run's own final state is not "succeeded" |
+| `RunSteps` (obs) | `StepsJson`, `Description` | MOVES HARDWARE. Run recipe steps supplied inline — see below |
+| `ValidateRecipe` | `RecipeName` | Check a recipe against the active HAL without running it. Returns `{valid, errors, warnings}` |
 | `PauseRun` | — | Pause the running protocol |
-| `ResumeRun` | — | Resume a paused protocol |
-| `AbortRun` | — | Abort; drops tips per `safety.auto_drop_tip_on_abort` |
+| `ResumeRun` | — | MOVES HARDWARE. Resume |
+| `AbortRun` | — | MOVES HARDWARE. Abort; drops tips per `safety.auto_drop_tip_on_abort` |
 
-**Tip Management**
+**Deck and modules**
+
 | Command | Parameters | Description |
 |---------|-----------|--------------|
-| `ListTipRacks` | — | Tip racks + usage counts (JSON array) |
-| `RefillTipRack` | `RackSlot` (e.g. `"A1"`) | Mark a rack as freshly refilled |
-| `ResetTipTracking` | — | Reset all tip-consumption tracking |
+| `MoveLabware` (obs) | `LabwareName`, `NewLocation`, `UseGripper` | MOVES HARDWARE. Move labware between slots with the gripper |
+| `SetModuleTemperature` (obs) | `ModuleName`, `Celsius`, `WaitForTemperature` | MOVES HARDWARE. `Celsius: 0` deactivates heating |
+| `ShakeModule` (obs) | `ModuleName`, `RPM`, `DurationSeconds` | MOVES HARDWARE. Latch must be closed; `DurationSeconds: 0` stops |
+| `SetModuleLatch` | `ModuleName`, `Open` | MOVES HARDWARE. Closed before shaking, open before the gripper touches the plate |
 
-**Monitoring**
+**Tips**
+
 | Command | Parameters | Description |
 |---------|-----------|--------------|
-| `SetLights` | `On` (bool) | Deck lights on/off |
-| `GetRobotInfo` | — | Robot metadata (JSON) |
-| `GetModulesStatus` | — | Attached modules (heater-shaker, temp module) status (JSON array) |
+| `RefillTipRack` | `RackSlot` (e.g. `"A1"`, or `"all"`) | Record that a rack was physically refilled |
+| `ResetTipTracking` | — | Reset every counter to full |
 
-### Safety features (implemented in `src/server.py`, not exposed as commands)
+**Camera**
 
-- **Leftover-tip pre-run guard** — before running a recipe, the server checks its own persisted per-mount tip state (`tip_mount_state.json`) and automatically prepends a forced drop-tip step for any pipette mount it can't confirm is clear. This exists because the installed robot firmware has no real tip-presence sensor. Fully automatic, no UI control, no way to disable except `safety.check_tip_before_run: false` in `config.yaml`.
-- **Run archive** — every run is logged to `run_archive/` (JSON, `{summary, commands}`), with automatic compression after `run_archive.retention_uncompressed_days` (default 3) and deletion after `retention_compressed_days` (default 30).
-- **Waste comparison** — if the executed recipe carries a waste estimate (from the Recipe Generator's Excel converter), the archive summary includes estimated-vs-actual waste.
+| Command | Parameters | Description |
+|---------|-----------|--------------|
+| `CaptureImage` (obs) | `Label`, `AllowRobotMotion` | Photograph the deck — see below |
+
+### `RunSteps`: atomic control without a recipe file
+
+Pass the same JSON a recipe's `Steps` array contains:
+
+```json
+{
+  "StepsJson": "[{\"Command\": \"Mix\", \"PipetteMount\": \"left\", \"Location\": \"MyPlate:A1\", \"Repetitions\": 3, \"Volume\": 100}]",
+  "Description": "Resuspend A1"
+}
+```
+
+Every command the recipe format defines is available this way — `Transfer`,
+`Distribute`, `Mix`, `MoveLabware`, `Delay`, the heater-shaker set,
+`TakeSnapshot`, and the rest (see [HAL_SYSTEM.md](HAL_SYSTEM.md) for the full
+list). Before this, moving one plate or mixing one well meant authoring a whole
+recipe file. It runs against the currently active HAL, exactly like
+`ExecuteRecipe`, so logical names such as `MyPlate` resolve the same way.
+
+`MoveLabware`, `SetModuleTemperature`, `ShakeModule` and `SetModuleLatch` are
+thin, well-named wrappers over the same mechanism, for the operations common
+enough to deserve their own entry in the workflow builder.
+
+### `CaptureImage`: the on-board camera
+
+The Flex has a camera, and the capture machinery has existed for a long time: a
+`TakeSnapshot` recipe step grabs a frame with `gst-launch` on the robot and
+base64-encodes it into the run log, and the server decodes it back out after
+every run. What was missing was any way to ask for it, and anywhere to put the
+result — images landed in the server's own `./images` directory, which nothing
+served.
+
+Now:
+
+- Images are written to `Results/Images/` and served by the web interface.
+  **Results → Deck photos** shows the gallery.
+- Two acquisition paths. First the robot's own HTTP camera endpoint: nothing
+  moves. If that is unavailable, capture falls back to running a one-step
+  protocol — **and starting a protocol homes the robot**, so the fallback is
+  refused unless you pass `AllowRobotMotion: true`. Leave it false unless
+  someone is watching the deck.
+- The response is JSON `{saved, path, url, method, detail}` and always says
+  which path ran and why the other did not.
+
+Configure it in `config.yaml`:
+
+```yaml
+camera:
+  enabled: true
+  device: "/dev/video2"   # the V4L2 node on the robot
+  http_probe: true        # try the no-motion path first
+```
+
+If capture produces no frame, `device` is the value to check: list the robot's
+video devices over SSH with `ls /dev/video*`. The HTTP path and the exact
+device node have not been verified against this particular Flex — both are one
+config value away, and the command reports precisely which path it used.
+
+### Safety features (in `src/server.py`, not exposed as commands)
+
+- **Leftover-tip pre-run guard** — the installed firmware has no tip-presence
+  sensor, so the server tracks per-mount "might still have a tip" state
+  (`tip_mount_state.json`) and prepends a forced drop-tip for any mount it
+  cannot confirm is clear. Automatic; disable only with
+  `safety.check_tip_before_run: false`.
+- **Run archive** — every run logged to `run_archive/` as JSON, gzipped after
+  `retention_uncompressed_days` (3) and deleted after
+  `retention_compressed_days` (30).
+- **Waste comparison** — if the recipe carries a waste estimate from the Recipe
+  Generator, the archive summary compares it to the actual aspirate/dispense
+  delta.
 
 ### Configuration (`config.yaml`, key sections)
 
 ```yaml
 server:
   port: 50302
-  name: "Opentrons Flex"
 
 robot:
-  ip: "10.16.0.137"       # Opentrons robot IP — the most commonly changed value
+  ip: "169.254.161.83"     # link-local; self-heals via mDNS if it moves
   port: 31950
-  run_timeout: 7200        # seconds; 0 = unlimited (needed for multi-day protocols)
+  run_timeout: 7200        # seconds; 0 = unlimited, for multi-day protocols
 
 hardware:
   config_folder: "../../Library/HardwareConfig"
-  default_config: "Standard_Flex_Setup.json"   # overridden by .active if present
+  default_config: "Standard_Flex_Setup.json"   # overridden by .active
 
 safety:
   check_tip_before_run: true
   auto_drop_tip_on_abort: true
   auto_home_on_error: true
 
-tip_tracking:
-  state_file: "./tip_state.json"
-  mount_state_file: "./tip_mount_state.json"
+camera:
+  enabled: true
+  device: "/dev/video2"
+  http_probe: true
 
 run_archive:
   enabled: true
   retention_uncompressed_days: 3
   retention_compressed_days: 30
 ```
-
-**Known config issue**: `directories.protocols` in `config.yaml` points at a `Protocols/` folder that does not exist on disk. In practice this key is never actually read by the server (`src/config.py` doesn't map it), so it's dead/cosmetic — but don't be alarmed if you notice it; it's not causing failures.
 
 ---
 

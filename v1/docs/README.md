@@ -45,7 +45,7 @@ First time on a new computer? See [SETUP.md](SETUP.md) for the full deployment g
 
 **Plug-and-Play**: The orchestrator discovers instruments at runtime through the PnP registry. Adding a new instrument means deploying a new SiLA2 server — no orchestration code changes.
 
-**sila2 Library**: All current servers are built with the `sila2` Python library. The orchestrator tries **Strategy 0** — `SilaClient` (standard SiLA2, used by all current servers) — then falls back to **Strategy 1** — dynamic stub loading for non-sila2 servers (none currently deployed). The legacy `SiLA2Common.ExecuteCommand` strategy has been fully removed from the codebase.
+**sila2 Library**: every server is built with the `sila2` Python library, and the orchestrator talks to all of them one way: `SilaClient` fetches each server's descriptor from the server itself at runtime. Two earlier execution paths — the proprietary `SiLA2Common.ExecuteCommand`, and dynamic stub loading for hypothetical non-`sila2` servers — have been removed.
 
 **HAL**: The Hardware Abstraction Layer separates liquid-handling recipes (what to do) from deck configurations (where things physically are). The active HAL config persists across restarts; `ExecuteRecipe` always runs against whatever HAL is currently active.
 

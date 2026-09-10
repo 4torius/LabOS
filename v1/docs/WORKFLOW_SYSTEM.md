@@ -13,9 +13,10 @@ A workflow in LabOS is a JSON file that chains instrument commands into a comple
   "name": "ELISA Coating and Read",
   "description": "Coat plate, incubate, read absorbance",
   "version": "1.0",
+  "SchemaVersion": "1.0",
   "steps": [
     {
-      "StepID": 1,
+      "StepNumber": 1,
       "Instrument": "opentrons",
       "Action": "ExecuteRecipe",
       "Parameters": { "RecipeName": "elisa_coating.json" },
@@ -25,7 +26,7 @@ A workflow in LabOS is a JSON file that chains instrument commands into a comple
       "OnFailure": "stop"
     },
     {
-      "StepID": 2,
+      "StepNumber": 2,
       "Instrument": "manual_station",
       "Action": "RequestOperatorTask",
       "Parameters": {
@@ -37,7 +38,7 @@ A workflow in LabOS is a JSON file that chains instrument commands into a comple
       "OnFailure": "stop"
     },
     {
-      "StepID": 3,
+      "StepNumber": 3,
       "Instrument": "tecan",
       "Action": "RunMeasurement",
       "Parameters": {
@@ -60,22 +61,91 @@ A workflow in LabOS is a JSON file that chains instrument commands into a comple
 
 | Field | Required | Description |
 |-------|----------|--------------|
-| `StepID` | yes | Unique integer, referenced by `DependsOn` |
-| `Instrument` | yes | Server key as registered in `lab_config.yaml` / discovered live (`opentrons`, `tecan`, `manual_station`, `mobile`) |
+| `StepNumber` | yes | Unique integer, referenced by `DependsOn` |
+| `Instrument` | yes | The instrument's canonical key from `lab_config.yaml` (`opentrons`, `tecan`, `manual_station`, `mobile`) |
 | `Action` | yes | Command identifier from the instrument's FDL |
 | `Parameters` | yes | Key-value map matching the command's declared parameters |
-| `DependsOn` | no | StepIDs that must complete first; empty = no dependency |
+| `DependsOn` | no | StepNumbers that must complete first; empty = no dependency |
 | `RetryCount` | no | Automatic retry attempts on failure (default 0) |
-| `TimeoutSeconds` | no | Max execution time; **`0` or omitted-with-default means unlimited/uses the configured default**, not "fails instantly" |
+| `TimeoutSeconds` | no | Max execution time. **`0` means unlimited**, not "fails instantly"; omitted uses `workflow.default_timeout` |
 | `OnFailure` | no | `"stop"` (default), `"skip"`, or `"continue"` |
 
-A pre-flight check rejects the whole workflow before anything runs if any `Instrument` name doesn't match a currently discovered server ("Instrument(s) not found: ...").
+The file also carries `SchemaVersion` (currently `"1.0"`). Files written before
+it existed still load; `python scripts/migrate_workflows.py --apply` brings them
+up to date and rewrites instrument names to their canonical form.
+
+### Instrument names
+
+Use the canonical key. The resolver still accepts looser spellings when
+*reading* an old file — `Tecan`, `TecanM200Pro` and `Tecan M200 Pro` all find
+the same instrument, matching by exact id, then exact name, then ignoring case
+and punctuation, then unique containment — but **a name that matches two
+instruments is an error, not a coin flip**. It reports the collision and
+refuses to guess, because on a machine that moves liquid, picking the wrong
+instrument by dictionary ordering is not an acceptable failure mode.
+
+### Validation happens before anything moves
+
+The whole workflow is rejected up front if any of these hold:
+
+- an instrument name matches nothing, or matches more than one
+- an instrument is registered but not responding (so its capabilities could not
+  be read) — reported once per instrument, naming the address
+- an action does not exist on that instrument
+- a required parameter is missing, or a parameter is named something the
+  command does not declare (a typo used to be silently dropped, and the command
+  ran without it)
+- two steps share a `StepNumber`, a step depends on itself, a dependency does
+  not exist, or the dependency graph contains a cycle
+- an `ExecuteRecipe` step targets more wells than the plate holds
+
+Check a file without running it:
+
+```bash
+python labos.py validate ELISA
+```
 
 ---
 
 ## DAG Execution Model
 
-Nodes = steps, edges = `DependsOn`. The executor repeatedly collects the "wave" of steps whose dependencies are all satisfied and dispatches that wave concurrently via `asyncio.gather` — steps with no dependency relationship to each other run in parallel automatically; there is no separate "parallel" flag to set per step.
+Nodes = steps, edges = `DependsOn`. The steps are sorted into **dependency
+waves**: wave 0 is everything with no unmet dependency, wave 1 everything that
+depends only on wave 0, and so on. Inside a wave the file order is preserved,
+so two independent steps still run in the order they were written.
+
+Both execution modes use this same ordering. `workflow.parallel_execution` in
+`lab_config.yaml` decides only whether one wave is dispatched concurrently or
+one step after another — never what runs before what.
+
+This matters more than it sounds. Sequential execution used to walk the file
+top to bottom and mark a step SKIPPED when its dependency happened to be
+written further down, so a valid workflow silently lost steps because of the
+order it was typed in.
+
+**Declare your dependencies.** With `parallel_execution: true`, a file whose
+steps declare none dispatches all of them at once — for a workflow that passes
+one plate between a mobile robot, a liquid handler and a plate reader, that is
+a collision. Every shipped workflow now states its chain explicitly.
+
+---
+
+## A Run Is a Background Job
+
+Starting a workflow returns immediately with a `run_id`; the run continues past
+the request that created it. Progress arrives over the WebSocket, and the state
+can be read at any point from `GET /api/runs/{id}`.
+
+Every step transition is written to the database as it happens — one row per
+step *attempt*, so a retry keeps the attempt that failed instead of
+overwriting it. That means a run that crashes halfway still leaves a
+diagnosable trail, and a page opened mid-run can reconstruct exactly where
+things got to. The **Database → Runs & Log** tab renders it as a timeline with
+per-step durations and parameters.
+
+One run at a time, deliberately: the instruments are physical and share a deck.
+A second attempt is refused with the name of the run holding the slot and how
+far along it is.
 
 ---
 
@@ -113,13 +183,42 @@ Only **one workflow can execute at a time** system-wide (a single shared executo
 
 ## Live Control: Pause / Resume / Abort
 
-Unlike a per-page button, Pause/Resume/Abort are rendered as a **global floating status bar at the bottom of every page** (not just the Workflow Builder), which appears automatically whenever a workflow is running and disappears when it finishes. It calls `POST /api/workflows/pause|resume|abort`, which signal the single active executor instance.
+Pause/Resume/Abort are rendered as a **global floating status bar at the bottom
+of every page**, which appears whenever a run is active.
+
+**Pause** takes effect between steps. It cannot interrupt a command already
+running on an instrument — a two-hour `ExecuteRecipe` finishes first.
+
+**Abort** does reach the instrument. It sends each instrument still executing a
+step that instrument's own stop command, discovered from its FDL (`AbortRun`,
+`CancelTask`, `Stop`, `EmergencyStop` — whichever it declares, never
+hardcoded), and only then stops waiting locally, so a cancelled wait can never
+leave hardware running with nobody watching. Previously abort set a flag read
+only between steps: the operator pressed Abort, the interface said "aborted",
+and the robot carried on.
+
+The response reports what each instrument actually did. If one did not confirm
+the stop, the interface raises a persistent **"Abort incomplete — check the
+instruments"** warning rather than folding it into a generic "aborted". Treat
+that as: something may still be moving.
+
+An instrument that exposes none of those commands is named explicitly, so you
+know which one to stop by hand.
 
 ---
 
 ## Manual Intervention Steps
 
-Any step whose `Instrument` value **contains the substring `"manual"`** (not just an exact `"manual_station"` match) is intercepted by the executor's manual-step handling instead of being sent to a real SiLA2 server: it posts an operator notification and blocks (polling) until the Operator page's "Confirm" button is clicked or the timeout fires. This is what actually implements `manual_station` / `ManualStation.RequestOperatorTask` steps in practice.
+Some steps have no SiLA2 server behind them and are executed by the
+orchestrator itself. One predicate decides this, shared by the executor and the
+web app so they cannot disagree: an instrument containing `"manual"`, an
+instrument containing `"delay"` or an action of `Wait`, and any action
+containing `"refill"`.
+
+A manual step posts an operator notification and blocks until the Operator
+page's "Confirm" is clicked or the timeout fires. `TimeoutSeconds: 0` on such a
+step now means **wait indefinitely**, which is what an overnight manual
+operation needs; it used to crash the comparison.
 
 ---
 

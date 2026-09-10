@@ -37,6 +37,18 @@ or double-click `LabOS_launcher.bat` (Windows).
 
 Other launcher modes: `--servers` (SiLA2 servers only), `--webapp` (web app only), `--status` (check what's running), `--stop` (stop everything the launcher started).
 
+### Option C — Check without a browser
+
+```bash
+python labos.py doctor       # dependencies, config validity, schema versions
+python labos.py status       # which servers and interfaces are up
+python labos.py instruments  # what was discovered, and what it can do
+```
+
+`doctor` is the first thing to run on a machine that "used to work": it
+validates `lab_config.yaml`, checks every dependency, counts the Library files
+and flags workflows that predate the current schema version.
+
 ### Option B — Manual start (for debugging one component)
 
 ```bash
@@ -66,11 +78,17 @@ Run this before the first workflow execution in a new environment or after any h
 - [ ] If using the mobile robot: GoFaGo base booted, arm powered, gripper connected; ArUco markers mounted and unobstructed at each workstation
 
 ### Software
-- [ ] All four servers (Opentrons, Tecan, Manual Station, Mobile Robot) start without errors / show reachable
-- [ ] Dashboard (`/dashboard`) shows all four as online
+- [ ] `python labos.py doctor` reports no problems
+- [ ] `python labos.py status` shows all four servers reachable
+- [ ] Dashboard (`/dashboard`) shows all four as online, with values in each
+      card's **Live readings** panel (an instrument whose readings say "error"
+      is announced but not really answering)
 - [ ] Hardware page: select the correct HAL config, confirm "Set Active" reports the config was actually applied to the robot (a warning toast appears if it wasn't — see below)
 - [ ] Recipe Generator: generate or load a small test recipe
+- [ ] `python labos.py validate Opentrons_Only_Test` passes
 - [ ] Run `Opentrons_Only_Test.workflow.json` from the Workflow Builder with a scrap plate
+- [ ] Press **Abort** during that run and confirm the robot actually stops, and
+      that the interface does not raise "Abort incomplete"
 - [ ] Tecan: `RunMeasurement` with a short test protocol, verify an AnIML result appears on the Database page's Plates tab
 - [ ] Mobile robot: `RefreshTasks` populates `AvailableTasks` with the expected task set
 
@@ -101,11 +119,32 @@ Run this before the first workflow execution in a new environment or after any h
 
 ---
 
+## Network Exposure
+
+The web interface binds `0.0.0.0:5000` with CORS open and **no authentication**.
+Anyone who can reach that port can run a workflow, which on this system means
+moving a robot arm.
+
+That is a deliberate trade-off for an isolated lab network, not an oversight —
+adding a login to a machine an operator uses with gloves on has its own cost.
+It is only safe while the network is actually isolated. If the orchestrator
+host ever gets a route to a wider network:
+
+- bind it to `127.0.0.1` (`python webapp/app.py --host 127.0.0.1`) and reach it
+  through an authenticated reverse proxy, or
+- restrict port 5000 with a host firewall rule to the operator workstations.
+
+The SiLA2 servers themselves (50051, 50302, 50500) are equally unauthenticated
+and equally consequential.
+
+---
+
 ## Troubleshooting
 
 ### Server shows "offline" in the dashboard
-1. Check the server's terminal/process is still running
-2. Check the port isn't taken by something else: `netstat -an | findstr 50302` (or 50051/50500)
+1. `python labos.py status` — it names the address it tried
+2. Check the server's terminal/process is still running
+3. Check the port isn't taken by something else: `netstat -an | findstr 50302` (or 50051/50500)
 3. Check `config.yaml` host/port match `lab_config.yaml`
 4. Restart the server — discovery reconnects automatically within ~10 seconds
 5. If a stale server on a *different* host was previously using the same configured port, this used to cause the wrong instrument to appear under a given name — that specific bug is fixed (host-aware instrument-ID resolution), but if you ever see an instrument's identity look wrong after a network change, that's the first thing to double-check.

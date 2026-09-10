@@ -26,6 +26,13 @@ The active config is tracked in a plain-text marker file, `Library/HardwareConfi
 
 A recipe is a JSON file (`Library/Recipes/*.json`) with a `Steps` array of Opentrons commands, plus optional `Metadata` (produced automatically by the Recipe Generator — required volumes, waste estimates, notes).
 
+### Running steps without a recipe file
+
+Any step below can also be run on its own, without authoring a recipe, via the
+Opentrons `RunSteps` command — pass the same JSON as a one-element array. That
+is how a workflow moves a single plate or mixes a single well. See
+[SERVERS.md](SERVERS.md#runsteps-atomic-control-without-a-recipe-file).
+
 ### Supported Step Commands
 
 **High-level (automatic tip management)**
@@ -61,6 +68,7 @@ A recipe is a JSON file (`Library/Recipes/*.json`) with a `Steps` array of Opent
 |---------|-------------|
 | `MoveLabware` | Move a plate within the deck via the gripper. Accepts optional `PickUpOffset`/`DropOffset` (`{"x":.., "y":.., "z":..}`, millimeters, additive on top of the labware's own calibrated default) — **JSON-only, no webapp UI control** to set these. **Default when omitted**: the code doesn't send an explicit `(0,0,0)` — it simply omits the kwarg entirely, which is functionally equivalent to zero *additional* offset. The labware's own built-in `gripperOffsets.default` (from its Opentrons labware definition) always applies regardless, on top of nothing extra. |
 | `Delay`, `Comment`, `Pause` | Control/annotation steps |
+| `TakeSnapshot` | Photograph the deck with the robot's on-board camera. Optional `Filename` and `Device` (the V4L2 node on the robot; defaults to the server's `camera.device`). The frame is base64-encoded into the run log and decoded back into `Results/Images/`, where the web interface serves it under **Results → Deck photos**. `CaptureImage` is the standalone command version — see [SERVERS.md](SERVERS.md#captureimage-the-on-board-camera) |
 | Heater-shaker / temperature module steps | Emitted automatically by the Recipe Generator's module-treatment engine when a treatment is configured — see below |
 
 ### Module Treatments (Recipe Generator feature)

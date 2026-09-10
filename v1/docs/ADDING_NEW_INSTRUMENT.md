@@ -1,307 +1,215 @@
 # LabOS — Adding a New Instrument
 
-This guide shows how to integrate a new scientific instrument into LabOS.
-
-## Quick Summary (5 steps)
-
-1. **Copy the template** and rename the folder
-2. **Edit the FDL XML** — define commands and parameters
-3. **Re-run codegen** — regenerate Python bindings from your FDL
-4. **Implement the commands** — fill in hardware logic
-5. **Declare library files** — edit `library_catalog.json`
-
-Register the server in `lab_config.yaml` and it is discovered automatically.  
-**No other LabOS files need to be modified.**
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────┐
-│         web interface / lab_core.py             │  ← user-facing
-├─────────────────────────────────────────────────┤
-│     PnP Discovery (src/discovery.py)            │  ← auto-discovers servers
-│     mDNS/DNS-SD + config seed (2-phase)         │     via SiLA2 native strategy
-├─────────────────────────────────────────────────┤
-│     Execution Client (src/client.py)            │
-│     Strategy 0: sila2 SilaClient (primary)      │  ← all sila2-compliant servers
-├─────────────────────────────────────────────────┤
-│     Your SiLA2 Server                           │
-│     FeatureImpl(FeatureBase)  +  SilaServer     │  ← what you implement
-│     LabOSLibraryProviderFeature (auto-wired)    │  ← declares library types
-├─────────────────────────────────────────────────┤
-│     Physical Hardware                           │
-└─────────────────────────────────────────────────┘
-```
-
----
-
-## Step-by-Step Guide
-
-### Step 1 — Copy the Template
+## The short version
 
 ```bash
-cd v1/SiLA2
-cp -r _NewInstrumentTemplate CentrifugeSiLA2Server   # example: centrifuge
+cd v1
+python labos.py new-server Centrifuge
 ```
 
-### Step 2 — Edit `config.yaml`
+That scaffolds the server, generates its SiLA2 bindings, and registers it in
+`lab_config.yaml`. Then you write **one file** — the implementation — and start
+it. Nothing in the orchestrator, the web interface or the workflow engine needs
+to change: everything they show about an instrument comes from what the server
+itself publishes at runtime.
 
-```yaml
-server:
-  host: "0.0.0.0"
-  port: 50061          # unique port, 50061–50099
+This used to be nine manual steps involving four renames, three consistent
+edits and a codegen run into a temp directory. Each was a chance to get
+something subtly wrong, and the failure mode was a server that starts and then
+never appears.
 
-hardware:
-  serial_port: "COM3"  # or host/port for network devices
-  simulation: false
+---
 
-sila2:
-  server_name: "Centrifuge"          # CamelCase, shown in UI
-  server_type: "Centrifuge"          # must match regex [A-Z][a-zA-Z0-9]*
-  vendor_url: "https://bicocca.lab"
-  description: "Centrifuge controller"
+## What `new-server` does
+
+```
+python labos.py new-server Centrifuge [--port 50077] [--key centrifuge]
 ```
 
-### Step 3 — Define Your Feature (FDL XML)
+| # | Step | Detail |
+|---|------|--------|
+| 1 | Copies the template | `SiLA2/CentrifugeSiLA2Server/` |
+| 2 | Renames the feature definition | `features/Centrifuge.sila.xml`, with `<Identifier>Centrifuge</Identifier>` |
+| 3 | Renames the implementation | `src/centrifuge_impl.py` |
+| 4 | Retargets the entry point | `main.py` imports the renamed module |
+| 5 | Fills in `config.yaml` | next free port in 50061–50099, real server name and uuid |
+| 6 | Writes an empty `library_catalog.json` | the template's example entry would advertise `Library/` folders this instrument does not use |
+| 7 | Runs `sila2-codegen` | into `generated/centrifuge/`, without the server skeleton nobody wants |
+| 8 | Registers it in `lab_config.yaml` | as a bootstrap seed, comments preserved |
 
-Rename and edit `features/NewInstrument.sila.xml`:
+The name must be CamelCase starting with a capital (`Centrifuge`,
+`PlateSealer`) — that is a SiLA2 requirement, and the command refuses anything
+else up front rather than letting codegen fail later.
+
+---
+
+## Then: define what it does
+
+### 1. Describe the commands (FDL)
+
+`features/Centrifuge.sila.xml` **is** your API. Anything you declare here
+appears automatically in the dashboard, the workflow builder and the CLI.
 
 ```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<Feature xmlns="http://www.sila-standard.org"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://www.sila-standard.org https://gitlab.com/SiLA2/sila_base/-/raw/master/schema/FeatureDefinition.xsd"
-         SiLA2Version="1.1" FeatureVersion="1.0" MaturityLevel="Draft"
-         Originator="de.bicocca.labos" Category="instruments">
-
-  <Identifier>Centrifuge</Identifier>
-  <DisplayName>Centrifuge</DisplayName>
-  <Description>Controls a benchtop centrifuge.</Description>
-
-  <Command>
+<Command>
     <Identifier>Spin</Identifier>
     <DisplayName>Spin</DisplayName>
+    <Description>MOVES HARDWARE. Spin at the given speed for the given time.</Description>
     <Observable>Yes</Observable>
     <Parameter>
-      <Identifier>RPM</Identifier>
-      <DataType><Basic>Integer</Basic></DataType>
-    </Parameter>
-    <Parameter>
-      <Identifier>DurationSeconds</Identifier>
-      <DataType><Basic>Integer</Basic></DataType>
+        <Identifier>RPM</Identifier>
+        <DisplayName>RPM</DisplayName>
+        <Description>Rotation speed.</Description>
+        <DataType><Basic>Integer</Basic></DataType>
     </Parameter>
     <Response>
-      <Identifier>FinalRPM</Identifier>
-      <DataType><Basic>Integer</Basic></DataType>
+        <Identifier>FinalRPM</Identifier>
+        <DisplayName>Final RPM</DisplayName>
+        <Description>Speed reached.</Description>
+        <DataType><Basic>Integer</Basic></DataType>
     </Response>
-    <IntermediateResponse>
-      <Identifier>CurrentRPM</Identifier>
-      <DataType><Basic>Integer</Basic></DataType>
-    </IntermediateResponse>
-  </Command>
-
-</Feature>
+</Command>
 ```
 
-**FDL schema rules (common mistakes):**
-- `FeatureVersion` must be `"1.0"` format, NOT `"1.0.0"`
-- For Observable commands: `<Response>` must come **before** `<IntermediateResponse>`
-- `<Parameter>` elements come before `<Response>` and `<IntermediateResponse>`
+**Two conventions worth following**, because the rest of LabOS assumes them:
 
-### Step 4 — Run `sila2-codegen`
+- **A command does something; a reading is a Property.** If the client is only
+  asking what is already true — status, current configuration, how many tips
+  are left — declare a `<Property>`, not a `Get*` command. Properties show up
+  in a "Live readings" panel rather than as buttons an operator has to press to
+  find something out, and an `<Observable>Yes</Observable>` property is pushed
+  to subscribers instead of polled.
+- **Say so when a command moves hardware.** Begin its `<Description>` with
+  `MOVES HARDWARE`. The operator reads that description in the command list,
+  and it is the only thing standing between them and a surprise.
 
-Generate Python bindings from your FDL. Run from your server's directory:
+**Schema rules that bite:**
+- `FeatureVersion` is `"1.0"`, never `"1.0.0"`
+- for an observable command, `<Response>` comes *before* `<IntermediateResponse>`
+- `<Parameter>` elements come before both
+
+### 2. Regenerate the bindings
 
 ```bash
-cd v1/SiLA2/CentrifugeSiLA2Server
-
-# Generate into a temp directory
-sila2-codegen new-package \
-    --package-name centrifuge \
-    --output-directory /tmp/sila2_gen \
-    --no-generate-main \
-    features/Centrifuge.sila.xml
-
-# Move the inner generated package into place
-mkdir -p generated/centrifuge
-cp /tmp/sila2_gen/centrifuge/generated/centrifuge/* generated/centrifuge/
+python labos.py codegen CentrifugeSiLA2Server
 ```
 
-> On Windows use `%TEMP%\sila2_gen` instead of `/tmp/sila2_gen`.
-> Run this step every time you edit the FDL XML.
+Every command you added is now an abstract method in
+`generated/centrifuge/centrifuge_base.py`. The server refuses to start until
+your implementation provides all of them — which is the behaviour you want:
+a missing method is caught at startup, not on the first call.
 
-The generated `generated/centrifuge/centrifuge_base.py` contains the abstract methods you must implement.
+### 3. Implement them
 
-### Step 5 — Implement the Commands
-
-Rename `src/servicer.py` → `src/centrifuge_impl.py` and implement every abstract method from the generated base:
+In `src/centrifuge_impl.py`:
 
 ```python
-import time
-from sila2.server import MetadataDict, ObservableCommandInstanceWithIntermediateResponses
-from generated.centrifuge.centrifuge_base import CentrifugeBase
-from generated.centrifuge.centrifuge_types import Spin_Responses, Spin_IntermediateResponses
-
 class CentrifugeImpl(CentrifugeBase):
     def __init__(self, parent_server, config: dict):
         super().__init__(parent_server=parent_server)
         self._simulation = config.get("hardware", {}).get("simulation", True)
-        self._status = "idle"
 
-    def Spin(
-        self,
-        RPM: int,
-        DurationSeconds: int,
-        *,
-        metadata: MetadataDict,
-        instance: ObservableCommandInstanceWithIntermediateResponses[Spin_IntermediateResponses],
-    ) -> Spin_Responses:
-        self._status = "spinning"
-        for i in range(DurationSeconds):
+    def Spin(self, RPM: int, DurationSeconds: int, *, metadata, instance) -> Spin_Responses:
+        instance.begin_execution()
+        for elapsed in range(DurationSeconds):
             time.sleep(1)
-            current = int(RPM * (i + 1) / DurationSeconds)
-            instance.send_intermediate_response(Spin_IntermediateResponses(CurrentRPM=current))
-        self._status = "idle"
+            instance.progress = (elapsed + 1) / DurationSeconds
         return Spin_Responses(FinalRPM=RPM)
 ```
 
-### Step 6 — Update `main.py` Imports
+These methods run on a thread pool, so use `time.sleep`, not `asyncio.sleep`.
+If your hardware library is async, bridge it with a dedicated event loop —
+`SiLA2/OpentronsSiLA2Server/src/workflow_api_impl.py` shows the pattern.
 
-In `main.py`, update the feature imports to match your renamed classes:
+### 4. Declare the `Library/` files it reads, if any
 
-```python
-from generated.centrifuge.centrifuge_feature import CentrifugeFeature
-from src.centrifuge_impl import CentrifugeImpl
-```
-
-And update the registration:
-
-```python
-impl = CentrifugeImpl(sila_server, config)
-sila_server.set_feature_implementation(CentrifugeFeature, impl)
-# LabOSLibraryProvider is already wired in — no changes needed
-sila_server.set_feature_implementation(
-    LabOSLibraryProviderFeature, LibraryProviderImpl(sila_server)
-)
-```
-
-### Step 7 — Declare Library Files (`library_catalog.json`)
-
-If your instrument uses files from `Library/` (e.g. method files, protocols), declare them in `library_catalog.json`. The orchestrator reads this at discovery time and automatically populates the workflow builder dropdowns — **no changes to `lab_config.yaml` or `discovery.py` needed**.
+Only if your instrument consumes files from `Library/` (methods, protocols).
+In `library_catalog.json`:
 
 ```json
 {
   "library_types": [
     {
-      "hint":            "centrifuge_method",
-      "display_name":    "Centrifuge Method",
-      "folder":          "Library/CentrifugeMethods",
-      "file_extension":  ".json",
-      "parameter_names": ["MethodName", "MethodFile"]
+      "hint": "centrifuge_method",
+      "display_name": "Centrifuge Method",
+      "folder": "Library/CentrifugeMethods",
+      "file_extension": ".json",
+      "parameter_names": ["MethodName"]
     }
   ]
 }
 ```
 
-- `hint` — internal key used by the UI (must be unique across all servers)
-- `parameter_names` — SiLA2 parameter identifiers that should show this file picker
-- `folder` / `file_extension` — where the files are located relative to `v1/`
+The orchestrator reads this at discovery time and turns any parameter named
+`MethodName` into a file picker showing that folder. No orchestrator change,
+no `lab_config.yaml` change.
 
-Create `Library/CentrifugeMethods/` and add your method files.
-
-### Step 8 — Register the Server
-
-Add your server to `v1/lab_config.yaml` under `servers`:
-
-```yaml
-servers:
-  centrifuge:
-    name: Centrifuge
-    enabled: true
-    host: localhost
-    port: 50061
-    directory: SiLA2/CentrifugeSiLA2Server
-    command_windows: [python, main.py]
-    command_unix:    [python, main.py]
-    startup_timeout: 30
-    check_file: main.py
-```
-
-### Step 9 — Test
+### 5. Run it
 
 ```bash
-# Start your server
-cd v1/SiLA2/CentrifugeSiLA2Server
-python main.py
-
-# In another terminal, start LabOS
-cd v1
-python launcher.py
+cd SiLA2/CentrifugeSiLA2Server && python main.py
+# in another terminal
+python labos.py instruments        # it should be listed, with its commands
 ```
 
-Open http://localhost:5000 — your server should appear under **Instruments**.
-In the **Workflow Builder**, your commands should be listed with correct dropdowns.
+Develop against `hardware.simulation: true` in `config.yaml` until the logic is
+right, then point it at the real device.
 
 ---
 
-## What the Orchestrator Discovers Automatically
+## What the orchestrator discovers by itself
 
-| What | How |
-|------|-----|
-| Server name, type | `config.yaml` → `sila2.server_name/server_type` |
-| Port | `lab_config.yaml` → `servers.your_key.port` |
-| Commands and parameters | From FDL XML via `SiLAService.GetFeatureDefinition()` |
-| Library file dropdowns | From `LabOSLibraryProvider.LibraryCatalog` property (reads `library_catalog.json`) |
+| What | Where it comes from |
+|------|---------------------|
+| Server name and type | the server's `config.yaml` → `sila2.server_name` / `server_type` |
+| Commands, parameters, responses | the FDL, fetched live via `SiLAService.GetFeatureDefinition()` |
+| Properties | the same |
+| File-picker dropdowns | `LabOSLibraryProvider.LibraryCatalog` (reads `library_catalog.json`) |
+| Which command means "stop" | the FDL — the executor looks for `AbortRun`/`CancelTask`/`Stop`/`EmergencyStop` and uses whichever you declare |
+
+That last one matters: expose one of those and your instrument becomes
+abortable from the web interface's Abort button, with no orchestrator change.
 
 ---
 
-## Files in Your Server Folder
-
-After completing the guide:
+## Files in your server folder
 
 ```
 SiLA2/CentrifugeSiLA2Server/
-├── config.yaml                      ← port, hardware settings, server metadata
+├── config.yaml                  port, hardware settings, server metadata
 ├── features/
-│   └── Centrifuge.sila.xml          ← FDL: commands, parameters, responses
+│   └── Centrifuge.sila.xml      YOUR API — commands, properties, parameters
 ├── generated/
-│   ├── centrifuge/                  ← codegen output (commit this)
-│   │   ├── centrifuge_base.py       ← abstract methods to implement
-│   │   ├── centrifuge_feature.py    ← Feature object for set_feature_implementation
-│   │   ├── centrifuge_types.py      ← Response NamedTuples
-│   │   └── ...
-│   └── laboslibraryprovider/        ← shared, already in template (do not modify)
-├── library_catalog.json             ← declares library file types
-├── main.py                          ← server entry point (update imports only)
+│   ├── centrifuge/              codegen output (commit it)
+│   └── laboslibraryprovider/    shared, do not modify
+├── library_catalog.json         which Library/ file types this instrument uses
+├── main.py                      entry point (already wired)
 └── src/
-    ├── centrifuge_impl.py           ← YOUR IMPLEMENTATION (renamed from servicer.py)
-    └── library_provider_impl.py     ← shared, already in template (do not modify)
+    ├── centrifuge_impl.py       YOUR IMPLEMENTATION
+    └── library_provider_impl.py shared, do not modify
 ```
 
-**Files to never modify:** `generated/laboslibraryprovider/`, `src/library_provider_impl.py`  
-**Files to run codegen on change:** `features/Centrifuge.sila.xml`
+**Re-run codegen** every time you change the FDL.
 
 ---
 
-## Communication Protocols
+## Communication protocols
 
-Your implementation can use any Python library for hardware communication:
+Your implementation can use any Python library:
 
-| Protocol | Use Case | Library |
-|----------|----------|---------|
-| Serial/RS232 | Lab instruments, PLCs | `pyserial` |
-| HTTP REST | Modern devices, web APIs | `httpx` |
-| TCP socket | Industrial controllers | `socket` |
-| USB/HID | Sensors, balances | `pyusb`, `hid` |
-| MODBUS | Industrial automation | `pymodbus` |
+| Protocol | Library |
+|----------|---------|
+| Serial / RS232 | `pyserial` |
+| HTTP REST | `httpx` |
+| TCP socket | `socket` |
+| USB / HID | `pyusb`, `hid` |
+| MODBUS | `pymodbus` |
 
 ---
 
-## Tips
+## Doing it by hand
 
-- **Simulation first**: set `hardware.simulation: true` in `config.yaml` to develop and test without hardware
-- **Observable vs Non-Observable**: use Observable for long-running operations (measurements, runs); Non-Observable for instant reads/sets
-- **Error handling**: raise `DefinedExecutionError` subclasses from your FDL for expected failure modes; uncaught exceptions become `UndefinedExecutionError`
-- **Codegen is idempotent**: safe to re-run; always re-run after editing the FDL
+`new-server` is a convenience, not a requirement — the template is a normal
+folder and every step above is an ordinary edit. If you scaffold manually, run
+`python labos.py doctor` afterwards: it checks the configuration parses, the
+ports do not collide and codegen is available.

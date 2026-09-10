@@ -23,13 +23,62 @@ The old ephemeral `/api/logs` and `/api/history` endpoints (backing the removed 
 |---|---|---|
 | GET | `/api/devices` | All discovered instruments |
 | GET | `/api/devices/{id}` | One instrument's detail |
-| GET | `/api/devices/{id}/property/{feature}/{prop}` | Read a live SiLA2 property |
+| GET | `/api/devices/{id}/property/{feature}/{prop}` | Read a live SiLA2 property. This is how state is read now — `GetStatus`-style *commands* were removed in favour of properties, which the dashboard shows in a "Live readings" panel rather than as buttons an operator presses to find something out. Example: `/api/devices/opentrons/property/WorkflowAPI/Status` |
 | POST | `/api/devices/{device_id}/command` | Execute any command on any discovered instrument — this is what the Dashboard's command modals call |
 | GET | `/api/instruments/commands` | Instrument + command catalog (feeds the Workflow Builder toolbox) |
-| GET | `/api/dynamic-options/{ui_hint}` | Dropdown options for a parameter hint (`recipe`, `hal_config`, `liquid_class`, `protocol`, …) — driven by each server's `LabOSLibraryProvider` catalog |
+| GET | `/api/dynamic-options/{ui_hint}` | Dropdown options for a parameter hint (`recipe`, `hal_config`, `liquid_class`, `location`, …) — driven by each server's `LabOSLibraryProvider` catalog. `location` returns the instruments discovery actually found |
 | GET | `/api/files/hal\|recipes\|protocols\|analyses\|workflows\|liquidclasses` | Raw file listings from the matching `Library/` subfolder |
 | POST | `/api/opentrons/refill-tips` | Mark a tip rack refilled |
 | GET | `/api/opentrons/tip-status` | Current tip consumption |
+
+## Runs (`routes/workflows.py`)
+
+**A run is a background job.** `POST /api/workflows/execute` returns as soon as
+the run has started, carrying its `run_id`; the run continues past the request
+that created it. It used to hold the executor lock *and the HTTP connection*
+for the whole run — hours, for a workflow that incubates a plate — and only
+return the id at the very end, so a closed tab or a proxy read timeout lost the
+reply entirely.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/runs` | Start a run. Alias of `/api/workflows/execute` |
+| GET | `/api/runs` | Runs this process knows about, and which one is active |
+| GET | `/api/runs/{id}` | Live state: status, current step, counts, percent. Falls back to the database for older runs |
+| GET | `/api/runs/{id}/steps` | The real step timeline, available *while the run is going* |
+| POST | `/api/runs/{id}/pause` \| `/resume` \| `/abort` | Control one run by id |
+
+Starting a run returns:
+
+```json
+{ "status": "started", "run_id": "20260910_142530_ELISA", "workflow_name": "ELISA",
+  "total_steps": 7, "active": true, "percent": 0 }
+```
+
+Or, when the instruments are busy:
+
+```json
+{ "status": "busy",
+  "error": "'ELISA' is already running (run 20260910_142530_ELISA, step 3 of 7). Wait for it to finish, or abort it first.",
+  "active_run": { ... } }
+```
+
+One run at a time is deliberate: the instruments are physical and share a deck.
+A refusal names the run holding the slot and how far along it is.
+
+**Aborting** stops the run *and tells each instrument mid-step to stop*, using
+that instrument's own command discovered from its FDL. The response reports
+what each one actually did:
+
+```json
+{ "status": "aborted", "run_id": "...",
+  "report": ["opentrons: AbortRun sent", "tecan: no abort command exposed — stop it at the instrument"],
+  "requires_attention": true,
+  "warning": "Some instruments did not confirm the stop — verify them physically" }
+```
+
+`requires_attention` is the field to act on: it means something may still be
+moving.
 
 ## Workflows (`routes/workflows.py`)
 
@@ -38,8 +87,9 @@ The old ephemeral `/api/logs` and `/api/history` endpoints (backing the removed 
 | GET | `/api/workflows` / `/api/workflows/{id}` | List / load workflow files |
 | POST | `/api/workflows/save` | Save a workflow |
 | POST | `/api/workflows/scan-variables` | Detect `${var}` placeholders in a workflow |
-| POST | `/api/workflows/execute` | Start execution (single global lock — a second call while one is running returns `{"status": "busy"}`) |
-| POST | `/api/workflows/pause` \| `/resume` \| `/abort` | Live control of the currently running workflow |
+| POST | `/api/workflows/execute` | Start a run; returns immediately with `run_id` (see Runs above) |
+| POST | `/api/workflows/pause` \| `/resume` \| `/abort` | Control the active run; aliases of the `/api/runs/{id}` forms |
+| GET | `/api/workflows/live-status` | Snapshot of the active run, for a page syncing on load |
 | POST | `/api/workflows/batch-execute` | Run the same workflow N times with per-sample variable substitution (API-only, see [WORKFLOW_SYSTEM.md](WORKFLOW_SYSTEM.md)) |
 | POST | `/api/intervention/respond` / GET `/api/intervention/pending` | Retry/Skip/Abort response to a failed-step intervention prompt |
 | GET | `/api/templates` / `/{id}`, POST `/save`, POST `/{id}/instantiate`, DELETE `/{id}` | Workflow templates with variables |
@@ -95,6 +145,8 @@ This is the SQLite-backed store behind the unified **Database** page (`/database
 | GET | `/api/results/{fmt}/{filename}` | Download a raw result file |
 | GET | `/api/results/{fmt}/{filename}/view` | Inline text view |
 | GET | `/api/files/animl_results` | List `.animl` files |
+| GET | `/api/images` | Deck photos taken with the robot's camera (`CaptureImage`, or a `TakeSnapshot` recipe step) |
+| GET | `/api/images/{filename}` | One image. Shown in **Results → Deck photos** |
 | GET | `/api/results/animl/{filename}/parse` | Parse an AnIML file into plate-heatmap data |
 
 ---
@@ -128,9 +180,35 @@ Each server exposes a standard SiLA2 gRPC endpoint on its configured port (see [
 from sila2.client import SilaClient
 
 client = SilaClient("localhost", 50302, insecure=True)
+
+# A property is read, not called
+print(client.WorkflowAPI.Status.get())
+
+# A command acts
 result = client.WorkflowAPI.ExecuteRecipe(RecipeName="my_recipe.json")
 print(result)
+
 client.close()
 ```
 
 Instrument-level errors raise `DefinedExecutionError` subclasses (see each server's FDL for its declared error identifiers); transport errors raise `grpc.RpcError`.
+
+---
+
+## Command line
+
+Most of this is reachable without a browser:
+
+```bash
+python labos.py status                     # which servers and interfaces are up
+python labos.py instruments -v             # commands and properties, with descriptions
+python labos.py read opentrons Status      # one property
+python labos.py validate ELISA             # check a workflow without running it
+python labos.py run ELISA                  # run it, streaming per-step progress
+python labos.py doctor                     # check the installation
+python labos.py new-server Centrifuge      # scaffold a new instrument
+python labos.py codegen OpentronsSiLA2Server
+```
+
+`run` confirms before starting, because it drives real instruments; `-y` skips
+the prompt for scripted use.
