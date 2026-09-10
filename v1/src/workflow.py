@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Awaitable
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Awaitable
 
 
 logger = logging.getLogger(__name__)
@@ -490,6 +490,12 @@ class PnPWorkflowExecutor:
         self._pause_requested = False
         self._resume_event: Optional[asyncio.Event] = None
         self._step_executor_fn: Optional[Callable] = None  # async fn(step, context) -> CommandResult
+        #: step_number -> (step, task) for steps currently awaiting an instrument.
+        #: Abort needs this: without it there is nothing to interrupt and nothing
+        #: to tell the instrument about.
+        self._inflight: Dict[int, Tuple["WorkflowStep", "asyncio.Task"]] = {}
+        #: What the last abort actually managed to do, surfaced to the operator.
+        self.last_abort_report: List[str] = []
 
         # One shared settings snapshot instead of re-reading lab_config.yaml.
         # Note the behaviour change this fixes: the old loader turned a
@@ -531,12 +537,82 @@ class PnPWorkflowExecutor:
             except Exception:
                 pass  # Don't let callback errors stop execution
     
+    #: Command identifiers that mean "stop what you are doing", most specific
+    #: first. Never hardcoded per instrument: the executor asks each server
+    #: which of these it declares in its own FDL, so a new instrument only has
+    #: to expose one of them to become abortable.
+    ABORT_COMMANDS = ("AbortRun", "CancelTask", "Abort", "Cancel", "Stop", "Halt", "EmergencyStop")
+
+    #: An abort must not itself hang. Bounded even though normal commands are
+    #: not: if the instrument cannot acknowledge a stop in this long, the
+    #: operator needs to be told to intervene physically, not kept waiting.
+    ABORT_TIMEOUT_S = 30.0
+
     def request_abort(self):
-        """Request workflow abortion."""
+        """Request workflow abortion.
+
+        Sets the flag every loop checks, and — the part that was missing —
+        schedules the work that actually stops the hardware. Previously this
+        set a boolean read *between* steps, so during a two-hour ExecuteRecipe
+        it did nothing at all and the robot was never told anything: the
+        operator pressed Abort, the UI said "aborted", and the run carried on.
+        """
         self._abort_requested = True
-        # Also release any pause so the abort check is reached
+        # Release any pause so the abort check is reached.
         if self._resume_event:
             self._resume_event.set()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No loop (a synchronous caller): the flag alone still stops the
+            # run at the next step boundary.
+            return
+        loop.create_task(self._perform_abort())
+
+    async def _perform_abort(self) -> List[str]:
+        """Tell every instrument mid-step to stop, then stop waiting on it."""
+        report: List[str] = []
+        inflight = list(self._inflight.values())
+        if not inflight:
+            report.append("No step was executing")
+
+        for step, _task in inflight:
+            command = self._find_abort_command(step.instrument)
+            if command is None:
+                report.append(
+                    f"{step.instrument}: no abort command exposed — "
+                    f"stop it at the instrument"
+                )
+                continue
+            try:
+                result = await self.registry.execute(
+                    step.instrument, command, {}, timeout=self.ABORT_TIMEOUT_S
+                )
+                if result.success:
+                    report.append(f"{step.instrument}: {command} sent")
+                else:
+                    report.append(f"{step.instrument}: {command} FAILED ({result.error}) — verify manually")
+            except Exception as exc:
+                report.append(f"{step.instrument}: {command} raised {exc} — verify manually")
+
+        # Only now stop awaiting: the instrument has been told first, so a
+        # cancelled wait cannot leave hardware running with nobody watching.
+        for _step, task in inflight:
+            if task is not None and not task.done():
+                task.cancel()
+
+        self.last_abort_report = report
+        for line in report:
+            logger.warning("Abort: %s", line)
+        return report
+
+    def _find_abort_command(self, instrument: str) -> Optional[str]:
+        """The instrument's own stop command, from its FDL. None if it has none."""
+        server = self.registry.get_server_by_name(instrument)
+        if server is None:
+            return None
+        available = {cmd_id for _fid, cmd_id, _cmd in server.get_all_commands()}
+        return next((c for c in self.ABORT_COMMANDS if c in available), None)
 
     def request_pause(self):
         """Request workflow pause after the current step finishes."""
@@ -1009,6 +1085,8 @@ class PnPWorkflowExecutor:
                             f"Starting {step.action} on {step.instrument}")
                     try:
                         outcomes.append(await self._run_one(step, workflow, context))
+                    except asyncio.CancelledError:
+                        outcomes.append(CommandResult(success=False, error="Aborted by operator"))
                     except Exception as exc:  # pragma: no cover - defensive
                         outcomes.append(exc)
                     # Pause takes effect between steps; a wave dispatched
@@ -1091,10 +1169,20 @@ class PnPWorkflowExecutor:
 
         original = step.parameters
         step.parameters = resolved
+        task = asyncio.current_task()
+        self._inflight[step.step_number] = (step, task)
         try:
             result = await self._execute_step_with_retry(step, workflow.name, context)
+        except asyncio.CancelledError:
+            # Cancelled by _perform_abort() after the instrument was told to
+            # stop. Report it as a failed step rather than letting the
+            # cancellation tear down the whole executor.
+            if not self._abort_requested:
+                raise
+            return CommandResult(success=False, error="Aborted by operator")
         finally:
             step.parameters = original
+            self._inflight.pop(step.step_number, None)
 
         if result.success:
             if ("opentrons" in step.instrument.lower()

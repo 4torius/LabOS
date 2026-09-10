@@ -327,7 +327,16 @@
             try {
                 const resp = await fetch('/api/workflows/abort', { method: 'POST' });
                 const out = await resp.json();
-                showToast('error', 'Workflow', out.message || 'Abort requested');
+                // An instrument that did not confirm the stop is the one thing
+                // the operator has to act on physically, so it gets a separate,
+                // persistent warning rather than being folded into "aborted".
+                if (out.requires_attention) {
+                    showToast('error', 'Abort incomplete — check the instruments',
+                              (out.report || []).join(' | ') ||
+                              'Some instruments did not confirm the stop');
+                } else {
+                    showToast('error', 'Workflow', out.message || 'Abort requested');
+                }
             } catch (e) {
                 showToast('error', 'Abort failed', e.message || 'Cannot abort workflow');
             }

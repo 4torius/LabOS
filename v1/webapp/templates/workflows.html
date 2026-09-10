@@ -1956,10 +1956,18 @@ function confirmExecution() {
     })
     .then(function(r) { return r.json(); })
     .then(function(result) {
-        if (result.status === 'completed') {
-            showNotification('Workflow completed! (' + (result.steps_completed || 0) + ' steps)', 'success');
+        // The run is a background job now: this response says it started, not
+        // that it finished. Completion arrives on the WebSocket
+        // (workflow_complete / workflow_failed) and drives the status bar in
+        // base.html, which is visible on every page.
+        if (result.status === 'started') {
+            window._activeRunId = result.run_id;
+            showNotification('Workflow started (' + (result.total_steps || 0) + ' steps). '
+                             + 'Progress is shown in the status bar below.', 'success');
+        } else if (result.status === 'busy') {
+            showNotification(result.error || 'Another workflow is already running', 'warning');
         } else {
-            showNotification((result.error || result.errors || 'Workflow failed'), 'danger');
+            showNotification((result.error || result.errors || 'Could not start workflow'), 'danger');
         }
     })
     .catch(function(e) { showNotification('Error: ' + e.message, 'danger'); });

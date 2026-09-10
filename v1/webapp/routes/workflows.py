@@ -22,6 +22,7 @@ except ImportError:
     _db = None
 
 from src import plate_tracking
+from src.run_manager import RunBusy, RunManager
 from src.settings import get_settings, normalize_timeout
 from src.workflow import is_locally_handled
 
@@ -105,8 +106,10 @@ def create_workflows_router(
 ) -> APIRouter:
     router = APIRouter(tags=["workflows"])
     active_executor = None
-    # Prevents concurrent workflow execution (parallel_execution:false is the default).
-    _executor_lock = asyncio.Lock()
+    # Owns background runs and the single-run slot. The instruments are
+    # physical and share a deck, so one run at a time is deliberate; a refusal
+    # names the run holding the slot instead of a bare "busy".
+    runs = RunManager(db=_db)
 
     # Last known workflow status, kept in sync with every workflow_* broadcast
     # below (see _track_workflow_status). Workflow progress is otherwise a
@@ -260,48 +263,157 @@ def create_workflows_router(
 
     @router.post("/api/workflows/pause")
     async def pause_workflow():
-        if active_executor:
-            active_executor.request_pause()
-            state.add_log("info", "Workflow pause requested", "workflow")
-            await _broadcast_workflow({"type": "workflow_paused", "message": "Workflow paused by operator"})
-            return {"status": "paused", "message": "Pause requested"}
-        return {"status": "idle", "message": "No active workflow"}
+        """Pause the active run. Kept as an alias of /api/runs/{id}/pause."""
+        result = runs.pause()
+        if result is None:
+            return {"status": "idle", "message": "No active workflow"}
+        state.add_log("info", "Workflow pause requested", "workflow")
+        await _broadcast_workflow({"type": "workflow_paused", "run_id": result.run_id,
+                                   "message": "Workflow paused by operator"})
+        return {"status": "paused", "message": "Pause requested", "run_id": result.run_id}
 
     @router.post("/api/workflows/resume")
     async def resume_workflow():
-        if active_executor:
-            active_executor.request_resume()
-            state.add_log("info", "Workflow resumed by operator", "workflow")
-            await _broadcast_workflow({"type": "workflow_resumed", "message": "Workflow resumed by operator"})
-            return {"status": "resumed", "message": "Workflow resumed"}
-        return {"status": "idle", "message": "No active workflow"}
+        result = runs.resume()
+        if result is None:
+            return {"status": "idle", "message": "No active workflow"}
+        state.add_log("info", "Workflow resumed by operator", "workflow")
+        await _broadcast_workflow({"type": "workflow_resumed", "run_id": result.run_id,
+                                   "message": "Workflow resumed by operator"})
+        return {"status": "resumed", "message": "Workflow resumed", "run_id": result.run_id}
 
     @router.post("/api/workflows/abort")
     async def abort_workflow():
-        if active_executor:
-            active_executor.request_abort()
-            state.add_log("warning", "Workflow aborted by operator", "workflow")
-            await _broadcast_workflow({"type": "workflow_failed", "workflow_name": "active", "error": "Aborted by operator"})
-            return {"status": "aborted", "message": "Abort requested"}
-        return {"status": "idle", "message": "No active workflow"}
+        """Abort the active run and report what each instrument actually did.
+
+        The response says what happened, not merely that a stop was requested:
+        an instrument that did not confirm the stop is the single most
+        important thing to put in front of the operator immediately.
+        """
+        active = runs.active()
+        if active is None:
+            return {"status": "idle", "message": "No active workflow"}
+
+        result = await runs.abort(active.run_id)
+        report = result.get("report", [])
+        unresolved = result.get("requires_attention", False)
+
+        state.add_log("warning", f"Workflow aborted by operator: {'; '.join(report)}", "workflow")
+        await _broadcast_workflow({
+            "type": "workflow_failed",
+            "workflow_name": active.workflow_name,
+            "run_id": active.run_id,
+            "error": "Aborted by operator",
+            "abort_report": report,
+            "requires_attention": unresolved,
+        })
+        return {
+            "status": "aborted",
+            "message": "Abort requested",
+            "run_id": active.run_id,
+            "report": report,
+            "requires_attention": unresolved,
+            "warning": ("Some instruments did not confirm the stop — verify them physically"
+                        if unresolved else None),
+        }
 
     # Execute workflow
 
     @router.post("/api/workflows/execute")
     async def execute_workflow(request: Request):
-        """Execute a workflow via PnPWorkflowExecutor (dependency graph + retry + intervention)."""
-        nonlocal active_executor
-        if _executor_lock.locked():
-            return {"status": "busy", "error": "Another workflow is already running"}
-        await _executor_lock.acquire()
-        try:
-            return await _run_workflow(request)
-        finally:
-            _executor_lock.release()
+        """Start a workflow and return its run id immediately.
 
-    async def _run_workflow(request: Request):
-        nonlocal active_executor
+        This used to hold the executor lock *and this HTTP connection* for the
+        whole run — hours, for a workflow that incubates a plate — and only
+        return the run id at the very end, so a closed tab or a proxy read
+        timeout lost the reply entirely. The run is now a background job:
+        poll GET /api/runs/{run_id} or listen on the WebSocket.
+        """
         data = await request.json()
+        workflow_name = data.get("WorkflowName", "Unknown")
+        try:
+            run_state = await runs.start(
+                workflow_name,
+                lambda run_id: _run_workflow(data, run_id),
+                total_steps=len(data.get("Steps", [])),
+            )
+        except RunBusy as busy:
+            return {
+                "status": "busy",
+                "error": str(busy),
+                "active_run": busy.active.to_dict(),
+            }
+        return {"status": "started", **run_state.to_dict()}
+
+    @router.post("/api/runs")
+    async def start_run(request: Request):
+        """Alias of /api/workflows/execute under the resource-shaped path."""
+        return await execute_workflow(request)
+
+    @router.get("/api/runs")
+    async def list_runs_in_memory():
+        return {"runs": [r.to_dict() for r in runs.list_runs()],
+                "active": (runs.active().run_id if runs.active() else None)}
+
+    @router.get("/api/runs/{run_id}")
+    async def get_run_state(run_id: str):
+        state_obj = runs.get(run_id)
+        if state_obj is not None:
+            return state_obj.to_dict()
+        # Not in memory (an older run, or after a restart): the database is the
+        # durable record.
+        if _db is not None:
+            record = _db.get_run(run_id)
+            if record:
+                return {"run_id": run_id, "status": record.get("status"),
+                        "workflow_name": record.get("workflow_name"),
+                        "active": False, "from_database": True, **record}
+        raise HTTPException(404, f"Run {run_id} not found")
+
+    @router.get("/api/runs/{run_id}/steps")
+    async def get_run_step_timeline(run_id: str):
+        """Every recorded step attempt, in order — the run's real timeline.
+
+        Available while the run is still going: steps are written as they
+        start and finish, not replayed at the end.
+        """
+        if _db is None:
+            return {"run_id": run_id, "steps": []}
+        return {"run_id": run_id, "steps": _db.get_run_steps(run_id)}
+
+    @router.post("/api/runs/{run_id}/pause")
+    async def pause_run(run_id: str):
+        result = runs.pause(run_id)
+        if result is None:
+            return {"status": "idle", "message": "No such active run"}
+        await _broadcast_workflow({"type": "workflow_paused", "run_id": run_id,
+                                   "message": "Workflow paused by operator"})
+        return result.to_dict()
+
+    @router.post("/api/runs/{run_id}/resume")
+    async def resume_run(run_id: str):
+        result = runs.resume(run_id)
+        if result is None:
+            return {"status": "idle", "message": "No such active run"}
+        await _broadcast_workflow({"type": "workflow_resumed", "run_id": run_id,
+                                   "message": "Workflow resumed by operator"})
+        return result.to_dict()
+
+    @router.post("/api/runs/{run_id}/abort")
+    async def abort_run(run_id: str):
+        result = await runs.abort(run_id)
+        state.add_log("warning", f"Run {run_id} aborted: {'; '.join(result.get('report', []))}",
+                      "workflow")
+        await _broadcast_workflow({
+            "type": "workflow_failed", "run_id": run_id,
+            "workflow_name": "active", "error": "Aborted by operator",
+            "abort_report": result.get("report", []),
+            "requires_attention": result.get("requires_attention", False),
+        })
+        return result
+
+    async def _run_workflow(data: dict, _run_id: str):
+        nonlocal active_executor
         workflow_name = data.get("WorkflowName", "Unknown")
         # Optional variables dict provided by frontend (Settimana 8: dialog variabili)
         user_variables = data.get("variables", {})
@@ -357,9 +469,7 @@ def create_workflows_router(
             return {"status": "error", "error": " | ".join(dict.fromkeys(_problems))}
 
         executor = PnPWorkflowExecutor(registry)
-        _wf_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        _wf_safe = re.sub(r'[^\w\-]', '_', workflow_name)
-        _run_id = f"{_wf_ts}_{_wf_safe}"
+        runs.attach_executor(_run_id, executor)
         shared_wf_ctx: dict = {
             "plate_id": None, "current_plate_id": None,
             "step_results": [], "workflow_name": workflow_name,
@@ -385,9 +495,27 @@ def create_workflows_router(
             except Exception as exc:
                 logger.warning(f"Failed to pre-create run_results row for {_run_id}: {exc}")
 
+        # Attempt counters and start times, so a retry is a distinct row in the
+        # timeline instead of overwriting the attempt that failed.
+        _attempts: dict = {}
+        _step_started: dict = {}
+
         async def web_execute_step(step, wf_context) -> "CommandResult":
             if wf_context and wf_context.plate_id and not shared_wf_ctx["plate_id"]:
                 shared_wf_ctx["plate_id"] = wf_context.plate_id
+
+            _n = getattr(step, "step_number", None)
+            _attempts[_n] = _attempts.get(_n, 0) + 1
+            _step_started[_n] = datetime.now()
+            runs.record_step(_run_id, {
+                "step_number": _n,
+                "attempt": _attempts[_n],
+                "instrument": step.instrument,
+                "action": step.action,
+                "parameters": step.parameters,
+                "status": "running",
+                "started_at": _step_started[_n].isoformat(),
+            })
 
             result_dict = await _execute_step(
                 step.instrument, step.action, step.parameters,
@@ -422,15 +550,35 @@ def create_workflows_router(
                 success = True
                 error = None
 
+            final_status = r_status if r_status else ("completed" if success else "error")
             step_record = {
                 "step": getattr(step, 'step_number', None),
                 "instrument": step.instrument,
                 "action": step.action,
-                "status": r_status if r_status else ("completed" if success else "error"),
+                "status": final_status,
                 "error": error,
                 "timestamp": datetime.now().isoformat(),
             }
             shared_wf_ctx["step_results"].append(step_record)
+
+            # Persist the outcome now, not in an end-of-run replay: a run that
+            # crashes mid-way must still leave a diagnosable trail.
+            _ended = datetime.now()
+            _n = getattr(step, "step_number", None)
+            _began = _step_started.pop(_n, None)
+            runs.record_step(_run_id, {
+                "step_number": _n,
+                "attempt": _attempts.get(_n, 1),
+                "instrument": step.instrument,
+                "action": step.action,
+                "parameters": step.parameters,
+                "status": "success" if success else final_status,
+                "ended_at": _ended.isoformat(),
+                "duration_seconds": (_ended - _began).total_seconds() if _began else None,
+                "error": error,
+                "result": result_dict if isinstance(result_dict, dict) else None,
+                "plate_id": shared_wf_ctx.get("current_plate_id"),
+            })
 
             return CommandResult(success=success, data=result_dict, error=error, status=r_status)
 
@@ -450,6 +598,7 @@ def create_workflows_router(
                 "percent": round((p.current_step / p.total_steps * 100) if p.total_steps else 0),
             }
             _track_workflow_status(_msg)
+            runs.record_progress(_run_id, _msg)
             asyncio.create_task(ws_manager.broadcast(_msg))
 
         executor.add_progress_callback(on_progress)
@@ -752,8 +901,9 @@ def create_workflows_router(
         if not samples:
             raise HTTPException(400, "Missing 'samples' list")
 
-        if _executor_lock.locked():
-            raise HTTPException(409, "A workflow is already running")
+        _active = runs.active()
+        if _active is not None:
+            raise HTTPException(409, str(RunBusy(_active)))
 
         batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         workflow_name = workflow_def.get("WorkflowName", "Batch")
@@ -771,7 +921,14 @@ def create_workflows_router(
         run_ids = []
         errors = []
 
-        await _executor_lock.acquire()
+        # A batch holds the single run slot for its whole duration: it drives
+        # the same physical instruments, one sample after another.
+        batch_state = await runs.start(
+            f"{workflow_name} (batch of {len(samples)})",
+            lambda _rid: _noop_body(),
+            total_steps=len(samples),
+            run_id=batch_id,
+        )
         try:
             for idx, sample in enumerate(samples):
                 sample_id = sample.get("sample_id", f"sample_{idx + 1}")
@@ -928,7 +1085,7 @@ def create_workflows_router(
                 "errors": errors,
             }
         finally:
-            _executor_lock.release()
+            runs.release(batch_id)
 
     return router
 
@@ -948,6 +1105,15 @@ def _create_version_snapshot(LIBRARY_DIR: Path, workflow_id: str, data: dict, no
 
 
 # execute_step: shared step execution logic
+
+async def _noop_body() -> dict:
+    """Body for a slot a caller drives itself (the batch runner).
+
+    RunManager.start() wants something to supervise; a batch already owns its
+    own loop over samples, so it just needs the slot reserved and released.
+    """
+    return {"status": "running"}
+
 
 def _timeouts(base_dir: Optional[Path]):
     """Operator-facing timeouts, read at call time so a Settings edit applies
