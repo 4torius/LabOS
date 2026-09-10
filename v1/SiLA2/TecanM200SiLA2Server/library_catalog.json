@@ -5,7 +5,33 @@
       "display_name": "Analysis Protocol",
       "folder": "Library/Analysis",
       "file_extension": ".mdfx",
-      "parameter_names": ["ProtocolFile", "AnalysisFile"]
+      "parameter_names": [
+        "ProtocolFile",
+        "AnalysisFile"
+      ]
+    },
+    {
+      "hint": "tecan_connect_mode",
+      "display_name": "How to connect",
+      "values": [
+        "",
+        "usb",
+        "dialog",
+        "last",
+        "sim",
+        "any"
+      ],
+      "value_labels": {
+        "": "default (from config.yaml)",
+        "usb": "usb - stored connection, then a fresh scan",
+        "dialog": "dialog - pick the instrument (needs someone at the PC)",
+        "last": "last - the stored connection only",
+        "sim": "sim - the Tecan simulator",
+        "any": "any - USB or simulator"
+      },
+      "parameter_names": [
+        "ConnectionString"
+      ]
     }
   ]
 }

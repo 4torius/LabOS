@@ -78,21 +78,18 @@
           any      USB or simulator - may silently connect to a simulator
 
         Leave empty for the configured default (instrument.connection_string).</Description>
+      <!--
+        Deliberately NOT a Constrained/Set. An empty string is the documented
+        way to say "use the configured default" (instrument.connection_string),
+        and a Set rejects it before the server ever sees it - which broke both
+        the shipped Simple_PlateRead workflow and every existing client.
+
+        The web interface still offers these as a dropdown: the server declares
+        them in library_catalog.json, which is the mechanism for "here are the
+        values this parameter accepts" without narrowing the protocol.
+      -->
       <DataType>
-        <Constrained>
-          <DataType>
-            <Basic>String</Basic>
-          </DataType>
-          <Constraints>
-            <Set>
-              <Value>usb</Value>
-              <Value>dialog</Value>
-              <Value>last</Value>
-              <Value>sim</Value>
-              <Value>any</Value>
-            </Set>
-          </Constraints>
-        </Constrained>
+        <Basic>String</Basic>
       </DataType>
     </Parameter>
     <DefinedExecutionErrors>

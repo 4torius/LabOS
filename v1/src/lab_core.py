@@ -424,6 +424,12 @@ class LabCore:
         """
         if ui_hint in DECK_HINTS:
             return deck_options(self._hal_dir(), ui_hint)
+
+        declared = self._ui_dropdowns.get(ui_hint) or {}
+        labels = declared.get("option_labels") or {}
+        if declared.get("options") is not None and labels:
+            return [{"value": v, "label": labels.get(v, v) or v}
+                    for v in declared["options"]]
         return []
 
     def get_dropdown_config(self) -> Dict[str, Any]:
@@ -687,6 +693,19 @@ class LabCore:
         # Only adds new entries; static lab_config.yaml entries take precedence.
         for lib_type in server.library_catalog:
             hint = lib_type["hint"]
+            # A server may declare the values a parameter accepts outright,
+            # rather than pointing at a Library/ folder. That is how an
+            # instrument offers a dropdown for something that is neither a file
+            # nor deck state - without the orchestrator having to know what the
+            # values mean, and without narrowing the SiLA2 type itself (a
+            # Constrained/Set would reject values the server still accepts,
+            # such as the empty string meaning "use your configured default").
+            if lib_type.get("values") is not None:
+                self._ui_dropdowns.setdefault(hint, {
+                    "options": list(lib_type["values"]),
+                    "option_labels": dict(lib_type.get("value_labels") or {}),
+                })
+                continue
             if hint not in self._ui_dropdowns and not lib_type.get("dynamic"):
                 self._ui_dropdowns[hint] = {
                     "folder": lib_type["folder"],
