@@ -23,9 +23,31 @@
         <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#animl">AnIML</a></li>
         <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#excel">Excel</a></li>
         <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#xml">XML</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#images"
+               onclick="loadDeckImages()">Deck photos</a></li>
     </ul>
 
     <div class="tab-content">
+        <!-- Deck photos: images captured with the robot's on-board camera.
+             The capture pipeline existed for a long time but had no front
+             door: frames landed in the Opentrons server's own ./images
+             directory that no route served. -->
+        <div class="tab-pane" id="images">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div class="text-muted small">
+                    Photographs taken by the Flex's camera, via the
+                    <code>CaptureImage</code> command or a <code>TakeSnapshot</code>
+                    recipe step.
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadDeckImages()">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                </button>
+            </div>
+            <div class="row g-3" id="deckImagesGrid">
+                <div class="col-12 text-muted text-center py-4">Loading…</div>
+            </div>
+        </div>
+
         <!-- AnIML tab -->
         <div class="tab-pane active" id="animl">
             <div class="table-responsive">
@@ -160,7 +182,66 @@
 
 <script>
 // ── Raw file viewer ──────────────────────────────────────────────────────────
-async function viewFile(format, filename) {
+async function loadDeckImages() {
+    var grid = document.getElementById('deckImagesGrid');
+    if (!grid) return;
+    grid.innerHTML = '<div class="col-12 text-muted text-center py-4">Loading…</div>';
+
+    fetch('/api/images')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var images = data.images || [];
+            if (!images.length) {
+                grid.innerHTML = '<div class="col-12 text-muted text-center py-5">' +
+                    '<i class="bi bi-camera display-4 d-block mb-2"></i>' +
+                    'No deck photos yet. Run <code>CaptureImage</code> on the Opentrons, ' +
+                    'or add a <code>TakeSnapshot</code> step to a recipe.</div>';
+                return;
+            }
+            grid.innerHTML = images.map(function(img) {
+                return '<div class="col-6 col-md-4 col-lg-3">' +
+                    '<div class="card h-100">' +
+                    '<img src="' + img.url + '" class="card-img-top" alt="' + img.name + '" ' +
+                    'style="cursor:zoom-in;object-fit:cover;aspect-ratio:4/3" ' +
+                    'onclick="openDeckImage(\'' + img.url + '\', \'' + img.name + '\')">' +
+                    '<div class="card-body p-2">' +
+                    '<div class="small text-truncate" title="' + img.name + '">' + img.name + '</div>' +
+                    '<div class="text-muted" style="font-size:.7rem">' +
+                    (img.modified || '').slice(0, 19).replace('T', ' ') +
+                    ' · ' + Math.round((img.size || 0) / 1024) + ' KB</div>' +
+                    '</div>' +
+                    '<div class="card-footer p-1 bg-transparent border-0">' +
+                    '<a href="' + img.url + '" download class="btn btn-sm btn-outline-primary w-100">' +
+                    '<i class="bi bi-download"></i> Download</a>' +
+                    '</div></div></div>';
+            }).join('');
+        })
+        .catch(function(e) {
+            grid.innerHTML = '<div class="col-12 text-danger text-center py-4">' +
+                'Could not load images: ' + e.message + '</div>';
+        });
+}
+
+function openDeckImage(url, name) {
+    var modal = document.getElementById('deckImageModal');
+    if (!modal) {
+        document.body.insertAdjacentHTML('beforeend',
+            '<div class="modal fade" id="deckImageModal" tabindex="-1">' +
+            '<div class="modal-dialog modal-xl modal-dialog-centered">' +
+            '<div class="modal-content">' +
+            '<div class="modal-header"><h5 class="modal-title" id="deckImageTitle"></h5>' +
+            '<button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>' +
+            '<div class="modal-body text-center p-0">' +
+            '<img id="deckImageFull" class="img-fluid" alt=""></div>' +
+            '</div></div></div>');
+        modal = document.getElementById('deckImageModal');
+    }
+    document.getElementById('deckImageTitle').textContent = name;
+    document.getElementById('deckImageFull').src = url;
+    new bootstrap.Modal(modal).show();
+}
+
+function viewFile(format, filename) {
     try {
         const resp = await fetch(`/api/results/${format}/${filename}/view`);
         const data = await resp.json();

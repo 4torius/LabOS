@@ -146,7 +146,6 @@
     .tool-block.opentrons { border-left: 3px solid #0d6efd; }
     .tool-block.tecan { border-left: 3px solid #198754; }
     .tool-block.mobile { border-left: 3px solid #ffc107; }
-    .tool-block.incubator { border-left: 3px solid #dc3545; }
     .tool-block.delay { border-left: 3px solid #0dcaf0; }
     .tool-block.loop { border-left: 3px solid #6f42c1; }
     .tool-block.condition { border-left: 3px solid #fd7e14; }
@@ -219,7 +218,6 @@
     .workflow-step.opentrons { border-left: 4px solid #0d6efd; }
     .workflow-step.tecan { border-left: 4px solid #198754; }
     .workflow-step.mobile { border-left: 4px solid #ffc107; }
-    .workflow-step.incubator { border-left: 4px solid #dc3545; }
     .workflow-step.delay { border-left: 4px solid #0dcaf0; }
     .workflow-step.loop { border-left: 4px solid #6f42c1; background: rgba(111,66,193,0.1); }
     .workflow-step.condition { border-left: 4px solid #fd7e14; background: rgba(253,126,20,0.1); }
@@ -385,10 +383,6 @@
                 <div class="tool-block mobile" data-type="mobile" draggable="true">
                     <i class="bi bi-robot text-warning"></i>
                     <span>Mobile</span>
-                </div>
-                <div class="tool-block incubator" data-type="incubator" draggable="true">
-                    <i class="bi bi-thermometer-half text-danger"></i>
-                    <span>Incubator</span>
                 </div>
                 <div class="tool-block manual" data-type="manual" draggable="true">
                     <i class="bi bi-hand-index-thumb text-info"></i>
@@ -606,11 +600,15 @@ var UTILITY_BLOCKS = {
 };
 
 // ICON/COLOR mapping for known instrument types
+// Icon/colour per instrument type. An `incubator` entry used to live here and
+// in the toolbox, alongside a draggable Incubator block — for an instrument
+// this lab does not have and no server has ever announced. Dragging it in
+// produced a step that failed pre-flight with "Instrument not found". The
+// toolbox shows what discovery actually found, plus the utility blocks below.
 var INSTRUMENT_STYLES = {
     tecan: { icon: 'bi-eye-fill', color: 'success' },
     opentrons: { icon: 'bi-droplet-fill', color: 'primary' },
     mobile: { icon: 'bi-robot', color: 'warning' },
-    incubator: { icon: 'bi-thermometer-half', color: 'danger' },
     manual: { icon: 'bi-hand-index-thumb', color: 'info' },
     _default: { icon: 'bi-gear', color: 'secondary' }
 };
@@ -621,7 +619,6 @@ function getInstrumentKey(name) {
     if (lower.indexOf('tecan') !== -1) return 'tecan';
     if (lower.indexOf('opentrons') !== -1) return 'opentrons';
     if (lower.indexOf('mobile') !== -1) return 'mobile';
-    if (lower.indexOf('incubator') !== -1) return 'incubator';
     if (lower.indexOf('manual') !== -1) return 'manual';
     return '_default';
 }

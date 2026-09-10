@@ -1048,9 +1048,28 @@ async function showDetail(runId) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const d = await r.json();
         const result = d.result || {};
-        const stepResults = result.step_results || [];
         const measurements = d.measurements || [];
         const plates = d.plates || [];
+
+        // The step timeline comes from run_steps, written as each step starts
+        // and finishes. It used to be replayed out of result_json at the end of
+        // the run, so a run that crashed midway showed nothing at all, a retry
+        // overwrote the attempt that failed, and nothing was visible while the
+        // run was still going. Falls back to the old shape for runs recorded
+        // before the table existed.
+        let stepRows = (d.steps || []);
+        if (!stepRows.length) {
+            try {
+                const sr = await fetch(`/api/runs/${encodeURIComponent(runId)}/steps`);
+                if (sr.ok) stepRows = (await sr.json()).steps || [];
+            } catch (e) { /* the legacy shape below still renders */ }
+        }
+        const legacySteps = (result.step_results || []).map(s => ({
+            step_number: s.step, instrument: s.instrument, action: s.action || s.command,
+            status: s.status === 'completed' ? 'success' : s.status,
+            error: s.error, ended_at: s.timestamp, attempt: 1, legacy: true,
+        }));
+        const stepResults = stepRows.length ? stepRows : legacySteps;
 
         let html = `
         <div class="row g-3 mb-3">
@@ -1078,16 +1097,35 @@ async function showDetail(runId) {
         </div>`;
 
         if (stepResults.length > 0) {
-            html += `<h6 class="mt-3">Steps</h6>
+            const retried = stepResults.some(s => (s.attempt || 1) > 1);
+            html += `<h6 class="mt-3">Step timeline
+                ${retried ? '<span class="badge bg-warning text-dark ms-1">has retries</span>' : ''}</h6>
             <div class="table-responsive"><table class="table table-sm">
-            <thead><tr><th>#</th><th>Instrument</th><th>Action</th><th>Status</th><th>Time</th></tr></thead>
+            <thead><tr><th>#</th><th>Instrument</th><th>Action</th><th>Status</th>
+                <th class="text-end">Took</th><th>Finished</th></tr></thead>
             <tbody>` + stepResults.map(s => {
-                const iconCls = s.status==='completed'?'step-ok':s.status==='skipped'?'step-skip':'step-fail';
-                const icon = s.status==='completed'?'check-circle':s.status==='skipped'?'skip-forward':'x-circle';
+                const status = s.status || '—';
+                const ok = status === 'success' || status === 'completed';
+                const skipped = status === 'skipped';
+                const running = status === 'running';
+                const iconCls = ok ? 'step-ok' : skipped ? 'step-skip' : running ? 'text-primary' : 'step-fail';
+                const icon = ok ? 'check-circle' : skipped ? 'skip-forward'
+                           : running ? 'hourglass-split' : 'x-circle';
+                const attempt = (s.attempt || 1) > 1
+                    ? `<span class="badge bg-warning text-dark ms-1" title="retry">try ${s.attempt}</span>` : '';
+                const params = s.parameters && Object.keys(s.parameters).length
+                    ? `<br><small class="text-muted font-monospace" title="${
+                          JSON.stringify(s.parameters).replace(/"/g,'&quot;')}">${
+                          JSON.stringify(s.parameters).slice(0, 60)}</small>` : '';
                 return `<tr class="step-row">
-                    <td>${s.step||'—'}</td><td>${s.instrument||'—'}</td><td>${s.action||s.command||'—'}</td>
-                    <td class="${iconCls}"><i class="bi bi-${icon}"></i> ${s.status||'—'}${s.error?`<br><small class="text-danger">${s.error}</small>`:''}</td>
-                    <td class="text-nowrap text-muted small">${s.timestamp?fmtDate(s.timestamp):''}</td>
+                    <td>${s.step_number ?? '—'}${attempt}</td>
+                    <td>${s.instrument||'—'}</td>
+                    <td>${s.action||'—'}${params}</td>
+                    <td class="${iconCls}"><i class="bi bi-${icon}"></i> ${status}${
+                        s.error?`<br><small class="text-danger">${s.error}</small>`:''}</td>
+                    <td class="text-end text-muted small text-nowrap">${
+                        s.duration_seconds != null ? fmtDuration(s.duration_seconds) : ''}</td>
+                    <td class="text-nowrap text-muted small">${s.ended_at?fmtDate(s.ended_at):''}</td>
                 </tr>`;
             }).join('') + `</tbody></table></div>`;
         }

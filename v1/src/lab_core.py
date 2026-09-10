@@ -133,6 +133,33 @@ class Command:
 
 
 @dataclass
+class Property:
+    """A readable value a server publishes.
+
+    Properties were parsed out of the FDL and then dropped: an Instrument
+    carried only commands, so nothing downstream could see them and the UI had
+    no way to show a reading that is not an operation. That is a large part of
+    why instruments grew GetStatus-style commands in the first place.
+    """
+    id: str
+    name: str
+    description: str = ""
+    feature: str = ""
+    data_type: str = "String"
+    observable: bool = False
+
+    def to_dict(self) -> Dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "feature": self.feature,
+            "type": self.data_type,
+            "observable": self.observable,
+        }
+
+
+@dataclass
 class Instrument:
     """A discovered instrument with its capabilities."""
     id: str
@@ -142,6 +169,7 @@ class Instrument:
     host: str = "localhost"
     port: int = 0
     commands: List[Command] = field(default_factory=list)
+    properties: List[Property] = field(default_factory=list)
     
     # Internal reference to PnP server
     _server: Optional[PnPServer] = field(default=None, repr=False)
@@ -153,7 +181,8 @@ class Instrument:
             "type": self.type,
             "status": self.status,
             "address": f"{self.host}:{self.port}",
-            "commands": [c.to_dict() for c in self.commands]
+            "commands": [c.to_dict() for c in self.commands],
+            "properties": [p.to_dict() for p in self.properties],
         }
 
 
@@ -370,6 +399,16 @@ class LabCore:
         """
         dropdown_config = self._ui_dropdowns.get(ui_hint)
         
+        # Locations are the instruments discovery actually found. The dashboard
+        # used to offer a hardcoded list here that included an "incubator" this
+        # lab does not have and three invented storage racks — every one of them
+        # a dead end the operator could pick.
+        if ui_hint == "location":
+            return [
+                {"id": inst.id, "name": inst.name}
+                for inst in sorted(self._instruments.values(), key=lambda i: i.name)
+            ]
+
         if not dropdown_config or not dropdown_config.get("dynamic"):
             return []
         
@@ -625,6 +664,23 @@ class LabCore:
                 observable=cmd.observable,
                 parameters=params,
             ))
+        # Properties: readable state the server publishes. Feature identifiers
+        # arrive fully qualified (org.silastandard/.../WorkflowAPI/v1); the
+        # client addresses a property by the bare feature name.
+        properties = []
+        for feature in server.features:
+            fid = feature.identifier
+            feature_name = fid.split("/")[-2] if "/" in fid else fid
+            for prop in feature.properties:
+                properties.append(Property(
+                    id=prop.identifier,
+                    name=prop.display_name or prop.identifier,
+                    description=prop.description,
+                    feature=feature_name,
+                    data_type=prop.data_type,
+                    observable=prop.observable,
+                ))
+
         return Instrument(
             id=inst_id,
             name=server.name,
@@ -633,6 +689,7 @@ class LabCore:
             host=server.host,
             port=server.port,
             commands=commands,
+            properties=properties,
             _server=server,
         )
 

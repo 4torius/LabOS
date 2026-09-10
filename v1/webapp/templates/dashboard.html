@@ -86,8 +86,11 @@ var liquidClasses = [];
 var workflows = [];
 var analyses = [];  // Tecan .mdfx files
 
-// Predefined options
-var LOCATIONS = ['opentrons', 'tecan', 'incubator', 'storage', 'manual_station', 'rack_1', 'rack_2', 'rack_3'];
+// Locations come from discovery, not from a list typed here. The previous
+// hardcoded array offered an 'incubator' this lab does not have and three
+// invented storage racks; picking any of them produced a step that could only
+// fail. Populated by loadLocations() below, empty until discovery answers.
+var LOCATIONS = [];
 var LABWARE_TYPES = ['tiprack_1000ul', 'tiprack_200ul', 'tiprack_50ul', 'reservoir_12', 'wellplate_96', 'wellplate_384'];
 
 // Real Tecan-compatible plate catalog (Library/Analysis/PlateTypes.json via
@@ -255,6 +258,10 @@ function refreshDevices() {
             
             var instruments = data.instruments || {};
             discoveredInstruments = instruments;
+            loadLocations();
+            // refreshProperties() needs each instrument's property list to know
+            // what to read and where to put it.
+            window._instrumentCache = instruments;
             
             container.innerHTML = '';
             
@@ -293,6 +300,8 @@ function refreshDevices() {
             }
             
             log('✅ Discovery complete (' + instrumentIds.length + ' instruments)', 'success');
+            // Fill the readings panels once the cards exist.
+            refreshAllProperties();
         })
         .catch(function(e) {
             log('❌ Error: ' + e.message, 'error');
@@ -364,6 +373,8 @@ function generateInstrumentCard(instrumentId, instrumentData) {
             '... ' + (commands.length - maxShow) + ' more commands</a>';
     }
     
+    var propertiesHtml = buildPropertiesHtml(instrumentId, instrumentData.properties || []);
+
     return '<div class="col-md-6 col-lg-4">' +
         '<div class="card device-card h-100" data-device-id="' + instrumentId + '" style="' + cardOpacity + '">' +
         '<div class="card-header ' + style.bg + ' text-white">' +
@@ -372,9 +383,117 @@ function generateInstrumentCard(instrumentId, instrumentData) {
         '</div>' +
         '<div class="card-body">' +
         '<p class="text-muted small">' + (instrumentData.address || 'Discovered') + '</p>' +
+        (isOnline ? propertiesHtml : '') +
         (isOnline && runControlsHtml ? '<div class="mb-2">' + runControlsHtml + '</div>' : '') +
         (isOnline ? '<div class="list-group list-group-flush">' + commandsHtml + '</div>' : '<p class="text-muted"><i class="bi bi-wifi-off"></i> Server not responding</p>') +
         '</div></div></div>';
+}
+
+// ============================================================================
+// LIVE READINGS (SiLA2 Properties)
+// ============================================================================
+// A property is state the instrument publishes, not an operation. They used to
+// be invisible here: the Instrument model carried only commands, so a server
+// that wanted to show its status had to expose a GetStatus *command* — an
+// operation you "run" to find out what is already true. Reads live here now,
+// and the command list below is only things that act.
+
+function loadLocations() {
+    fetch('/api/dynamic-options/location')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            LOCATIONS = (data.options || []).map(function(o) {
+                return typeof o === 'string' ? o : o.id;
+            });
+        })
+        .catch(function() { LOCATIONS = []; });
+}
+
+function _propCellId(instrumentId, prop) {
+    return ('propval-' + instrumentId + '-' + prop.feature + '-' + prop.id)
+        .replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
+function buildPropertiesHtml(instrumentId, properties) {
+    if (!properties || !properties.length) return '';
+    var rows = properties.map(function(prop) {
+        return '<div class="d-flex justify-content-between align-items-start gap-2 py-1 border-bottom">' +
+            '<span class="text-muted small text-nowrap" title="' +
+                escapeAttr(prop.description || '') + '">' + (prop.name || prop.id) + '</span>' +
+            '<span class="small text-end font-monospace text-truncate" style="max-width:60%" ' +
+                'id="' + _propCellId(instrumentId, prop) + '">…</span>' +
+            '</div>';
+    }).join('');
+
+    return '<div class="mb-2 border rounded p-2 bg-body-tertiary">' +
+        '<div class="d-flex justify-content-between align-items-center mb-1">' +
+        '<span class="small fw-semibold text-uppercase text-muted" style="font-size:.68rem;letter-spacing:.04em">' +
+        'Live readings</span>' +
+        '<button class="btn btn-sm btn-link p-0 text-decoration-none" title="Refresh readings" ' +
+        'onclick="refreshProperties(\'' + instrumentId + '\'); return false;">' +
+        '<i class="bi bi-arrow-clockwise"></i></button>' +
+        '</div>' + rows + '</div>';
+}
+
+function escapeAttr(value) {
+    return String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+function formatPropertyValue(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    // Most properties carry JSON in a string. Show the interesting part rather
+    // than a wall of braces the card has no room for.
+    if (typeof value === 'string') {
+        var trimmed = value.trim();
+        if (trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') {
+            try { value = JSON.parse(trimmed); } catch (e) { return trimmed; }
+        } else {
+            return trimmed;
+        }
+    }
+    if (Array.isArray(value)) return value.length ? value.length + ' item(s)' : 'none';
+    if (typeof value === 'object') {
+        var preferred = ['state', 'name', 'status', 'value'];
+        for (var i = 0; i < preferred.length; i++) {
+            if (value[preferred[i]] !== undefined) return String(value[preferred[i]]);
+        }
+        var keys = Object.keys(value);
+        return keys.length ? keys.length + ' field(s)' : '—';
+    }
+    return String(value);
+}
+
+function refreshProperties(instrumentId) {
+    var instrument = (window._instrumentCache || {})[instrumentId];
+    if (!instrument || !instrument.properties) return;
+    instrument.properties.forEach(function(prop) {
+        var cell = document.getElementById(_propCellId(instrumentId, prop));
+        if (!cell) return;
+        fetch('/api/devices/' + encodeURIComponent(instrumentId) + '/property/' +
+              encodeURIComponent(prop.feature) + '/' + encodeURIComponent(prop.id))
+            .then(function(r) { return r.json(); })
+            .then(function(result) {
+                if (result.status === 'completed') {
+                    cell.textContent = formatPropertyValue(result.result);
+                    cell.title = typeof result.result === 'string'
+                        ? result.result : JSON.stringify(result.result, null, 2);
+                    cell.classList.remove('text-danger');
+                } else {
+                    cell.textContent = 'error';
+                    cell.title = result.error || 'unknown error';
+                    cell.classList.add('text-danger');
+                }
+            })
+            .catch(function(e) {
+                cell.textContent = 'error';
+                cell.title = e.message;
+                cell.classList.add('text-danger');
+            });
+    });
+}
+
+function refreshAllProperties() {
+    Object.keys(window._instrumentCache || {}).forEach(refreshProperties);
 }
 
 // ============================================================================
@@ -654,6 +773,10 @@ function showParameterModal(instrumentId, commandId) {
                 fieldsHtml += '<option value="' + LOCATIONS[li] + '">' + LOCATIONS[li] + '</option>';
             }
             fieldsHtml += '</select>';
+            if (!LOCATIONS.length) {
+                fieldsHtml += '<div class="form-text text-warning">No instrument discovered yet — ' +
+                              'refresh the dashboard to populate this list.</div>';
+            }
         }
         else if (uiHint === 'tip_rack' || TIP_RACK_PARAMS.indexOf(paramLower) !== -1) {
             // Tip rack dropdown - shows tip racks from current HAL config
