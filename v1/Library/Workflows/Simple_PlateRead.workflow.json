@@ -10,9 +10,9 @@
       "Instrument": "tecan",
       "Action": "Connect",
       "Parameters": {
-        "ConnectionString": ""
+        "ConnectionString": "usb"
       },
-      "Description": "Connect to the reader (empty string = default USB connection)",
+      "Description": "Connect to the reader. 'usb' tries the stored connection and, if the reader has been moved to another USB port, falls back to a fresh scan. An empty string would mean 'use instrument.connection_string' from the server's config.yaml; naming it explicitly is clearer in a saved workflow.",
       "DependsOn": []
     },
     {
