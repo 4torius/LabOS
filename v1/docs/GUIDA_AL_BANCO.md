@@ -17,8 +17,7 @@ GoFaGo.
 4. [Eseguire](#fase-4--eseguire)
 5. [Durante e dopo](#fase-5--durante-e-dopo)
 6. [Il robot mobile](#fase-6--il-robot-mobile)
-7. [I punti dove ci si inceppa](#i-punti-dove-ci-si-inceppa)
-8. [Riferimento rapido](#riferimento-rapido)
+7. [Riferimento rapido](#riferimento-rapido)
 
 ---
 
@@ -138,11 +137,13 @@ un heater-shaker che non c'è, il comando si rifiuta di partire e te lo dice.
    piastra, tutto.
 2. Salvalo come `.mdfx` dentro `Library/Analysis/`.
 3. **Chiudi iControl** prima di tornare a usare il Tecan da LabOS, vedi Fase 2.
-4. Nel comando `RunMeasurement` il parametro `ProtocolFile` vuole il nome **senza
-   estensione**: `abs_REAGENTI`, non `abs_REAGENTI.mdfx`.
+4. Nel comando `RunMeasurement` il protocollo si sceglie da una **tendina**:
+   l'elenco viene letto da `Library/Analysis/` e non si scrive niente a mano. Se
+   il file nuovo non compare, ricarica la pagina.
 
 > **Se lo salti:** i parametri della misura vivono solo nel file `.mdfx`. LabOS
-> non ha modo di impostare una lunghezza d'onda, passa solo il nome del protocollo.
+> non ha modo di impostare una lunghezza d'onda, sceglie solo quale protocollo
+> far girare.
 
 ---
 
@@ -169,35 +170,52 @@ connessione, una foto, un `Home`, una misura al volo.
    quello strumento espone davvero, non una lista fissa.
 4. **Compila i parametri.** Dove c'è una tendina, usala: i valori arrivano dalla
    libreria e dalla configurazione attiva, quindi sono valori che esistono.
-5. **Collega le dipendenze.** Nel pannello dello step ci sono le caselle
-   `DependsOn`: spunta gli step che devono essere finiti prima di questo. È qui
-   che si costruisce l'ordine, non trascinando.
-6. Ripeti per ogni step. Un ordine tipico: Opentrons `ExecuteRecipe` → trasporto
+5. Ripeti per ogni step. Un ordine tipico: Opentrons `ExecuteRecipe` → trasporto
    della piastra (step manuale oppure robot mobile) → Tecan `RunMeasurement`.
+6. **Le dipendenze sono facoltative**, vedi sotto. Se ti servono, nel pannello
+   dello step ci sono le caselle `DependsOn`.
 7. **Salva.** Il workflow finisce in `Library/Workflows/` come `.workflow.json`.
 8. **Execute.** Compare una barra di stato in fondo a **ogni** pagina, con Pause,
    Resume e Abort. Puoi navigare altrove mentre gira.
 
-### Quello che il builder non espone
+### Le dipendenze: quando servono e quando no
 
-Tre campi esistono nel formato ma si mettono a mano, aprendo il file in
-`Library/Workflows/`:
+**Un workflow senza nessuna dipendenza funziona.** Gli step girano uno dopo
+l'altro, nell'ordine in cui li hai messi. Per una sequenza lineare — prepara,
+trasporta, misura — non devi spuntare niente.
 
-| Campo | Cosa fa |
-|-------|---------|
-| `OnFailure` | `stop` ferma tutto (default), `continue` tira dritto, `skip` salta i dipendenti |
-| `RetryCount` | Quanti tentativi prima di dichiarare fallito lo step |
-| `TimeoutSeconds` | Limite di tempo per quello step. Vuoto usa il default globale, 600 s |
+Le dipendenze servono a una cosa sola, ma importante: **far saltare gli step che
+non hanno più senso** quando un prerequisito fallisce. Se la misura dipende dalla
+preparazione e la preparazione fallisce, la misura viene saltata invece di
+partire su una piastra vuota. Senza dipendenze, il workflow si ferma comunque al
+primo errore, ma il sistema non sa *quali* step erano collegati a quale.
 
-### Come vengono ordinati gli step
+**Esecuzione in parallelo.** È **spenta** (`workflow.parallel_execution: false`
+in `lab_config.yaml`), ed è una scelta globale, non per singolo workflow. Con il
+parallelo spento ogni step aspetta che finisca il precedente, punto: è il
+comportamento che vuoi, e non devi fare niente per averlo.
 
-L'esecuzione segue `DependsOn`, non il numero dello step. Di default gli step
-girano **uno alla volta**: l'esecuzione in parallelo è spenta in `lab_config.yaml`
-(`workflow.parallel_execution: false`) ed è una scelta globale, non per singolo
-workflow.
+Se un giorno lo accendi, gli step **senza dipendenze tra loro partono insieme**.
+È allora che `DependsOn` diventa obbligatorio, perché è l'unica cosa che
+impedisce alla misura di partire mentre il robot sta ancora pipettando.
 
 Non esistono cicli né condizioni. LabOS fa sequenze con dipendenze, non controllo
 di flusso.
+
+### Quanto tempo aspetta uno step
+
+Non c'è niente da impostare, e il comportamento non è lo stesso per tutti i
+comandi.
+
+- **I comandi lunghi non hanno limite.** `ExecuteRecipe`, `RunMeasurement`,
+  `MoveLabware`, `Home` finiscono quando lo strumento ha finito, che sia un
+  minuto o tre ore. È voluto: un run da due ore non deve essere ucciso a metà
+  perché un contatore è scaduto.
+- **I comandi brevi hanno un limite di 600 secondi**
+  (`workflow.default_timeout`). Un comando che per progetto risponde subito e
+  invece non risponde è un guasto, e dieci minuti bastano a riconoscerlo.
+- Se uno step resta fermo senza motivo, guarda prima la pagina **Operator**:
+  quasi sempre sta aspettando una conferma, non lo strumento.
 
 ---
 
@@ -268,11 +286,10 @@ su quello del laboratorio.
 3. Lancia `RefreshTasks`: riporta dal robot la lista dei task disponibili e la
    salva in `Library/MobileTasks/`. Senza questo, la tendina dei task nel workflow
    builder è vuota.
-4. Nel workflow aggiungi uno step `ExecuteTask` con il `TaskId` scelto dalla
-   tendina e `ExecutionMode`:
-   - `DryRun` — simula, non muove. Provaci sempre la prima volta.
-   - `StepByStep` — un sotto-task alla volta.
-   - `Normal` — esecuzione piena.
+4. Nel workflow aggiungi uno step `ExecuteTask` e scegli il `TaskId` dalla
+   tendina. Il parametro `ExecutionMode` esiste ancora nell'interfaccia ma il
+   server attuale **lo ignora**: lascialo su `Normal` e non aspettarti che
+   `DryRun` simuli qualcosa.
 
 ### Prima di farlo muovere davvero
 
@@ -282,34 +299,11 @@ su quello del laboratorio.
 - **Batteria sopra il 20%**, altrimenti si rifiuta di operare.
 - Il robot si ferma da solo se trova un ostacolo entro **30 cm**. Velocità
   massime: 0,5 m/s la base, 0,3 m/s il braccio.
-- Postazioni già calibrate: `Home`, `Opentrons`, `Tecan`, `Storage_A1`,
-  `Storage_A2`, `Incubator`.
+- Le postazioni calibrate sono quelle configurate sul robot. Non fidarti di un
+  elenco scritto qui: guarda i task che `RefreshTasks` riporta davvero.
 
 **Se un task fallisce:** la causa più frequente è il marker. Poi la
 localizzazione. Poi il container fermo sul PC remoto.
-
----
-
-## I punti dove ci si inceppa
-
-Sette cose che non sono ovvie e che fermano il lavoro.
-
-1. **La configurazione hardware.** Il pezzo più importante. La ricetta parla di
-   etichette, la configurazione le trasforma in slot. Va scelta, attivata e fatta
-   combaciare col deck vero.
-2. **Verificare prima di eseguire.** `ValidateRecipe` controlla la ricetta contro
-   la configurazione attiva senza eseguire niente. `CaptureImage` fotografa il
-   deck senza muovere niente. Entrambi costano secondi.
-3. **Chiudere iControl.** Tiene la USB in esclusiva. È la causa numero uno dei
-   fallimenti di `Connect`.
-4. **Il conteggio delle punte.** Il server ricorda quante punte ha usato. Se
-   cambi un rack senza dirglielo, continua a contarle consumate.
-5. **Qualcuno deve guardare la pagina Operator.** Uno step manuale o una richiesta
-   di refill bloccano il workflow fino alla conferma. Se nessuno conferma, scade.
-6. **Il robot mobile dopo la localizzazione.** Attivare l'hardware, lanciare
-   `RefreshTasks`, e solo allora `ExecuteTask`. Più i marker ArUco e la batteria.
-7. **Spegnere.** Opzione `6` del launcher. Chiudere la finestra lascia i server
-   accesi e il prossimo avvio trova le porte occupate.
 
 ---
 

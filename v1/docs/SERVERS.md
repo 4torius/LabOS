@@ -499,7 +499,7 @@ Like the local servers, it's built with the `sila2` library (self-describes via 
 | Command | Parameters | Description |
 |---------|-----------|--------------|
 | `RefreshTasks` | — | Re-query the robot controller for available tasks; updates `AvailableTasks` |
-| `ExecuteTask` (Observable) | `TaskId`, `ExecutionMode` (`Normal`/`StepByStep`/`DryRun`) | Runs a task via the ROS action server; streams `CurrentSubtask`/`Progress`/`Status` as intermediate responses |
+| `ExecuteTask` (Observable) | `TaskId`, `ExecutionMode` (`Normal`/`StepByStep`/`DryRun`) | Runs a task via the ROS action server; streams `CurrentSubtask`/`Progress`/`Status` as intermediate responses. **`ExecutionMode` is declared in the FDL but the current server ignores it** — `DryRun` does not simulate. Leave it on `Normal` |
 | `CancelTask` | — | Cancel the currently executing task |
 | `GetTaskDetails` | `TaskId` | Full task info including all subtasks (JSON) |
 | `ConnectToRobot` | `RosMasterUri` (empty = config default) | Explicitly (re)establish the ROS connection. **Physically consequential**: initializes the ROS node against the action server |
@@ -518,7 +518,13 @@ From the current `config.yaml`, the robot controller manages: an ABB GoFa arm, a
 
 ### Registered Stations & Gripper Profiles (from the remote `config.yaml`)
 
-Pre-configured pickup/place locations (name, type, approach offset where defined): `Home` (Exchange), `Opentrons` (Instrument), `Tecan` (Instrument), `Storage_A1`/`Storage_A2` (Storage), `Incubator` (Incubator) — each with real deck coordinates and heights calibrated on the physical setup.
+**Do not trust the station list that used to be written here.** An earlier
+documentation pass copied `Home`, `Opentrons`, `Tecan`, `Storage_A1`,
+`Storage_A2` and `Incubator` out of the remote `config.yaml`; the lab does not
+recognise the last three, and the host was unreachable when this was checked, so
+the list could not be confirmed either way. The authority on what stations exist
+is the robot: call `RefreshTasks` and read `AvailableTasks`, or read
+`config.yaml` on the remote host directly.
 
 Gripper labware profiles (width / grip force / grip offset) are pre-defined for `96_well_plate`, `384_well_plate`, `reservoir`, and `tube_rack` — the server selects grip parameters based on what's being handled.
 

@@ -378,7 +378,6 @@
   <a href="#f4"><b>4</b> Eseguire</a>
   <a href="#f5"><b>5</b> Durante e dopo</a>
   <a href="#f6"><b>6</b> Robot mobile</a>
-  <a href="#gaps">Cosa mancava</a>
   <a href="#ref">Riferimento</a>
 </nav>
 
@@ -519,10 +518,10 @@
     <li>Apri <b>iControl</b> e costruisci il metodo di misura: lunghezze d'onda, tipo di piastra, tutto.</li>
     <li>Salvalo come <code>.mdfx</code> dentro <code>Library/Analysis/</code>.</li>
     <li><b>Chiudi iControl</b> prima di tornare a usare il Tecan da LabOS, vedi Fase 2.</li>
-    <li>Nel comando <code>RunMeasurement</code> il parametro <code>ProtocolFile</code> vuole il nome <b>senza estensione</b>: <code>abs_REAGENTI</code>, non <code>abs_REAGENTI.mdfx</code>.</li>
+    <li>Nel comando <code>RunMeasurement</code> il protocollo si sceglie da una <b>tendina</b>: l'elenco viene letto da <code>Library/Analysis/</code> e non si scrive niente a mano. Se il file nuovo non compare, ricarica la pagina.</li>
   </ol>
 
-  <p class="skip"><b>Se lo salti:</b> i parametri della misura vivono solo nel file <code>.mdfx</code>. LabOS non ha modo di impostare una lunghezza d'onda, passa solo il nome del protocollo.</p>
+  <p class="skip"><b>Se lo salti:</b> i parametri della misura vivono solo nel file <code>.mdfx</code>. LabOS non ha modo di impostare una lunghezza d'onda, sceglie solo quale protocollo far girare.</p>
 </section>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
@@ -549,30 +548,30 @@
     <li><b>Aggiungi uno step</b> scegliendo lo strumento. Lo step compare nella lista a sinistra.</li>
     <li><b>Scegli l'azione</b> nel pannello dei parametri: è la lista dei comandi che quello strumento espone davvero, non una lista fissa.</li>
     <li><b>Compila i parametri.</b> Dove c'è una tendina, usala: i valori arrivano dalla libreria e dalla configurazione attiva, quindi sono valori che esistono.</li>
-    <li><b>Collega le dipendenze.</b> Nel pannello dello step ci sono le caselle <code>DependsOn</code>: spunta gli step che devono essere finiti prima di questo. È qui che si costruisce l'ordine, non trascinando.</li>
     <li>Ripeti per ogni step. Un ordine tipico: Opentrons <code>ExecuteRecipe</code> → trasporto della piastra (step manuale oppure robot mobile) → Tecan <code>RunMeasurement</code>.</li>
+    <li><b>Le dipendenze sono facoltative</b>, vedi sotto. Se ti servono, nel pannello dello step ci sono le caselle <code>DependsOn</code>.</li>
     <li><b>Salva.</b> Il workflow finisce in <code>Library/Workflows/</code> come <code>.workflow.json</code>.</li>
     <li><b>Execute.</b> Compare una barra di stato in fondo a <b>ogni</b> pagina, con Pause, Resume e Abort. Puoi navigare altrove mentre gira.</li>
   </ol>
 
-  <h3>Quello che il builder non espone</h3>
-  <p>Tre campi esistono nel formato ma si mettono a mano, aprendo il file in <code>Library/Workflows/</code>:</p>
-  <div class="tablebox">
-  <table>
-    <thead><tr><th>Campo</th><th>Cosa fa</th></tr></thead>
-    <tbody>
-      <tr><td><code>OnFailure</code></td><td><code>stop</code> ferma tutto (default), <code>continue</code> tira dritto, <code>skip</code> salta i dipendenti</td></tr>
-      <tr><td><code>RetryCount</code></td><td>Quanti tentativi prima di dichiarare fallito lo step</td></tr>
-      <tr><td><code>TimeoutSeconds</code></td><td>Limite di tempo per quello step. Vuoto usa il default globale, 600 s</td></tr>
-    </tbody>
-  </table>
-  </div>
+  <h3>Le dipendenze: quando servono e quando no</h3>
+  <p><b>Un workflow senza nessuna dipendenza funziona.</b> Gli step girano uno dopo l'altro, nell'ordine in cui li hai messi. Per una sequenza lineare — prepara, trasporta, misura — non devi spuntare niente.</p>
+  <p>Le dipendenze servono a una cosa sola, ma importante: <b>far saltare gli step che non hanno più senso</b> quando un prerequisito fallisce. Se la misura dipende dalla preparazione e la preparazione fallisce, la misura viene saltata invece di partire su una piastra vuota. Senza dipendenze, il workflow si ferma comunque al primo errore, ma il sistema non sa <i>quali</i> step erano collegati a quale.</p>
 
   <div class="note">
-    <span class="tag">Come vengono ordinati gli step</span>
-    <p>L'esecuzione segue <code>DependsOn</code>, non il numero dello step. Di default gli step girano <b>uno alla volta</b>: l'esecuzione in parallelo è spenta in <code>lab_config.yaml</code> (<code>workflow.parallel_execution: false</code>) ed è una scelta globale, non per singolo workflow.</p>
+    <span class="tag">Esecuzione in parallelo</span>
+    <p>È <b>spenta</b> (<code>workflow.parallel_execution: false</code> in <code>lab_config.yaml</code>), ed è una scelta globale, non per singolo workflow. Con il parallelo spento ogni step aspetta che finisca il precedente, punto: è il comportamento che vuoi, e non devi fare niente per averlo.</p>
+    <p>Se un giorno lo accendi, gli step <b>senza dipendenze tra loro partono insieme</b>. È allora che <code>DependsOn</code> diventa obbligatorio, perché è l'unica cosa che impedisce alla misura di partire mentre il robot sta ancora pipettando.</p>
     <p>Non esistono cicli né condizioni. LabOS fa sequenze con dipendenze, non controllo di flusso.</p>
   </div>
+
+  <h3>Quanto tempo aspetta uno step</h3>
+  <p>Non c'è niente da impostare, e il comportamento non è lo stesso per tutti i comandi.</p>
+  <ul class="plain">
+    <li><b>I comandi lunghi non hanno limite.</b> <code>ExecuteRecipe</code>, <code>RunMeasurement</code>, <code>MoveLabware</code>, <code>Home</code> finiscono quando lo strumento ha finito, che sia un minuto o tre ore. È voluto: un run da due ore non deve essere ucciso a metà perché un contatore è scaduto.</li>
+    <li><b>I comandi brevi hanno un limite di 600 secondi</b> (<code>workflow.default_timeout</code>). Un comando che per progetto risponde subito e invece non risponde è un guasto, e dieci minuti bastano a riconoscerlo.</li>
+    <li>Se uno step resta fermo senza motivo, guarda prima la pagina <b>Operator</b>: quasi sempre sta aspettando una conferma, non lo strumento.</li>
+  </ul>
 </section>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
@@ -639,13 +638,7 @@
     <li>Dashboard → card <b>Mobile Robot</b>. Se è grigia, il container non risponde: controlla che sia acceso e sulla stessa rete.</li>
     <li><b>Attiva l'hardware</b> con <code>ActivateAllHardware</code>, oppure pezzo per pezzo con <code>SetHardwareActivationByRole</code> (<code>MobileBase</code>, <code>Arm</code>, <code>Gripper</code>, <code>Camera</code>). La base va attivata prima del braccio, e <code>ActivateAllHardware</code> lo garantisce da solo.</li>
     <li>Lancia <code>RefreshTasks</code>: riporta dal robot la lista dei task disponibili e la salva in <code>Library/MobileTasks/</code>. Senza questo, la tendina dei task nel workflow builder è vuota.</li>
-    <li>Nel workflow aggiungi uno step <code>ExecuteTask</code> con il <code>TaskId</code> scelto dalla tendina e <code>ExecutionMode</code>:
-      <ul>
-        <li><code>DryRun</code> — simula, non muove. Provaci sempre la prima volta.</li>
-        <li><code>StepByStep</code> — un sotto-task alla volta.</li>
-        <li><code>Normal</code> — esecuzione piena.</li>
-      </ul>
-    </li>
+    <li>Nel workflow aggiungi uno step <code>ExecuteTask</code> e scegli il <code>TaskId</code> dalla tendina. Il parametro <code>ExecutionMode</code> esiste ancora nell'interfaccia ma il server attuale <b>lo ignora</b>: lascialo su <code>Normal</code> e non aspettarti che <code>DryRun</code> simuli qualcosa.</li>
   </ol>
 
   <h3>Prima di farlo muovere davvero</h3>
@@ -653,52 +646,10 @@
     <li><b>Marker ArUco puliti e non ostruiti.</b> Le traiettorie del braccio sono relative al marker della postazione, non alla mappa. Marker sporco o coperto significa presa sbagliata.</li>
     <li><b>Batteria sopra il 20%</b>, altrimenti si rifiuta di operare.</li>
     <li>Il robot si ferma da solo se trova un ostacolo entro <b>30 cm</b>. Velocità massime: 0,5 m/s la base, 0,3 m/s il braccio.</li>
-    <li>Postazioni già calibrate: <code>Home</code>, <code>Opentrons</code>, <code>Tecan</code>, <code>Storage_A1</code>, <code>Storage_A2</code>, <code>Incubator</code>.</li>
+    <li>Le postazioni calibrate sono quelle configurate sul robot. Non fidarti di un elenco scritto qui: guarda i task che <code>RefreshTasks</code> riporta davvero.</li>
   </ul>
 
   <p class="skip"><b>Se un task fallisce:</b> la causa più frequente è il marker. Poi la localizzazione. Poi il container fermo sul PC remoto.</p>
-</section>
-
-<!-- ═══════════════════════════════════════════════════════════ -->
-<section class="phase" id="gaps">
-  <div class="phase-head">
-    <div class="phase-num">EXTRA</div>
-    <div>
-      <h2>Cosa mancava alla tua lista</h2>
-      <p>La sequenza che hai descritto è giusta. Questi sono i punti in cui si inceppa.</p>
-    </div>
-  </div>
-
-  <div class="gaps">
-    <div class="gap"><div class="k">01</div><div>
-      <h4>La configurazione hardware</h4>
-      <p>Il pezzo più importante. La ricetta parla di etichette, la configurazione le trasforma in slot. Va scelta, attivata e fatta combaciare col deck vero. Senza, la ricetta non parte.</p>
-    </div></div>
-    <div class="gap"><div class="k">02</div><div>
-      <h4>Allestire il deck e verificarlo</h4>
-      <p><code>ValidateRecipe</code> controlla la ricetta contro la configurazione attiva senza eseguire niente. <code>CaptureImage</code> fotografa il deck senza muovere niente. Entrambi costano secondi.</p>
-    </div></div>
-    <div class="gap"><div class="k">03</div><div>
-      <h4>Chiudere iControl</h4>
-      <p>Tiene la USB in esclusiva. È la causa numero uno dei fallimenti di <code>Connect</code>.</p>
-    </div></div>
-    <div class="gap"><div class="k">04</div><div>
-      <h4>Il conteggio delle punte</h4>
-      <p>Il server ricorda quante punte ha usato. Se cambi un rack senza dirglielo, continua a contarle consumate e a un certo punto chiede un refill che non serve.</p>
-    </div></div>
-    <div class="gap"><div class="k">05</div><div>
-      <h4>Qualcuno deve guardare la pagina Operator</h4>
-      <p>Uno step manuale o una richiesta di refill bloccano il workflow fino alla conferma. Se nessuno conferma, scade.</p>
-    </div></div>
-    <div class="gap"><div class="k">06</div><div>
-      <h4>Il robot mobile dopo la localizzazione</h4>
-      <p>Attivare l'hardware, lanciare <code>RefreshTasks</code>, e solo allora <code>ExecuteTask</code>. Più i marker ArUco e la batteria.</p>
-    </div></div>
-    <div class="gap"><div class="k">07</div><div>
-      <h4>Spegnere</h4>
-      <p>Opzione <code>6</code> del launcher. Chiudere la finestra lascia i server accesi e il prossimo avvio trova le porte occupate.</p>
-    </div></div>
-  </div>
 </section>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
