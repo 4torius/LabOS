@@ -337,3 +337,26 @@ class TestRetryIsNotAOneShotGamble:
         """"1 skipped" with no hint of which step or why is a count, not a
         record."""
         assert '"notes": result.errors,' in SOURCE
+
+
+class TestTheModalOnEveryPageCanRenderIt:
+    """`base.html` pops a decision dialog on whatever page the operator happens
+    to be looking at. It reads step_number, error_message, attempt and
+    max_attempts - none of which anything has ever sent, so it has always
+    rendered "Step ? — / Unknown error / Attempt ? / ?": a dialog demanding a
+    decision while telling the reader nothing about it."""
+
+    BASE_PAGE = (V1_DIR / "webapp" / "templates" / "base.html").read_text(encoding="utf-8")
+
+    @pytest.mark.parametrize("field", [
+        "step_number", "error_message", "attempt", "max_attempts",
+    ])
+    def test_the_field_the_modal_reads_is_sent(self, field):
+        assert f"data.{field}" in self.BASE_PAGE, f"the modal stopped reading {field}"
+        assert f'"{field}"' in _function_body("_ask_operator"), f"nothing sends {field}"
+
+    def test_the_operator_page_spelling_is_still_sent_too(self):
+        """Two pages, two vocabularies; send both rather than break one."""
+        body = _function_body("_ask_operator")
+        assert '"step": req.step_number' in body
+        assert '"error": req.error.details or req.error.message' in body

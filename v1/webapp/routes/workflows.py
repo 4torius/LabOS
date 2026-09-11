@@ -1379,6 +1379,14 @@ async def _ask_operator(
         "requires_action": True,
         "timestamp": datetime.now().isoformat(),
         "step": req.step_number,
+        # The modal in base.html, which pops on whatever page the operator
+        # happens to be looking at, reads step_number/error_message/attempt/
+        # max_attempts. Nothing has ever sent those, so it has always rendered
+        # "Step ? - / Unknown error / Attempt ? / ?" - a dialog demanding a
+        # decision while telling the reader nothing. Both spellings go out.
+        "step_number": req.step_number,
+        "attempt": req.attempt,
+        "max_attempts": req.max_attempts,
         "instrument": req.instrument,
         "action": req.action,
         # CategorizedError.message is a category label ("Hardware error:
@@ -1386,6 +1394,7 @@ async def _ask_operator(
         # actually went wrong is .details, the raw error text. Asking for a
         # decision without saying what it is about is not a decision.
         "error": req.error.details or req.error.message,
+        "error_message": req.error.details or req.error.message,
         "category": req.error.category.value,
         "category_label": req.error.message,
     }
