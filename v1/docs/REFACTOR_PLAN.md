@@ -207,10 +207,15 @@ the dashboard polls `GetStatus`.
   `ListTipRacks`, `Initialize`, `GetRobotInfo`, `GetModulesStatus`. File
   listings belong to the webapp's `Library/` reads; `Initialize` duplicated
   what `start()` already does; the two `Get*` are now Properties.
-- **Added**: `RunSteps` (execute inline recipe steps without a saved file —
-  this is what makes atomic control possible without inventing one command
-  per Opentrons primitive), `MoveLabware`, `SetModuleTemperature`,
-  `ShakeModule`, `SetModuleLatch`, `ValidateRecipe`, `CaptureImage`.
+- **Added**: `MoveLabware`, `SetModuleTemperature`, `ShakeModule`,
+  `SetModuleLatch`, `ValidateRecipe`, `CaptureImage`.
+- **Added then removed**: `RunSteps`, which took a recipe's `Steps` array as a
+  JSON string parameter. The idea was atomic control without one command per
+  Opentrons primitive. In use it was worse than the recipe file it replaced:
+  the caller had to know the recipe format, the parameter was an opaque string
+  the workflow builder could not help with, and nothing validated it against
+  the deck. The named commands above cover the operations anyone actually
+  asked for.
 - **Properties** (observable): `Status`, `CurrentRunId`, `ActiveConfig`,
   `TipsAvailable`, `RobotInfo`, `ModulesStatus`.
 

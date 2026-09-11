@@ -684,15 +684,33 @@ class LabCore:
 
         # Build param→hint lookup from server's LabOSLibraryProvider catalog.
         # Takes priority over keyword inference in infer_ui_hint().
+        #
+        # Everything below reads the catalog with .get(). The catalog arrives
+        # over the wire from another process - frequently one deployed on a
+        # different machine and upgraded on a different schedule - so it is
+        # untrusted input, not a local literal. A single entry missing a key
+        # used to raise KeyError out of here, out of discover(), and out of the
+        # execute route that calls discover() before every command: one stale
+        # remote server made every command on every instrument in the lab fail
+        # with the message 'folder'. A malformed entry now costs exactly the
+        # dropdown it describes.
         param_hint_lookup: Dict[str, str] = {}
         for lib_type in server.library_catalog:
+            hint = lib_type.get("hint")
+            if not hint:
+                logger.warning(
+                    "%s declares a library type with no hint; ignoring it", server.name
+                )
+                continue
             for pname in lib_type.get("parameter_names", []):
-                param_hint_lookup[pname] = lib_type["hint"]
+                param_hint_lookup[pname] = hint
 
         # Merge catalog folder/extension into _ui_dropdowns for _get_options_for_hint().
         # Only adds new entries; static lab_config.yaml entries take precedence.
         for lib_type in server.library_catalog:
-            hint = lib_type["hint"]
+            hint = lib_type.get("hint")
+            if not hint:
+                continue
             # A server may declare the values a parameter accepts outright,
             # rather than pointing at a Library/ folder. That is how an
             # instrument offers a dropdown for something that is neither a file
@@ -706,11 +724,22 @@ class LabCore:
                     "option_labels": dict(lib_type.get("value_labels") or {}),
                 })
                 continue
-            if hint not in self._ui_dropdowns and not lib_type.get("dynamic"):
-                self._ui_dropdowns[hint] = {
-                    "folder": lib_type["folder"],
-                    "file_extension": lib_type["file_extension"],
-                }
+            if hint in self._ui_dropdowns or lib_type.get("dynamic"):
+                continue
+            folder = lib_type.get("folder")
+            if not folder:
+                # Neither a folder, nor a declared value set, nor dynamic:
+                # there is nothing to offer. The parameter still works, it is
+                # just a free-text field.
+                logger.warning(
+                    "%s declares library type '%s' with no folder, no values and "
+                    "not dynamic - no dropdown for it", server.name, hint
+                )
+                continue
+            self._ui_dropdowns[hint] = {
+                "folder": folder,
+                "file_extension": lib_type.get("file_extension", ""),
+            }
 
         commands = []
         for feature_id, cmd_id, cmd in server.get_all_commands():
@@ -819,13 +848,25 @@ class LabCore:
         await self._discovery.discover_all(timeout=timeout)
 
         port_to_key, port_to_host = self._build_port_to_key()
-        self._instruments = {
-            inst.id: inst
-            for inst in (
-                self._server_to_instrument(s, port_to_key, port_to_host)
-                for s in self._discovery.list_servers()
-            )
-        }
+        # Per-server, not one comprehension over all of them: a server whose
+        # metadata cannot be turned into an Instrument is one missing
+        # instrument, not an empty lab. Building the dict in a single
+        # comprehension meant the first raise discarded every instrument
+        # already built and propagated out of discover() - and the command
+        # route calls discover() before every command, so one bad server took
+        # the whole lab offline.
+        instruments: Dict[str, Instrument] = {}
+        for server in self._discovery.list_servers():
+            try:
+                inst = self._server_to_instrument(server, port_to_key, port_to_host)
+            except Exception as exc:
+                logger.error(
+                    "Skipping %s at %s:%s - its metadata could not be read: %s",
+                    server.name, server.host, server.port, exc, exc_info=True
+                )
+                continue
+            instruments[inst.id] = inst
+        self._instruments = instruments
 
         self._last_discovery_time = time.monotonic()
 

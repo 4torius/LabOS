@@ -26,12 +26,13 @@ The active config is tracked in a plain-text marker file, `Library/HardwareConfi
 
 A recipe is a JSON file (`Library/Recipes/*.json`) with a `Steps` array of Opentrons commands, plus optional `Metadata` (produced automatically by the Recipe Generator — required volumes, waste estimates, notes).
 
-### Running steps without a recipe file
+### Running one step without a recipe file
 
-Any step below can also be run on its own, without authoring a recipe, via the
-Opentrons `RunSteps` command — pass the same JSON as a one-element array. That
-is how a workflow moves a single plate or mixes a single well. See
-[SERVERS.md](SERVERS.md#runsteps-atomic-control-without-a-recipe-file).
+The operations common enough to want on their own have their own SiLA2
+command — `MoveLabware`, `ShakeModule`, `SetModuleLatch`,
+`SetModuleTemperature` — which validate against the loaded deck and offer real
+pickers in the workflow builder. See [SERVERS.md](SERVERS.md). Anything else is
+a recipe file, however short.
 
 ### Supported Step Commands
 

@@ -27,12 +27,17 @@ class TestFeatureShape:
     @pytest.mark.parametrize("removed", [
         "GetStatus", "GetCurrentConfig", "GetRobotInfo", "GetModulesStatus",
         "ListRecipes", "ListHardwareConfigs", "ListTipRacks", "Initialize",
+        "RunSteps",
     ])
     def test_pure_reads_and_no_ops_are_no_longer_commands(self, removed):
         assert removed not in COMMANDS, (
             f"{removed} is a command again. Reads belong in Properties, file "
             f"listings belong to the webapp's own Library/ reads, and "
-            f"Initialize duplicated what start() already does."
+            f"Initialize duplicated what start() already does. RunSteps "
+            f"took a recipe's Steps array as a string parameter: the caller "
+            f"had to know the recipe format, got no validation against the "
+            f"deck, and ended up with something harder to use than the recipe "
+            f"file it was meant to avoid. Named actions replaced it."
         )
 
     @pytest.mark.parametrize("name", [
@@ -43,7 +48,7 @@ class TestFeatureShape:
         assert name in PROPERTIES
 
     @pytest.mark.parametrize("name", [
-        "RunSteps", "MoveLabware", "SetModuleTemperature", "ShakeModule",
+        "MoveLabware", "SetModuleTemperature", "ShakeModule",
         "SetModuleLatch", "ValidateRecipe", "CaptureImage",
     ])
     def test_capabilities_that_existed_but_were_unreachable_are_exposed(self, name):
@@ -70,7 +75,7 @@ class TestFeatureShape:
             re.search(r"<Identifier>(\w+)</Identifier>", b).group(1)
             for b in blocks if "MOVES HARDWARE" in b
         }
-        for name in ("Home", "ExecuteRecipe", "RunSteps", "MoveLabware",
+        for name in ("Home", "ExecuteRecipe", "MoveLabware",
                      "ShakeModule", "SetModuleTemperature", "SetModuleLatch",
                      "EmergencyStop", "AbortRun", "ResumeRun"):
             assert name in described, f"{name} moves hardware but does not say so"
@@ -124,49 +129,6 @@ class TestGeneratedBindingsMatchTheImplementation:
             assert (f"get_{prop}" in base or f"update_{prop}" in base), (
                 f"property {prop} is in the FDL but not in the generated bindings"
             )
-
-
-class TestRunStepsValidation:
-    """RunSteps takes arbitrary JSON from a workflow file, so it validates
-    before handing anything to the robot."""
-
-    @pytest.mark.parametrize("payload,expected", [
-        ("not json at all", "not valid JSON"),
-        ("[]", "non-empty"),
-        # A lone {} is promoted to [{}] first, so it fails on the missing
-        # Command rather than on emptiness — still the accurate complaint.
-        ("{}", 'no "Command" field'),
-        ('[{"NoCommandField": 1}]', 'no "Command" field'),
-        ('[{"Command": "Mix"}, {"oops": true}]', 'no "Command" field'),
-    ])
-    def test_bad_payloads_are_rejected_with_a_usable_message(self, payload, expected):
-        parsed_error = _parse_steps_error(payload)
-        assert parsed_error is not None
-        assert expected in parsed_error
-
-    @pytest.mark.parametrize("payload", [
-        '[{"Command": "Mix", "PipetteMount": "left", "Location": "MyPlate:A1"}]',
-        '{"Command": "Delay", "Seconds": 5}',            # a lone object is fine
-        '[{"Command": "MoveLabware"}, {"Command": "Home"}]',
-    ])
-    def test_valid_payloads_pass(self, payload):
-        assert _parse_steps_error(payload) is None
-
-
-def _parse_steps_error(steps_json: str):
-    """Mirror of RunSteps' argument validation, exercised without a robot."""
-    try:
-        steps = json.loads(steps_json) if steps_json else []
-    except json.JSONDecodeError as exc:
-        return f"StepsJson is not valid JSON: {exc}"
-    if isinstance(steps, dict):
-        steps = [steps]
-    if not isinstance(steps, list) or not steps:
-        return "StepsJson must be a non-empty JSON array of recipe steps"
-    for index, step in enumerate(steps):
-        if not isinstance(step, dict) or not step.get("Command"):
-            return f'Step {index + 1} has no "Command" field'
-    return None
 
 
 class TestCameraConfiguration:

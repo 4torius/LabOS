@@ -13,10 +13,9 @@ Two shaping rules, mirrored from the FDL:
   commands, so a client asking "what config is loaded?" appeared in the UI as
   an operation to run. They are Status/RobotInfo/ModulesStatus/ActiveConfig now.
 
-* Rather than one SiLA2 command per Opentrons primitive, RunSteps takes recipe
-  steps inline. The server already knew how to execute every step the recipe
-  format defines — Transfer, Mix, MoveLabware, heater-shaker, Delay — but the
-  only way to reach any of them was to author a recipe file first.
+* A command is one deliberate action: move this labware, shake this module,
+  open this latch. Each validates its own arguments against the loaded deck
+  before the robot moves. A whole procedure is a recipe, run by ExecuteRecipe.
 
 Async bridge: the business logic is asyncio, SiLA2 feature methods are
 synchronous (called on a thread-pool). A dedicated event-loop thread bridges
@@ -50,13 +49,15 @@ from generated.workflowapi import (
     RefillTipRack_Responses,
     ResetTipTracking_Responses,
     ResumeRun_Responses,
-    RunSteps_Responses,
+    SetCameraEnabled_Responses,
     SetLights_Responses,
     SetModuleLatch_Responses,
     SetModuleTemperature_Responses,
     ShakeModule_Responses,
     ValidateRecipe_Responses,
 )
+
+from .server import parse_run_id
 
 if TYPE_CHECKING:
     from .server import OpentronsSiLA2Server as OTServer
@@ -94,7 +95,6 @@ class WorkflowAPIImpl(WorkflowAPIBase):
         # so the webapp can resync after losing its poll connection during a
         # multi-day protocol.
         self.ExecuteRecipe_default_lifetime_of_execution = timedelta(days=7)
-        self.RunSteps_default_lifetime_of_execution = timedelta(days=1)
 
     # ─── Lifecycle ───────────────────────────────────────────────────────────
 
@@ -262,6 +262,50 @@ class WorkflowAPIImpl(WorkflowAPIBase):
                 logger.warning("Failed to fetch robot info: %s", exc)
         return json.dumps(info)
 
+    def get_CameraStatus(self, *, metadata: MetadataDict) -> str:
+        """Whether the robot's camera is on, and where to watch it.
+
+        The Flex has a native camera API - a still from /camera/picture and an
+        HLS/RTMP live stream - and all three enablement flags ship off. With
+        them off every capture comes back 422 "Cannot take photo, camera is
+        disabled", which reads like a broken endpoint rather than a setting.
+        This says so plainly, and gives the stream URLs when it is on.
+        """
+        ot = self._require_ot()
+        status: Dict[str, Any] = {
+            "cameraEnabled": None, "liveStreamEnabled": None,
+            "errorRecoveryCameraEnabled": None, "hls": "", "rtmp": "",
+        }
+        if ot.robot is None or not ot.robot.is_connected:
+            status["detail"] = "not connected to the robot"
+            return json.dumps(status)
+        try:
+            status.update(self._run_async(self._camera_state(), timeout=20))
+        except Exception as exc:
+            status["detail"] = f"could not read the camera state: {exc}"
+        return json.dumps(status)
+
+    async def _camera_state(self) -> Dict[str, Any]:
+        """The robot's camera enablement plus its live-stream URLs."""
+        import httpx
+
+        ot = self._require_ot()
+        base = f"http://{ot.robot.host}:{ot.robot.port}"
+        headers = {"Opentrons-Version": "*"}
+        out: Dict[str, Any] = {}
+        async with httpx.AsyncClient(timeout=20.0, headers=headers) as client:
+            enablement = await client.get(f"{base}/camera")
+            if enablement.is_success:
+                out.update(enablement.json())
+            stream = await client.get(f"{base}/camera/stream")
+            if stream.is_success:
+                data = stream.json()
+                # The robot returns paths; make them usable as they stand.
+                out["liveStreamEnabled"] = data.get("enabled", out.get("liveStreamEnabled"))
+                out["hls"] = f"{base}{data.get('hls', '')}" if data.get("hls") else ""
+                out["rtmp"] = data.get("rtmp", "")
+        return out
+
     def get_ModulesStatus(self, *, metadata: MetadataDict) -> str:
         ot = self._require_ot()
         modules: List[Any] = []
@@ -340,39 +384,6 @@ class WorkflowAPIImpl(WorkflowAPIBase):
         self._publish_state()
         return ExecuteRecipe_Responses(RunId=run_id or "")
 
-    def RunSteps(
-        self,
-        StepsJson: str,
-        Description: str,
-        *,
-        metadata: MetadataDict,
-        instance: ObservableCommandInstance,
-    ) -> RunSteps_Responses:
-        """Run recipe steps supplied inline, against the active HAL config."""
-        self._require_ot()
-        instance.begin_execution()
-        instance.progress = 0.05
-
-        try:
-            steps = json.loads(StepsJson) if StepsJson else []
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"StepsJson is not valid JSON: {exc}") from exc
-        if isinstance(steps, dict):
-            # A single step object is an easy and harmless thing to send.
-            steps = [steps]
-        if not isinstance(steps, list) or not steps:
-            raise ValueError("StepsJson must be a non-empty JSON array of recipe steps")
-        for index, step in enumerate(steps):
-            if not isinstance(step, dict) or not step.get("Command"):
-                raise ValueError(f"Step {index + 1} has no \"Command\" field")
-
-        instance.progress = 0.1
-        run_id = self._run_inline(
-            steps, Description or "Steps supplied inline via RunSteps"
-        )
-        instance.progress = 1.0
-        return RunSteps_Responses(RunId=run_id)
-
     def ValidateRecipe(
         self, RecipeName: str, *, metadata: MetadataDict
     ) -> ValidateRecipe_Responses:
@@ -422,21 +433,58 @@ class WorkflowAPIImpl(WorkflowAPIBase):
     #  DECK AND MODULES
     # ═════════════════════════════════════════════════════════════════════════
 
-    def _run_inline(self, steps: List[Dict[str, Any]], description: str) -> str:
-        """Execute steps as a one-off protocol and return the run id."""
+    def _run_inline(
+        self,
+        steps: List[Dict[str, Any]],
+        description: str,
+        requirements: Optional[Dict[str, str]] = None,
+    ) -> str:
+        """Execute steps as a one-off protocol and return the run id.
+
+        `requirements` names the deck items the steps address. It is not
+        optional in practice: the hardware config reaches a generated protocol
+        only through Requirements, so a recipe that declares none gets a
+        protocol with no load_module and no load_labware beyond the tip racks
+        that are auto-injected. The step then refers to a name the protocol
+        never defined, and the robot fails with a bare KeyError on that name -
+        after homing, because the run has already started by then. Confirmed on
+        hardware: SetModuleLatch on a heater-shaker that was correctly declared
+        AND physically attached died on KeyError: 'HeaterShaker'.
+        """
         ot = self._require_ot()
         recipe = {
             "ProtocolName": description,
             "Description": description,
-            "Requirements": {},
+            # logical name -> physical id in the hardware config; for a
+            # single-action command the two are the same name.
+            "Requirements": dict(requirements or {}),
             "Steps": steps,
         }
-        run_id, result = self._run_async(
+        # cmd_run_protocol returns one string, not the (run_id, result) tuple
+        # cmd_execute_recipe_by_name returns - unpacking it into two names
+        # raised "too many values to unpack", which is what every command
+        # routed through here did instead of moving: MoveLabware,
+        # SetModuleTemperature, ShakeModule, SetModuleLatch.
+        result = self._run_async(
             ot.cmd_run_protocol(json.dumps(recipe), "json"), timeout=None
         )
+        run_id = parse_run_id(result)
         self._raise_unless_succeeded(run_id, result)
         self._publish_state()
         return run_id or ""
+
+    def _move_requirements(self, labware_name: str, new_location: str) -> Dict[str, str]:
+        """The deck items a move addresses, so the protocol actually loads them.
+
+        The labware being moved, always. The destination too when it is a
+        module rather than a bare slot - a move onto a heater-shaker needs that
+        module loaded in the protocol to have somewhere to go.
+        """
+        requirements = {labware_name: labware_name}
+        ot = self._require_ot()
+        if ot.hardware and new_location in (ot.hardware.get_modules() or {}):
+            requirements[new_location] = new_location
+        return requirements
 
     def MoveLabware(
         self,
@@ -469,10 +517,21 @@ class WorkflowAPIImpl(WorkflowAPIBase):
                     slot: name for name, slot in hardware._slot_occupants().items()
                     if name != LabwareName
                 }
+                free = sorted(set(_FLEX_SLOTS) - set(occupied))
+                # A destination that is neither a real slot nor a module on the
+                # deck reached the robot and failed there with "'Z9' is not a
+                # valid deck slot" - which cost a home first, because the run
+                # was already playing by then.
+                if NewLocation not in _FLEX_SLOTS:
+                    raise ValueError(
+                        f"'{NewLocation}' is not a deck slot or a module on the deck. "
+                        f"Free slots: {', '.join(free) or 'none'}"
+                        + (f". Modules: {', '.join(sorted(modules))}" if modules else "")
+                    )
                 if NewLocation in occupied:
                     raise ValueError(
                         f"Slot {NewLocation} already holds '{occupied[NewLocation]}'. "
-                        f"Free slots: {', '.join(sorted(set(_FLEX_SLOTS) - set(occupied))) or 'none'}"
+                        f"Free slots: {', '.join(free) or 'none'}"
                     )
 
         self._run_inline(
@@ -483,6 +542,7 @@ class WorkflowAPIImpl(WorkflowAPIBase):
                 "UseGripper": UseGripper,
             }],
             f"MoveLabware {LabwareName} -> {NewLocation}",
+            requirements=self._move_requirements(LabwareName, NewLocation),
         )
         instance.progress = 0.9
 
@@ -509,6 +569,73 @@ class WorkflowAPIImpl(WorkflowAPIBase):
                        f"{' with the gripper' if UseGripper else ' (manual move)'}{hal_note}"
         )
 
+    def _require_module(self, module_name: str) -> str:
+        """The module a command names, or a refusal that costs no motion.
+
+        Everything a module command does reaches the robot by generating a
+        one-step protocol and playing it - and playing a run homes the robot
+        first. So a mistyped module name used to home the Flex and only then
+        fail on a loadModule the deck could not satisfy. The operator saw the
+        arm move and an error afterwards, which reads like the command half
+        worked.
+
+        Two things have to be true, and they are different things:
+          * the active hardware config declares the module - otherwise the
+            generated protocol has nothing to address;
+          * the robot reports it attached - the config is a description of the
+            deck, written by a person, and it can be out of date. Ours was:
+            01_SPAAC declared a HeaterShaker at A1 while the robot reported no
+            modules at all.
+        """
+        ot = self._require_ot()
+        declared: Dict[str, Any] = {}
+        if ot.hardware:
+            declared = ot.hardware.get_modules() or {}
+
+        if not module_name:
+            raise ValueError(
+                "No module named. Modules in the active hardware config: "
+                f"{', '.join(sorted(declared)) or 'none'}"
+            )
+
+        match = module_name if module_name in declared else None
+        if match is None:
+            # A module is also addressable by its type, which is what the
+            # recipe format calls a ModuleID.
+            for name, spec in declared.items():
+                if isinstance(spec, dict) and spec.get("Type") == module_name:
+                    match = name
+                    break
+        if match is None:
+            raise ValueError(
+                f"'{module_name}' is not in the active hardware config "
+                f"({ot.hardware.get_current_config_name() if ot.hardware else 'none'}). "
+                f"Modules it declares: {', '.join(sorted(declared)) or 'none'}"
+            )
+
+        if ot.robot is None:
+            return match
+        attached = []
+        try:
+            attached = self._run_async(ot.robot.get_modules(), timeout=15) or []
+        except Exception as exc:
+            # Not reachable is not the same as not attached; do not block on it.
+            logger.warning("Could not ask the robot which modules are attached: %s", exc)
+            return match
+
+        spec = declared.get(match) or {}
+        wanted = (spec.get("Type") or "").lower()
+        present = {str(m.get("moduleModel", "")).lower() for m in attached}
+        if wanted and not any(wanted in model or model in wanted for model in present):
+            raise ValueError(
+                f"The hardware config declares '{match}' ({spec.get('Type')}) at slot "
+                f"{spec.get('Slot', '?')}, but the robot reports "
+                f"{'no modules attached' if not attached else 'only: ' + ', '.join(sorted(present))}. "
+                f"Nothing was moved. Either plug the module in, or load a hardware "
+                f"config that matches the deck."
+            )
+        return match
+
     def SetModuleTemperature(
         self,
         ModuleName: str,
@@ -520,6 +647,7 @@ class WorkflowAPIImpl(WorkflowAPIBase):
     ) -> SetModuleTemperature_Responses:
         instance.begin_execution()
         instance.progress = 0.05
+        ModuleName = self._require_module(ModuleName)
         if Celsius <= 0:
             steps = [{"Command": "HeaterShakerDeactivateHeater", "ModuleID": ModuleName}]
             message = f"{ModuleName}: heating deactivated"
@@ -536,7 +664,8 @@ class WorkflowAPIImpl(WorkflowAPIBase):
                     "Temperature": Celsius,
                 })
             message = f"{ModuleName}: target {Celsius} C"
-        self._run_inline(steps, f"SetModuleTemperature {ModuleName}")
+        self._run_inline(steps, f"SetModuleTemperature {ModuleName}",
+                         requirements={ModuleName: ModuleName})
         instance.progress = 1.0
         return SetModuleTemperature_Responses(TemperatureResult=message)
 
@@ -551,6 +680,7 @@ class WorkflowAPIImpl(WorkflowAPIBase):
     ) -> ShakeModule_Responses:
         instance.begin_execution()
         instance.progress = 0.05
+        ModuleName = self._require_module(ModuleName)
         if DurationSeconds <= 0:
             steps = [{"Command": "HeaterShakerDeactivateShaker", "ModuleID": ModuleName}]
             message = f"{ModuleName}: shaking stopped"
@@ -561,17 +691,20 @@ class WorkflowAPIImpl(WorkflowAPIBase):
                 {"Command": "HeaterShakerDeactivateShaker", "ModuleID": ModuleName},
             ]
             message = f"{ModuleName}: shook at {RPM} rpm for {DurationSeconds}s"
-        self._run_inline(steps, f"ShakeModule {ModuleName}")
+        self._run_inline(steps, f"ShakeModule {ModuleName}",
+                         requirements={ModuleName: ModuleName})
         instance.progress = 1.0
         return ShakeModule_Responses(ShakeResult=message)
 
     def SetModuleLatch(
         self, ModuleName: str, Open: bool, *, metadata: MetadataDict
     ) -> SetModuleLatch_Responses:
+        ModuleName = self._require_module(ModuleName)
         command = "HeaterShakerOpenLatch" if Open else "HeaterShakerCloseLatch"
         self._run_inline(
             [{"Command": command, "ModuleID": ModuleName}],
             f"SetModuleLatch {ModuleName}",
+            requirements={ModuleName: ModuleName},
         )
         return SetModuleLatch_Responses(
             LatchResult=f"{ModuleName}: latch {'opened' if Open else 'closed'}"
@@ -605,6 +738,42 @@ class WorkflowAPIImpl(WorkflowAPIBase):
     # ═════════════════════════════════════════════════════════════════════════
     #  CAMERA
     # ═════════════════════════════════════════════════════════════════════════
+
+    def SetCameraEnabled(
+        self, Camera: bool, LiveStream: bool, *, metadata: MetadataDict
+    ) -> SetCameraEnabled_Responses:
+        """Turn the robot's camera and live stream on or off.
+
+        Nothing moves. This is a setting on the robot, not on this server: it
+        persists across restarts of both, and it is the reason CaptureImage
+        used to fail with a bare 422.
+        """
+        ot = self._require_ot()
+        if ot.robot is None or not ot.robot.is_connected:
+            raise RuntimeError("Not connected to the robot")
+        result = self._run_async(self._set_camera(Camera, LiveStream), timeout=30)
+        return SetCameraEnabled_Responses(CameraResult=json.dumps(result))
+
+    async def _set_camera(self, camera: bool, live_stream: bool) -> Dict[str, Any]:
+        import httpx
+
+        ot = self._require_ot()
+        base = f"http://{ot.robot.host}:{ot.robot.port}"
+        payload = {"data": {
+            "cameraEnabled": camera,
+            "liveStreamEnabled": live_stream,
+            # Left alone deliberately: whether the robot films its own error
+            # recovery is a separate decision from whether we can take a photo.
+            "errorRecoveryCameraEnabled": None,
+        }}
+        async with httpx.AsyncClient(timeout=30.0,
+                                     headers={"Opentrons-Version": "*"}) as client:
+            response = await client.post(f"{base}/camera", json=payload)
+            if not response.is_success:
+                raise RuntimeError(
+                    f"the robot refused ({response.status_code}): {response.text[:300]}"
+                )
+        return await self._camera_state()
 
     def CaptureImage(
         self,
@@ -789,7 +958,14 @@ class WorkflowAPIImpl(WorkflowAPIBase):
     async def _capture_over_http(self) -> Optional[bytes]:
         """Try the robot's own camera endpoint. None if it does not have one."""
         ot = self._require_ot()
-        if ot.robot is None or not ot.robot.is_connected():
+        # RobotClient.is_connected is a property; the server object's
+        # is_connected of the same name is a method. Calling this one
+        # raised "'bool' object is not callable", which the capture
+        # reported as "HTTP capture failed" - so every CaptureImage fell
+        # through to the protocol path, which homes the robot, and with
+        # AllowRobotMotion false simply refused. The camera looked
+        # unreachable when it had never been asked.
+        if ot.robot is None or not ot.robot.is_connected:
             return None
         import httpx
 
@@ -798,6 +974,20 @@ class WorkflowAPIImpl(WorkflowAPIBase):
             response = await client.post(url, headers={"Opentrons-Version": "*"})
             if response.status_code == 404:
                 return None
+            if response.status_code == 422:
+                # The endpoint exists and the request was fine; the robot is
+                # refusing. Its own message is the useful part, and the usual
+                # one is "Cannot take photo, camera is disabled." - a per-robot
+                # setting that ships off, and which no amount of retrying here
+                # will change.
+                try:
+                    message = response.json().get("message", response.text)
+                except Exception:
+                    message = response.text
+                raise RuntimeError(
+                    f"the robot refused: {message} "
+                    f"(see the CameraStatus property; SetCameraEnabled turns it on)"
+                )
             response.raise_for_status()
             content = response.content
             # Some firmware answers with base64 in a JSON envelope.

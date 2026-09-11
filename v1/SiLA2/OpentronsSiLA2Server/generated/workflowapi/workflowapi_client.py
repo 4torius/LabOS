@@ -31,7 +31,7 @@ if TYPE_CHECKING:
         RefillTipRack_Responses,
         ResetTipTracking_Responses,
         ResumeRun_Responses,
-        RunSteps_Responses,
+        SetCameraEnabled_Responses,
         SetLights_Responses,
         SetModuleLatch_Responses,
         SetModuleTemperature_Responses,
@@ -45,12 +45,17 @@ class WorkflowAPIClient:
 
     Workflow-level control of an Opentrons Flex.
 
-    Two rules shape this surface. Commands *do* something to the robot;
-    anything that merely reads state is a Property, so a client can read it
-    without asking the robot to act. And rather than one command per
-    Opentrons primitive, RunSteps takes recipe steps inline: any step the
-    recipe format supports becomes available as a workflow step without
-    this file growing a command for each.
+    Commands *do* something to the robot; anything that merely reads
+    state is a Property, so a client can read it without asking the robot
+    to act.
+
+    A command here is one deliberate action an operator would ask for:
+    move this labware, shake this module, open this latch. A whole
+    procedure is a recipe, run by ExecuteRecipe. There is deliberately no
+    general "run these steps inline" escape hatch: it duplicated the recipe
+    format inside a workflow parameter, gave the caller no validation and
+    no checking against the deck, and was harder to use than the recipe
+    file it replaced.
 
     Commands whose description begins with MOVES HARDWARE physically move
     the robot. Everything else is safe to call at any time.
@@ -60,6 +65,21 @@ class WorkflowAPIClient:
     RobotInfo: ClientUnobservableProperty[str]
     """
     Robot metadata as JSON: name, model, serial, firmware version.
+    """
+
+    CameraStatus: ClientUnobservableProperty[str]
+    """
+    
+            Whether the robot's camera is on, and where to watch it, as JSON:
+            cameraEnabled, liveStreamEnabled, errorRecoveryCameraEnabled, and
+            the hls and rtmp stream URLs.
+
+            The Flex has a native camera API - a still photograph, and an
+            HLS/RTMP live stream - and all three enablement flags ship off.
+            With them off every capture comes back "Cannot take photo, camera
+            is disabled", which reads like a broken endpoint rather than a
+            setting. SetCameraEnabled turns it on.
+        
     """
 
     ModulesStatus: ClientUnobservableProperty[str]
@@ -168,6 +188,11 @@ class WorkflowAPIClient:
         must be closed before shaking and open before the gripper can place
         or remove a plate.
 
+        The module must be declared in the active hardware config AND
+        reported attached by the robot. If it is not, the command fails
+        immediately and nothing moves - checked before any protocol is
+        generated, because playing a protocol homes the robot.
+
         """
         ...
 
@@ -187,6 +212,23 @@ class WorkflowAPIClient:
         """
         ...
 
+    def SetCameraEnabled(
+        self, Camera: bool, LiveStream: bool, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
+    ) -> SetCameraEnabled_Responses:
+        """
+
+        Turn the robot's camera and live stream on or off. Nothing moves.
+
+        This is a setting on the robot, not on this server: it persists
+        across a restart of either, and it ships off. It is the reason a
+        capture can fail without the camera ever being asked for a frame.
+
+        Leaves the error-recovery camera setting alone - whether the robot
+        films its own error recovery is a separate decision.
+
+        """
+        ...
+
     def Home(
         self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
     ) -> ClientObservableCommandInstance[Home_Responses]:
@@ -203,27 +245,6 @@ class WorkflowAPIClient:
         MOVES HARDWARE. Run a saved recipe against the currently active HAL
         configuration. Fails loudly if the run's own final state is anything
         other than "succeeded" — a stopped or errored run is not a success.
-
-        """
-        ...
-
-    def RunSteps(
-        self, StepsJson: str, Description: str, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
-    ) -> ClientObservableCommandInstance[RunSteps_Responses]:
-        """
-
-        MOVES HARDWARE. Run recipe steps supplied inline, without a saved
-        recipe file, against the active HAL configuration.
-
-        This is what makes atomic control possible without one SiLA2 command
-        per Opentrons primitive: pass a JSON array of recipe steps (the same
-        format as a recipe's "Steps") and any command the recipe format
-        supports — Transfer, Mix, MoveLabware, heater-shaker, Delay, and the
-        rest — becomes usable as a single workflow step. Previously the only
-        way to move one plate or mix one well was to author a recipe file.
-
-        Example: [{"Command": "Mix", "PipetteMount": "left",
-                   "Location": "MyPlate:A1", "Repetitions": 3, "Volume": 100}]
 
         """
         ...
@@ -258,6 +279,11 @@ class WorkflowAPIClient:
         MOVES HARDWARE. Set a heater-shaker or temperature module's target
         temperature. Set Celsius to 0 to deactivate heating.
 
+        The module must be declared in the active hardware config AND
+        reported attached by the robot. If it is not, the command fails
+        immediately and nothing moves - checked before any protocol is
+        generated, because playing a protocol homes the robot.
+
         """
         ...
 
@@ -273,6 +299,11 @@ class WorkflowAPIClient:
 
         MOVES HARDWARE. Shake a heater-shaker for a set time. The latch must
         be closed; set DurationSeconds to 0 to stop shaking immediately.
+
+        The module must be declared in the active hardware config AND
+        reported attached by the robot. If it is not, the command fails
+        immediately and nothing moves - checked before any protocol is
+        generated, because playing a protocol homes the robot.
 
         """
         ...

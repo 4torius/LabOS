@@ -42,6 +42,22 @@ from .run_archive import RunArchive
 logger = logging.getLogger(__name__)
 
 
+def parse_run_id(result: Optional[str]) -> str:
+    """The run id out of what cmd_run_protocol returns.
+
+    cmd_run_protocol returns one formatted string, "Run {id}: {status}", not a
+    tuple - by then the robot's run is finished and _current_run_id has already
+    been cleared, so the string is the only place the id survives. Callers that
+    need the id parse it back out of there, and they do it here rather than
+    each writing the same split: getting it wrong is silent, because a bad
+    parse yields an empty id rather than an error, and the id is what an
+    operator uses to find the run's own command log on the robot.
+    """
+    if not result or not result.startswith("Run "):
+        return ""
+    return result.split(":", 1)[0][len("Run "):].strip()
+
+
 class OpentronsSiLA2Server:
     """
     Main SiLA2 Server for Opentrons Flex.
@@ -1353,16 +1369,7 @@ class OpentronsSiLA2Server:
             content = f.read()
         
         result = await self.cmd_run_protocol(content, "json", on_progress)
-        
-        # Parse run_id from result string (format: "Run {run_id}: {status}")
-        # _current_run_id is None at this point because cmd_run_protocol clears it
-        run_id = ""
-        if result and result.startswith("Run "):
-            parts = result.split(":")
-            if parts:
-                run_id = parts[0].replace("Run ", "").strip()
-        
-        return run_id, result
+        return parse_run_id(result), result
     
     def list_tip_racks(self) -> str:
         """List tip racks from hardware config with their current usage status."""

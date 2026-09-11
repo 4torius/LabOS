@@ -3,12 +3,17 @@
   <DisplayName>Opentrons Workflow API</DisplayName>
   <Description>Workflow-level control of an Opentrons Flex.
 
-        Two rules shape this surface. Commands *do* something to the robot;
-        anything that merely reads state is a Property, so a client can read it
-        without asking the robot to act. And rather than one command per
-        Opentrons primitive, RunSteps takes recipe steps inline: any step the
-        recipe format supports becomes available as a workflow step without
-        this file growing a command for each.
+        Commands *do* something to the robot; anything that merely reads
+        state is a Property, so a client can read it without asking the robot
+        to act.
+
+        A command here is one deliberate action an operator would ask for:
+        move this labware, shake this module, open this latch. A whole
+        procedure is a recipe, run by ExecuteRecipe. There is deliberately no
+        general "run these steps inline" escape hatch: it duplicated the recipe
+        format inside a workflow parameter, gave the caller no validation and
+        no checking against the deck, and was harder to use than the recipe
+        file it replaced.
 
         Commands whose description begins with MOVES HARDWARE physically move
         the robot. Everything else is safe to call at any time.</Description>
@@ -59,6 +64,23 @@
     <Identifier>RobotInfo</Identifier>
     <DisplayName>Robot Info</DisplayName>
     <Description>Robot metadata as JSON: name, model, serial, firmware version.</Description>
+    <Observable>No</Observable>
+    <DataType>
+      <Basic>String</Basic>
+    </DataType>
+  </Property>
+  <Property>
+    <Identifier>CameraStatus</Identifier>
+    <DisplayName>Camera Status</DisplayName>
+    <Description>Whether the robot's camera is on, and where to watch it, as JSON:
+            cameraEnabled, liveStreamEnabled, errorRecoveryCameraEnabled, and
+            the hls and rtmp stream URLs.
+
+            The Flex has a native camera API - a still photograph, and an
+            HLS/RTMP live stream - and all three enablement flags ship off.
+            With them off every capture comes back "Cannot take photo, camera
+            is disabled", which reads like a broken endpoint rather than a
+            setting. SetCameraEnabled turns it on.</Description>
     <Observable>No</Observable>
     <DataType>
       <Basic>String</Basic>
@@ -184,47 +206,6 @@
     </Response>
   </Command>
   <Command>
-    <Identifier>RunSteps</Identifier>
-    <DisplayName>Run Steps</DisplayName>
-    <Description>MOVES HARDWARE. Run recipe steps supplied inline, without a saved
-            recipe file, against the active HAL configuration.
-
-            This is what makes atomic control possible without one SiLA2 command
-            per Opentrons primitive: pass a JSON array of recipe steps (the same
-            format as a recipe's "Steps") and any command the recipe format
-            supports &#8212; Transfer, Mix, MoveLabware, heater-shaker, Delay, and the
-            rest &#8212; becomes usable as a single workflow step. Previously the only
-            way to move one plate or mix one well was to author a recipe file.
-
-            Example: [{"Command": "Mix", "PipetteMount": "left",
-                       "Location": "MyPlate:A1", "Repetitions": 3, "Volume": 100}]</Description>
-    <Observable>Yes</Observable>
-    <Parameter>
-      <Identifier>StepsJson</Identifier>
-      <DisplayName>Steps (JSON)</DisplayName>
-      <Description>JSON array of recipe step objects.</Description>
-      <DataType>
-        <Basic>String</Basic>
-      </DataType>
-    </Parameter>
-    <Parameter>
-      <Identifier>Description</Identifier>
-      <DisplayName>Description</DisplayName>
-      <Description>Label for the run archive. Optional.</Description>
-      <DataType>
-        <Basic>String</Basic>
-      </DataType>
-    </Parameter>
-    <Response>
-      <Identifier>RunId</Identifier>
-      <DisplayName>Run Id</DisplayName>
-      <Description>The robot's own run id.</Description>
-      <DataType>
-        <Basic>String</Basic>
-      </DataType>
-    </Response>
-  </Command>
-  <Command>
     <Identifier>ValidateRecipe</Identifier>
     <DisplayName>Validate Recipe</DisplayName>
     <Description>Check a recipe against the active HAL configuration without running
@@ -338,12 +319,19 @@
     <Identifier>SetModuleTemperature</Identifier>
     <DisplayName>Set Module Temperature</DisplayName>
     <Description>MOVES HARDWARE. Set a heater-shaker or temperature module's target
-            temperature. Set Celsius to 0 to deactivate heating.</Description>
+            temperature. Set Celsius to 0 to deactivate heating.
+
+            The module must be declared in the active hardware config AND
+            reported attached by the robot. If it is not, the command fails
+            immediately and nothing moves - checked before any protocol is
+            generated, because playing a protocol homes the robot.</Description>
     <Observable>Yes</Observable>
     <Parameter>
       <Identifier>ModuleName</Identifier>
       <DisplayName>Module Name</DisplayName>
-      <Description>Logical module name from the active HAL config.</Description>
+      <Description>Logical module name from the active hardware config, or the
+                module type. Checked against the config and against what the
+                robot reports attached before anything moves.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
@@ -377,12 +365,19 @@
     <Identifier>ShakeModule</Identifier>
     <DisplayName>Shake Module</DisplayName>
     <Description>MOVES HARDWARE. Shake a heater-shaker for a set time. The latch must
-            be closed; set DurationSeconds to 0 to stop shaking immediately.</Description>
+            be closed; set DurationSeconds to 0 to stop shaking immediately.
+
+            The module must be declared in the active hardware config AND
+            reported attached by the robot. If it is not, the command fails
+            immediately and nothing moves - checked before any protocol is
+            generated, because playing a protocol homes the robot.</Description>
     <Observable>Yes</Observable>
     <Parameter>
       <Identifier>ModuleName</Identifier>
       <DisplayName>Module Name</DisplayName>
-      <Description>Logical module name from the active HAL config.</Description>
+      <Description>Logical module name from the active hardware config, or the
+                module type. Checked against the config and against what the
+                robot reports attached before anything moves.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
@@ -417,12 +412,19 @@
     <DisplayName>Set Module Latch</DisplayName>
     <Description>MOVES HARDWARE. Open or close a heater-shaker's labware latch. It
             must be closed before shaking and open before the gripper can place
-            or remove a plate.</Description>
+            or remove a plate.
+
+            The module must be declared in the active hardware config AND
+            reported attached by the robot. If it is not, the command fails
+            immediately and nothing moves - checked before any protocol is
+            generated, because playing a protocol homes the robot.</Description>
     <Observable>No</Observable>
     <Parameter>
       <Identifier>ModuleName</Identifier>
       <DisplayName>Module Name</DisplayName>
-      <Description>Logical module name from the active HAL config.</Description>
+      <Description>Logical module name from the active hardware config, or the
+                module type. Checked against the config and against what the
+                robot reports attached before anything moves.</Description>
       <DataType>
         <Basic>String</Basic>
       </DataType>
@@ -486,6 +488,44 @@
   <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
   <!--  CAMERA                                                             -->
   <!-- &#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552;&#9552; -->
+  <Command>
+    <Identifier>SetCameraEnabled</Identifier>
+    <DisplayName>Set Camera Enabled</DisplayName>
+    <Description>Turn the robot's camera and live stream on or off. Nothing moves.
+
+            This is a setting on the robot, not on this server: it persists
+            across a restart of either, and it ships off. It is the reason a
+            capture can fail without the camera ever being asked for a frame.
+
+            Leaves the error-recovery camera setting alone - whether the robot
+            films its own error recovery is a separate decision.</Description>
+    <Observable>No</Observable>
+    <Parameter>
+      <Identifier>Camera</Identifier>
+      <DisplayName>Camera</DisplayName>
+      <Description>Enable the camera for stills.</Description>
+      <DataType>
+        <Basic>Boolean</Basic>
+      </DataType>
+    </Parameter>
+    <Parameter>
+      <Identifier>LiveStream</Identifier>
+      <DisplayName>Live Stream</DisplayName>
+      <Description>Enable the HLS/RTMP live stream. Read its URLs from the
+                CameraStatus property.</Description>
+      <DataType>
+        <Basic>Boolean</Basic>
+      </DataType>
+    </Parameter>
+    <Response>
+      <Identifier>CameraResult</Identifier>
+      <DisplayName>Camera Result</DisplayName>
+      <Description>The resulting camera state, same shape as CameraStatus.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+  </Command>
   <Command>
     <Identifier>CaptureImage</Identifier>
     <DisplayName>Capture Image</DisplayName>

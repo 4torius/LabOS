@@ -4,7 +4,7 @@ import "SiLAFramework.proto";
 
 package sila2.org.labos.workflow.workflowapi.v1;
 
-/* Workflow-level control of an Opentrons Flex. Two rules shape this surface. Commands *do* something to the robot; anything that merely reads state is a Property, so a client can read it without asking the robot to act. And rather than one command per Opentrons primitive, RunSteps takes recipe steps inline: any step the recipe format supports becomes available as a workflow step without this file growing a command for each. Commands whose description begins with MOVES HARDWARE physically move the robot. Everything else is safe to call at any time. */
+/* Workflow-level control of an Opentrons Flex. Commands *do* something to the robot; anything that merely reads state is a Property, so a client can read it without asking the robot to act. A command here is one deliberate action an operator would ask for: move this labware, shake this module, open this latch. A whole procedure is a recipe, run by ExecuteRecipe. There is deliberately no general "run these steps inline" escape hatch: it duplicated the recipe format inside a workflow parameter, gave the caller no validation and no checking against the deck, and was harder to use than the recipe file it replaced. Commands whose description begins with MOVES HARDWARE physically move the robot. Everything else is safe to call at any time. */
 service WorkflowAPI {
   /* MOVES HARDWARE. Home all robot axes to their default positions. */
   rpc Home (sila2.org.labos.workflow.workflowapi.v1.Home_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
@@ -28,25 +28,6 @@ service WorkflowAPI {
   rpc ExecuteRecipe_Info (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.ExecutionInfo) {}
   /* Retrieve result of ExecuteRecipe */
   rpc ExecuteRecipe_Result(sila2.org.silastandard.CommandExecutionUUID) returns (sila2.org.labos.workflow.workflowapi.v1.ExecuteRecipe_Responses) {}
-  /* 
-            MOVES HARDWARE. Run recipe steps supplied inline, without a saved
-            recipe file, against the active HAL configuration.
-
-            This is what makes atomic control possible without one SiLA2 command
-            per Opentrons primitive: pass a JSON array of recipe steps (the same
-            format as a recipe's "Steps") and any command the recipe format
-            supports — Transfer, Mix, MoveLabware, heater-shaker, Delay, and the
-            rest — becomes usable as a single workflow step. Previously the only
-            way to move one plate or mix one well was to author a recipe file.
-
-            Example: [{"Command": "Mix", "PipetteMount": "left",
-                       "Location": "MyPlate:A1", "Repetitions": 3, "Volume": 100}]
-         */
-  rpc RunSteps (sila2.org.labos.workflow.workflowapi.v1.RunSteps_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
-  /* Monitor the state of RunSteps */
-  rpc RunSteps_Info (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.ExecutionInfo) {}
-  /* Retrieve result of RunSteps */
-  rpc RunSteps_Result(sila2.org.silastandard.CommandExecutionUUID) returns (sila2.org.labos.workflow.workflowapi.v1.RunSteps_Responses) {}
   /* Check a recipe against the active HAL configuration without running it: every labware the recipe requires must be present on the deck, and the generated protocol must compile. Safe to call at any time. */
   rpc ValidateRecipe (sila2.org.labos.workflow.workflowapi.v1.ValidateRecipe_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.ValidateRecipe_Responses) {}
   /* Pause the protocol currently running. */
@@ -68,6 +49,11 @@ service WorkflowAPI {
   /* 
             MOVES HARDWARE. Set a heater-shaker or temperature module's target
             temperature. Set Celsius to 0 to deactivate heating.
+
+            The module must be declared in the active hardware config AND
+            reported attached by the robot. If it is not, the command fails
+            immediately and nothing moves - checked before any protocol is
+            generated, because playing a protocol homes the robot.
          */
   rpc SetModuleTemperature (sila2.org.labos.workflow.workflowapi.v1.SetModuleTemperature_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
   /* Monitor the state of SetModuleTemperature */
@@ -77,18 +63,25 @@ service WorkflowAPI {
   /* 
             MOVES HARDWARE. Shake a heater-shaker for a set time. The latch must
             be closed; set DurationSeconds to 0 to stop shaking immediately.
+
+            The module must be declared in the active hardware config AND
+            reported attached by the robot. If it is not, the command fails
+            immediately and nothing moves - checked before any protocol is
+            generated, because playing a protocol homes the robot.
          */
   rpc ShakeModule (sila2.org.labos.workflow.workflowapi.v1.ShakeModule_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
   /* Monitor the state of ShakeModule */
   rpc ShakeModule_Info (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.ExecutionInfo) {}
   /* Retrieve result of ShakeModule */
   rpc ShakeModule_Result(sila2.org.silastandard.CommandExecutionUUID) returns (sila2.org.labos.workflow.workflowapi.v1.ShakeModule_Responses) {}
-  /* MOVES HARDWARE. Open or close a heater-shaker's labware latch. It must be closed before shaking and open before the gripper can place or remove a plate. */
+  /* MOVES HARDWARE. Open or close a heater-shaker's labware latch. It must be closed before shaking and open before the gripper can place or remove a plate. The module must be declared in the active hardware config AND reported attached by the robot. If it is not, the command fails immediately and nothing moves - checked before any protocol is generated, because playing a protocol homes the robot. */
   rpc SetModuleLatch (sila2.org.labos.workflow.workflowapi.v1.SetModuleLatch_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.SetModuleLatch_Responses) {}
   /* Record that a tip rack has been physically refilled. */
   rpc RefillTipRack (sila2.org.labos.workflow.workflowapi.v1.RefillTipRack_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.RefillTipRack_Responses) {}
   /* Reset every tip-consumption counter to full. */
   rpc ResetTipTracking (sila2.org.labos.workflow.workflowapi.v1.ResetTipTracking_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.ResetTipTracking_Responses) {}
+  /* Turn the robot's camera and live stream on or off. Nothing moves. This is a setting on the robot, not on this server: it persists across a restart of either, and it ships off. It is the reason a capture can fail without the camera ever being asked for a frame. Leaves the error-recovery camera setting alone - whether the robot films its own error recovery is a separate decision. */
+  rpc SetCameraEnabled (sila2.org.labos.workflow.workflowapi.v1.SetCameraEnabled_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.SetCameraEnabled_Responses) {}
   /* 
             Photograph the deck with the robot's on-board camera and save the
             image under Results/Images, where the web interface serves it.
@@ -144,6 +137,18 @@ service WorkflowAPI {
   rpc Subscribe_TipsAvailable (sila2.org.labos.workflow.workflowapi.v1.Subscribe_TipsAvailable_Parameters) returns (stream sila2.org.labos.workflow.workflowapi.v1.Subscribe_TipsAvailable_Responses) {}
   /* Robot metadata as JSON: name, model, serial, firmware version. */
   rpc Get_RobotInfo (sila2.org.labos.workflow.workflowapi.v1.Get_RobotInfo_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.Get_RobotInfo_Responses) {}
+  /* 
+            Whether the robot's camera is on, and where to watch it, as JSON:
+            cameraEnabled, liveStreamEnabled, errorRecoveryCameraEnabled, and
+            the hls and rtmp stream URLs.
+
+            The Flex has a native camera API - a still photograph, and an
+            HLS/RTMP live stream - and all three enablement flags ship off.
+            With them off every capture comes back "Cannot take photo, camera
+            is disabled", which reads like a broken endpoint rather than a
+            setting. SetCameraEnabled turns it on.
+         */
+  rpc Get_CameraStatus (sila2.org.labos.workflow.workflowapi.v1.Get_CameraStatus_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.Get_CameraStatus_Responses) {}
   /* Attached modules (heater-shaker, temperature module) as a JSON array. */
   rpc Get_ModulesStatus (sila2.org.labos.workflow.workflowapi.v1.Get_ModulesStatus_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.Get_ModulesStatus_Responses) {}
 }
@@ -194,17 +199,6 @@ message ExecuteRecipe_Parameters {
 /* Responses of ExecuteRecipe */
 message ExecuteRecipe_Responses {
   sila2.org.silastandard.String RunId = 1;  /* The robot's own run id, for looking the run up later. */
-}
-
-/* Parameters for RunSteps */
-message RunSteps_Parameters {
-  sila2.org.silastandard.String StepsJson = 1;  /* JSON array of recipe step objects. */
-  sila2.org.silastandard.String Description = 2;  /* Label for the run archive. Optional. */
-}
-
-/* Responses of RunSteps */
-message RunSteps_Responses {
-  sila2.org.silastandard.String RunId = 1;  /* The robot's own run id. */
 }
 
 /* Parameters for ValidateRecipe */
@@ -258,7 +252,7 @@ message MoveLabware_Responses {
 
 /* Parameters for SetModuleTemperature */
 message SetModuleTemperature_Parameters {
-  sila2.org.silastandard.String ModuleName = 1;  /* Logical module name from the active HAL config. */
+  sila2.org.silastandard.String ModuleName = 1;  /* Logical module name from the active hardware config, or the module type. Checked against the config and against what the robot reports attached before anything moves. */
   sila2.org.silastandard.Real Celsius = 2;  /* Target temperature in degrees Celsius; 0 deactivates. */
   sila2.org.silastandard.Boolean WaitForTemperature = 3;  /* Block until the target is reached. */
 }
@@ -270,7 +264,7 @@ message SetModuleTemperature_Responses {
 
 /* Parameters for ShakeModule */
 message ShakeModule_Parameters {
-  sila2.org.silastandard.String ModuleName = 1;  /* Logical module name from the active HAL config. */
+  sila2.org.silastandard.String ModuleName = 1;  /* Logical module name from the active hardware config, or the module type. Checked against the config and against what the robot reports attached before anything moves. */
   sila2.org.silastandard.Integer RPM = 2;  /* Shake speed in revolutions per minute. */
   sila2.org.silastandard.Integer DurationSeconds = 3;  /* How long to shake; 0 stops shaking. */
 }
@@ -282,7 +276,7 @@ message ShakeModule_Responses {
 
 /* Parameters for SetModuleLatch */
 message SetModuleLatch_Parameters {
-  sila2.org.silastandard.String ModuleName = 1;  /* Logical module name from the active HAL config. */
+  sila2.org.silastandard.String ModuleName = 1;  /* Logical module name from the active hardware config, or the module type. Checked against the config and against what the robot reports attached before anything moves. */
   sila2.org.silastandard.Boolean Open = 2;  /* True to open the latch, false to close it. */
 }
 
@@ -308,6 +302,17 @@ message ResetTipTracking_Parameters {
 /* Responses of ResetTipTracking */
 message ResetTipTracking_Responses {
   sila2.org.silastandard.String ResetResult = 1;  /* Status message. */
+}
+
+/* Parameters for SetCameraEnabled */
+message SetCameraEnabled_Parameters {
+  sila2.org.silastandard.Boolean Camera = 1;  /* Enable the camera for stills. */
+  sila2.org.silastandard.Boolean LiveStream = 2;  /* Enable the HLS/RTMP live stream. Read its URLs from the CameraStatus property. */
+}
+
+/* Responses of SetCameraEnabled */
+message SetCameraEnabled_Responses {
+  sila2.org.silastandard.String CameraResult = 1;  /* The resulting camera state, same shape as CameraStatus. */
 }
 
 /* Parameters for CaptureImage */
@@ -377,6 +382,15 @@ message Get_RobotInfo_Parameters {
 /* Responses of RobotInfo */
 message Get_RobotInfo_Responses {
   sila2.org.silastandard.String RobotInfo = 1;  /* Robot metadata as JSON: name, model, serial, firmware version. */
+}
+
+/* Parameters for CameraStatus */
+message Get_CameraStatus_Parameters {
+}
+
+/* Responses of CameraStatus */
+message Get_CameraStatus_Responses {
+  sila2.org.silastandard.String CameraStatus = 1;  /* Whether the robot's camera is on, and where to watch it, as JSON: cameraEnabled, liveStreamEnabled, errorRecoveryCameraEnabled, and the hls and rtmp stream URLs. The Flex has a native camera API - a still photograph, and an HLS/RTMP live stream - and all three enablement flags ship off. With them off every capture comes back "Cannot take photo, camera is disabled", which reads like a broken endpoint rather than a setting. SetCameraEnabled turns it on. */
 }
 
 /* Parameters for ModulesStatus */

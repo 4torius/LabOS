@@ -84,6 +84,14 @@ class ResetTipTracking_Responses(NamedTuple):
     """
 
 
+class SetCameraEnabled_Responses(NamedTuple):
+
+    CameraResult: str
+    """
+    The resulting camera state, same shape as CameraStatus.
+    """
+
+
 class Home_Responses(NamedTuple):
 
     HomeResult: str
@@ -97,14 +105,6 @@ class ExecuteRecipe_Responses(NamedTuple):
     RunId: str
     """
     The robot's own run id, for looking the run up later.
-    """
-
-
-class RunSteps_Responses(NamedTuple):
-
-    RunId: str
-    """
-    The robot's own run id.
     """
 
 

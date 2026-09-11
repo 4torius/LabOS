@@ -27,9 +27,16 @@ entirely: they asked the robot to list files the web interface already reads
 from `Library/` far more cheaply, and can read while the robot is off.
 `Initialize` is gone because `start()` already connects with retry.
 
-**One command takes steps inline rather than one command per primitive.**
-`RunSteps` accepts a JSON array of recipe steps, so every command the recipe
-format supports becomes usable as a single workflow step.
+**A command is one deliberate action.** `MoveLabware`, `ShakeModule`,
+`SetModuleLatch` and `SetModuleTemperature` each name one thing an operator
+would ask for, validate their own arguments against the loaded deck, and offer
+real pickers in the workflow builder. A whole procedure is a recipe, run by
+`ExecuteRecipe`.
+
+There was briefly a general `RunSteps` that took a recipe's `Steps` array as a
+JSON string parameter. It was removed: the caller had to know the recipe format
+by heart, got no validation and no checking against the deck, and ended up with
+something harder to use than the recipe file it was meant to avoid.
 
 ### Properties (read, never act)
 
@@ -40,6 +47,7 @@ format supports becomes usable as a single workflow step.
 | `ActiveConfig` | yes | JSON `{name, config}` — the HAL `ExecuteRecipe` runs against |
 | `TipsAvailable` | yes | JSON array: per rack, load name, slot, used, remaining |
 | `RobotInfo` | no | JSON: name, model, serial, firmware |
+| `CameraStatus` | no | JSON: the three camera enablement flags plus the `hls` and `rtmp` stream URLs |
 | `ModulesStatus` | no | JSON array of attached modules |
 
 The observable ones are pushed on every state change, so a subscribed client
@@ -70,7 +78,6 @@ Descriptions beginning **MOVES HARDWARE** physically move the robot.
 | Command | Parameters | Description |
 |---------|-----------|--------------|
 | `ExecuteRecipe` (obs) | `RecipeName` | MOVES HARDWARE. Run a saved recipe against the active HAL. Fails loudly if the run's own final state is not "succeeded" |
-| `RunSteps` (obs) | `StepsJson`, `Description` | MOVES HARDWARE. Run recipe steps supplied inline — see below |
 | `ValidateRecipe` | `RecipeName` | Check a recipe against the active HAL without running it. Returns `{valid, errors, warnings}` |
 | `PauseRun` | — | Pause the running protocol |
 | `ResumeRun` | — | MOVES HARDWARE. Resume |
@@ -96,30 +103,9 @@ Descriptions beginning **MOVES HARDWARE** physically move the robot.
 
 | Command | Parameters | Description |
 |---------|-----------|--------------|
+| `SetCameraEnabled` | `Camera`, `LiveStream` | Turn the robot's camera and live stream on or off. Nothing moves; the setting lives on the robot |
 | `CaptureImage` (obs) | `Label`, `AllowRobotMotion` | Photograph the deck — see below |
 | `CaptureTimelapse` (obs) | `Count`, `IntervalSeconds`, `Label`, `AllowRobotMotion` | MOVES HARDWARE. A series of photographs in one run — see below |
-
-### `RunSteps`: atomic control without a recipe file
-
-Pass the same JSON a recipe's `Steps` array contains:
-
-```json
-{
-  "StepsJson": "[{\"Command\": \"Mix\", \"PipetteMount\": \"left\", \"Location\": \"MyPlate:A1\", \"Repetitions\": 3, \"Volume\": 100}]",
-  "Description": "Resuspend A1"
-}
-```
-
-Every command the recipe format defines is available this way — `Transfer`,
-`Distribute`, `Mix`, `MoveLabware`, `Delay`, the heater-shaker set,
-`TakeSnapshot`, and the rest (see [HAL_SYSTEM.md](HAL_SYSTEM.md) for the full
-list). Before this, moving one plate or mixing one well meant authoring a whole
-recipe file. It runs against the currently active HAL, exactly like
-`ExecuteRecipe`, so logical names such as `MyPlate` resolve the same way.
-
-`MoveLabware`, `SetModuleTemperature`, `ShakeModule` and `SetModuleLatch` are
-thin, well-named wrappers over the same mechanism, for the operations common
-enough to deserve their own entry in the workflow builder.
 
 ### `MoveLabware`: what it offers, and what it records
 
@@ -180,20 +166,63 @@ camera:
 ```
 
 If capture produces no frame, `device` is the value to check: list the robot's
-video devices over SSH with `ls /dev/video*`. The HTTP path and the exact
-device node have not been verified against this particular Flex — both are one
-config value away, and the command reports precisely which path it used.
+video devices over SSH with `ls /dev/video*`. That only matters for the
+protocol path; the HTTP path uses the robot's own camera service and needs no
+device node.
 
-### `CaptureTimelapse`: what you get instead of video
+### The camera has to be switched on, on the robot
 
-**The robot cannot send back a video.** A protocol executes *on* the robot, and
-the only channel to the orchestrator is the run log, where each frame travels
-base64-encoded. That is fine for one photograph — a JPEG is a couple of hundred
-kilobytes — and impractical for the megabytes of a clip.
+Verified on the bench: the HTTP path works and returns a 1280x720 JPEG of the
+deck without the robot moving at all.
 
-A timelapse is the form this transport supports, and for watching a gel set or
-a plate fill it is the more useful one anyway: frames at chosen moments, each a
-full-resolution still, rather than a low-bitrate video of a mostly-static deck.
+It looked broken for two sessions because of a setting, not a fault. The Flex
+firmware has three camera flags and **all three ship off**. With them off,
+`POST /camera/picture` answers `422 Cannot take photo, camera is disabled`.
+
+Read them with the `CameraStatus` property, set them with `SetCameraEnabled`:
+
+```
+SetCameraEnabled(Camera=true, LiveStream=false)
+```
+
+The setting lives on the robot, not on this server, and survives a restart of
+either. `Camera` and `LiveStream` are deliberately separate parameters:
+enabling the stream broadcasts the lab over the network, which should not ride
+along with permission to take one photograph. The error-recovery camera flag is
+left alone - whether the robot films its own error recovery is a third,
+separate decision.
+
+### Video: yes, as a live stream
+
+**The Flex can send back live video.** Its camera service publishes an HLS
+stream and an RTMP stream; `CameraStatus` reports the URLs.
+
+```json
+{"cameraEnabled": true, "liveStreamEnabled": true,
+ "hls": "http://<robot>:31950/hls/stream.m3u", "rtmp": "/live/stream"}
+```
+
+The HLS URL plays in a browser or in VLC. Source device, resolution, framerate
+and bitrate are configurable on the robot through its own
+`/camera/stream/settings` endpoint.
+
+What the robot cannot do is hand a *recorded clip* back through a protocol run.
+A protocol executes on the robot and its only channel to the orchestrator is
+the run log, where each frame travels base64-encoded - fine for one photograph
+at a couple of hundred kilobytes, impractical for the megabytes of a clip. So
+there are two different things here, and they answer different questions:
+
+| Want | Use |
+|------|-----|
+| Watch what is happening now | the live stream (`CameraStatus` → `hls`) |
+| A file of what happened at chosen moments | `CaptureTimelapse` |
+| One photograph, now | `CaptureImage` |
+
+### `CaptureTimelapse`: stills at intervals, saved as files
+
+For watching a gel set or a plate fill, frames at chosen moments - each a
+full-resolution still that lands in `Results/Images/` - are more useful than a
+low-bitrate video of a mostly-static deck.
 
 ```
 CaptureTimelapse(Count=12, IntervalSeconds=300, Label="curing", AllowRobotMotion=true)
@@ -204,8 +233,8 @@ rather than once per photograph. Count is capped at 240. The frames land in
 `Results/Images/` alongside single captures and appear in the same gallery,
 named so they sort in order.
 
-The same thing can be composed by hand with `RunSteps` — a `TakeSnapshot` and a
-`Delay` per frame — which is what this command generates.
+The protocol it generates is a `TakeSnapshot` and a `Delay` per frame; the
+same thing can be written by hand in a recipe file.
 
 ### Safety features (in `src/server.py`, not exposed as commands)
 

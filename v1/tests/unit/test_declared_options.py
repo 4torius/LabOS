@@ -197,3 +197,53 @@ class TestConnectionMethodsAreDistinct:
     def test_the_failure_message_points_at_the_interactive_options(self):
         source = self.source
         assert "'ask'" in source and "'dialog'" in source
+
+
+class TestAMalformedCatalogIsSurvivable:
+    """The catalog arrives over the wire from another process, frequently one
+    deployed on a different machine and upgraded on a different schedule. It is
+    untrusted input.
+
+    An entry missing a key used to raise KeyError out of _server_to_instrument,
+    out of discover(), and out of the execute route that calls discover()
+    before every command — so one stale remote server made every command on
+    every instrument in the lab fail with the message 'folder'. That message is
+    what an operator actually saw when trying to shake a module.
+    """
+
+    def test_an_entry_with_no_folder_costs_only_its_own_dropdown(self, core):
+        core._server_to_instrument(
+            _server_with_catalog([
+                {"hint": "broken", "parameter_names": ["Whatever"]},
+                {"hint": "recipe", "folder": "Library/Recipes",
+                 "file_extension": ".json", "parameter_names": ["RecipeName"]},
+            ]), {}, {})
+        assert core._get_options_for_hint("broken") == []
+        assert core._ui_dropdowns["recipe"]["folder"] == "Library/Recipes"
+
+    def test_an_entry_with_no_hint_is_ignored(self):
+        core = LabCore(Path("."))
+        core._server_to_instrument(
+            _server_with_catalog([{"folder": "Library/Recipes",
+                                   "parameter_names": ["RecipeName"]}]), {}, {})
+
+    def test_a_folder_entry_with_no_extension_still_works(self, core):
+        core._server_to_instrument(
+            _server_with_catalog([{"hint": "thing", "folder": "Library/Recipes",
+                                   "parameter_names": ["X"]}]), {}, {})
+        assert core._ui_dropdowns["thing"]["file_extension"] == ""
+
+    def test_a_server_with_a_broken_catalog_still_becomes_an_instrument(self, core):
+        """It keeps its commands; it just loses the dropdown it described."""
+        server = _server_with_catalog([{"hint": "broken", "parameter_names": ["X"]}])
+        server.name = "Stale Remote Server"
+        instrument = core._server_to_instrument(server, {}, {})
+        assert instrument.name == "Stale Remote Server"
+
+    def test_the_discover_loop_does_not_build_them_in_one_comprehension(self):
+        """A comprehension discards every instrument already built on the first
+        raise; the loop has to tolerate one server failing."""
+        source = (V1_DIR / "src" / "lab_core.py").read_text(encoding="utf-8")
+        block = source[source.index("await self._discovery.discover_all("):]
+        block = block[:block.index("self._last_discovery_time")]
+        assert "try:" in block and "continue" in block
