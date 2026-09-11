@@ -202,6 +202,38 @@ impedisce alla misura di partire mentre il robot sta ancora pipettando.
 Non esistono cicli né condizioni. LabOS fa sequenze con dipendenze, non controllo
 di flusso.
 
+### Quando uno step fallisce
+
+Il workflow non si ferma e basta, e non tira dritto. Chiede a te.
+
+1. Lo step viene **ritentato automaticamente** qualche volta.
+2. Se continua a fallire, sulla pagina **Operator** compare una richiesta con il
+   **motivo vero** del fallimento e tre pulsanti: **Retry**, **Skip**, **Abort**.
+3. La richiesta **resta lì**: non sparisce da sola, sopravvive a un
+   ricaricamento della pagina, ed è ancora lì se arrivi dieci minuti dopo.
+4. **Retry** riprova. Se fallisce di nuovo te lo richiede, con il nuovo errore.
+   Puoi sistemare qualcosa sul banco e riprovare quante volte vuoi.
+5. **Skip** salta quello step e prosegue col resto. Il run lo registra come
+   saltato, con il motivo.
+6. **Abort** interrompe il workflow e manda l'abort anche allo strumento.
+
+> **Se nessuno risponde.** Dopo un'ora il workflow si **interrompe**. Non salta
+> lo step: proseguire come se fosse stato eseguito è il modo silenzioso di
+> rovinare una piastra. Saltare resta una scelta che fai tu.
+
+**Una ricetta non valida ferma il workflow.** Se uno step è `ValidateRecipe` e
+la ricetta non è eseguibile con la configurazione attiva, lo step **fallisce** e
+ti viene chiesto cosa fare. Ha senso: il robot quella ricetta non la può
+eseguire, quindi tutto quello che viene dopo fallirebbe comunque, con il deck
+già toccato. Lanciato dalla Dashboard invece `ValidateRecipe` resta quello che
+è: un controllo che riporta e non cambia niente.
+
+### Dove leggere cosa è successo
+
+Ogni tentativo di ogni step è una riga nella cronologia del run, con esito,
+durata e il motivo dell'errore. Quattro tentativi falliti sono quattro righe,
+non una. La trovi in **Database** → **Runs & Log**.
+
 ### Quanto tempo aspetta uno step
 
 Non c'è niente da impostare, e il comportamento non è lo stesso per tutti i
@@ -223,9 +255,10 @@ comandi.
 
 ### Mentre gira
 
-- **Operator** (`/operator`) — qui l'umano risponde al sistema. Se un workflow ha
-  uno step manuale, o chiede di ricaricare le punte, **resta fermo finché
-  qualcuno non conferma qui**. Timeout: un'ora per un intervento, dieci minuti
+- **Operator** (`/operator`) — qui l'umano risponde al sistema: step manuali,
+  ricariche di punte, e le decisioni su uno step fallito (vedi Fase 4). Se un
+  workflow ha uno step manuale, o chiede di ricaricare le punte, **resta fermo
+  finché qualcuno non conferma qui**. Timeout: un'ora per un intervento, dieci minuti
   per un'azione manuale o un refill. Se nessuno guarda questa pagina, il workflow
   scade.
 - **Barra di stato** — in fondo a ogni pagina mentre qualcosa è in esecuzione.
