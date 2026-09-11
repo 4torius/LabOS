@@ -406,6 +406,14 @@ class HardwareManager:
                     
         return tips
         
+    def get_config(self) -> Dict[str, Any]:
+        """The whole loaded hardware configuration.
+
+        A copy: callers publish it over SiLA2 and must not be able to edit the
+        deck by editing what they were shown.
+        """
+        return dict(self._config or {})
+
     def get_modules(self) -> Dict[str, Any]:
         """Get configured modules."""
         return self._config.get("Modules", {})

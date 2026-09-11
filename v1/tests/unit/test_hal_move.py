@@ -134,3 +134,43 @@ class TestSlotAssignmentsMetadata:
         manager = HardwareManager(config_folder=str(folder))
         manager.record_labware_move("TargetPlate", "C2")
         assert "Metadata" not in json.loads((folder / "Plain.json").read_text(encoding="utf-8"))
+
+
+class TestTheActiveConfigPropertyPublishesTheDeck:
+    """Two objects in this server are called a config, and the property that
+    is meant to answer "what is on the deck?" published the wrong one.
+
+    ActiveConfig serialised ot.config - the ServerConfig dataclass read from
+    the server's own config.yaml: host, port, robot IP, timeouts - under a
+    property whose description says "this is what ExecuteRecipe runs against".
+    """
+
+    IMPL = ((V1_DIR / "SiLA2" / "OpentronsSiLA2Server" / "src"
+             / "workflow_api_impl.py").read_text(encoding="utf-8"))
+
+    def test_the_hardware_manager_can_hand_over_its_config(self, manager):
+        config = manager.get_config()
+        assert config["ConfigName"] == "TestSetup"
+        assert "Labware" in config and "Modules" in config
+
+    def test_what_it_hands_over_is_a_copy(self, manager):
+        """A client publishing the deck must not be able to edit it."""
+        manager.get_config()["Labware"] = {}
+        assert manager.get_labware(), "the real config was modified"
+
+    def test_the_property_reads_the_hardware_manager(self):
+        start = self.IMPL.index("    def _active_config_json(")
+        body = self.IMPL[start:self.IMPL.index("\n    def ", start + 1)]
+        assert "ot.hardware.get_config()" in body
+
+    def test_it_no_longer_serialises_the_server_settings(self):
+        start = self.IMPL.index("    def _active_config_json(")
+        body = self.IMPL[start:self.IMPL.index("\n    def ", start + 1)]
+        assert "dataclasses.asdict" not in body, (
+            "that is the server's own config.yaml - host, port, timeouts - "
+            "not the deck"
+        )
+
+    def test_a_move_shows_up_in_what_the_property_would_publish(self, manager):
+        manager.record_labware_move("TargetPlate", "C2")
+        assert manager.get_config()["Labware"]["TargetPlate"]["Slot"] == "C2"

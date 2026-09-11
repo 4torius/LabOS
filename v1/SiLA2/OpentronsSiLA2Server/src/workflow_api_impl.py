@@ -24,7 +24,6 @@ the two via _run_async().
 
 import asyncio
 import base64
-import dataclasses
 import json
 import logging
 import os
@@ -195,11 +194,19 @@ class WorkflowAPIImpl(WorkflowAPIBase):
             logger.debug("Could not publish state: %s", exc)
 
     def _active_config_json(self) -> str:
+        """The hardware configuration - the deck - not this server's settings.
+
+        It used to serialise ot.config, which is the ServerConfig dataclass
+        read from the server's own config.yaml: host, port, robot IP, timeouts.
+        So a client asking "what is on the deck?" was handed the server's
+        network settings, under a property whose description says "this is what
+        ExecuteRecipe runs against". Two objects, both called a config.
+        """
         ot = self._require_ot()
         name = ot.get_current_hardware_config() or ""
         config_json = ""
-        if name and ot.config:
-            config_json = json.dumps(dataclasses.asdict(ot.config), indent=2)
+        if ot.hardware:
+            config_json = json.dumps(ot.hardware.get_config(), indent=2)
         return json.dumps({"name": name, "config": config_json})
 
     def _tips_json(self) -> str:
