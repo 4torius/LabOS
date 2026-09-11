@@ -247,6 +247,15 @@ def create_workflows_router(
         if not future.done():
             future.set_result(action_map[action_str])
 
+        # Take it out of the operator queue now rather than waiting for the
+        # waiter's own cleanup, so the buttons disappear on the next refresh
+        # instead of inviting a second click.
+        async with pending_operator_actions_lock:
+            pending_operator_actions[:] = [
+                a for a in pending_operator_actions
+                if a.get("id") != intervention_id
+            ]
+
         state.add_log("info", f"Intervention {intervention_id} resolved: {action_str}", "workflow")
         await ws_manager.broadcast({
             "type": "intervention_resolved",
@@ -521,12 +530,35 @@ def create_workflows_router(
                 "started_at": _step_started[_n].isoformat(),
             })
 
-            result_dict = await _execute_step(
-                step.instrument, step.action, step.parameters,
-                state, ws_manager, _exec_core, shared_wf_ctx,
-                pending_operator_actions, pending_operator_actions_lock,
-                base_dir=BASE_DIR,
-            )
+            try:
+                result_dict = await _execute_step(
+                    step.instrument, step.action, step.parameters,
+                    state, ws_manager, _exec_core, shared_wf_ctx,
+                    pending_operator_actions, pending_operator_actions_lock,
+                    base_dir=BASE_DIR,
+                )
+            except Exception as exc:
+                # A failing step raises, so the completion write below never
+                # ran and the row stayed "running" for ever - four retries of
+                # one step showed up in the timeline as four steps still in
+                # progress, with no reason recorded against any of them. Close
+                # the row here, then let the failure carry on to the retry and
+                # intervention machinery.
+                _failed_at = datetime.now()
+                _began_at = _step_started.pop(_n, None)
+                runs.record_step(_run_id, {
+                    "step_number": _n,
+                    "attempt": _attempts.get(_n, 1),
+                    "instrument": step.instrument,
+                    "action": step.action,
+                    "parameters": step.parameters,
+                    "status": "failed",
+                    "ended_at": _failed_at.isoformat(),
+                    "duration_seconds": ((_failed_at - _began_at).total_seconds()
+                                         if _began_at else None),
+                    "error": str(exc),
+                })
+                raise
 
             if wf_context and shared_wf_ctx.get("plate_id") and not wf_context.plate_id:
                 wf_context.plate_id = shared_wf_ctx["plate_id"]
@@ -608,10 +640,7 @@ def create_workflows_router(
         executor.add_progress_callback(on_progress)
 
         async def on_intervention(req) -> "InterventionAction":
-            from src.lab_core import InterventionAction
             iid = f"step_{req.step_number}_{int(datetime.now().timestamp())}"
-            future: asyncio.Future = asyncio.get_event_loop().create_future()
-            pending_interventions[iid] = future
             total_steps = len(workflow_obj.steps)
             await _broadcast_workflow({
                 "type": "workflow_progress",
@@ -624,23 +653,17 @@ def create_workflows_router(
                 "message": f"Step failed: {req.error.message}",
                 "percent": round((req.step_number / total_steps * 100) if total_steps else 0),
             })
-            await ws_manager.broadcast({
-                "type": "intervention_required",
-                "intervention_id": iid,
-                "step": req.step_number,
-                "instrument": req.instrument,
-                "action": req.action,
-                "error": req.error.message,
-                "category": req.error.category.value,
-                "workflow_name": workflow_name
-            })
-            try:
-                timeout = get_settings(BASE_DIR).webapp.timeouts.intervention_timeout
-                return await asyncio.wait_for(future, timeout=timeout)
-            except asyncio.TimeoutError:
-                from src.lab_core import InterventionAction
-                pending_interventions.pop(iid, None)
-                return InterventionAction.SKIP
+            return await _ask_operator(
+                req,
+                intervention_id=iid,
+                pending_interventions=pending_interventions,
+                pending_operator_actions=pending_operator_actions,
+                pending_operator_actions_lock=pending_operator_actions_lock,
+                ws_manager=ws_manager,
+                state=state,
+                base_dir=BASE_DIR,
+                extra_broadcast={"workflow_name": workflow_name},
+            )
 
         executor.set_intervention_callback(on_intervention)
 
@@ -682,6 +705,11 @@ def create_workflows_router(
                 "steps_failed": result.steps_failed,
                 "steps_skipped": result.steps_skipped,
                 "duration_seconds": result.duration_seconds,
+                # A run can finish successfully and still have something worth
+                # reading: a step the operator chose to skip says so here.
+                # Without this the summary showed "1 skipped" and no hint of
+                # which one, or why.
+                "notes": result.errors,
             }
         else:
             state.add_log("error", f"Workflow failed: {result.errors}", "workflow")
@@ -1011,29 +1039,20 @@ def create_workflows_router(
                         asyncio.create_task(ws_manager.broadcast(_msg))
 
                     async def on_batch_intervention(req) -> "InterventionAction":
-                        from src.lab_core import InterventionAction
                         iid = f"batch_{batch_id}_step_{req.step_number}_{int(datetime.now().timestamp())}"
-                        future: asyncio.Future = asyncio.get_event_loop().create_future()
-                        pending_interventions[iid] = future
-                        total_steps = len(wf_obj.steps)
-                        await ws_manager.broadcast({
-                            "type": "intervention_required",
-                            "intervention_id": iid,
-                            "step": req.step_number,
-                            "instrument": req.instrument,
-                            "action": req.action,
-                            "error": req.error.message,
-                            "category": req.error.category.value,
-                            "workflow_name": req.workflow_name,
-                            "sample_id": sample_id,
-                            "batch_id": batch_id,
-                        })
-                        try:
-                            timeout = get_settings(BASE_DIR).webapp.timeouts.intervention_timeout
-                            return await asyncio.wait_for(future, timeout=timeout)
-                        except asyncio.TimeoutError:
-                            pending_interventions.pop(iid, None)
-                            return InterventionAction.SKIP
+                        return await _ask_operator(
+                            req,
+                            intervention_id=iid,
+                            pending_interventions=pending_interventions,
+                            pending_operator_actions=pending_operator_actions,
+                            pending_operator_actions_lock=pending_operator_actions_lock,
+                            ws_manager=ws_manager,
+                            state=state,
+                            base_dir=BASE_DIR,
+                            extra_broadcast={"workflow_name": req.workflow_name,
+                                             "sample_id": sample_id,
+                                             "batch_id": batch_id},
+                        )
 
                     executor.set_step_executor(_sample_step)
                     executor.add_progress_callback(on_batch_progress)
@@ -1195,6 +1214,18 @@ async def _execute_step(
         result = await core.execute_command(device_id, action, params)
         logger.info(f"[WORKFLOW] {device_id}/{action} → success={result.success}, error={result.error}")
 
+        # A validation that comes back negative is a successful *command* - it
+        # ran, and the verdict is in its result - but inside a workflow it is a
+        # failed *step*. The robot cannot execute that recipe, so every step
+        # after it is going to fail anyway, on a deck that has already been
+        # touched. Better to stop here and ask, while nothing has moved.
+        #
+        # Only inside a workflow: run from the Dashboard, ValidateRecipe stays
+        # what it is, a check that reports and changes nothing.
+        invalid = _validation_failure(action, result)
+        if invalid:
+            raise Exception(invalid)
+
         if result.success:
             state.add_log("info", f"{action} completed on {device_id}", "workflow")
 
@@ -1271,6 +1302,134 @@ async def _execute_step(
         state.add_command(device=instrument, command=action, params=params,
                           result={"error": str(e), "workflow": True}, success=False)
         raise
+
+
+def _validation_failure(action: str, result) -> Optional[str]:
+    """The complaint a negative validation should stop the workflow with.
+
+    None when the step is not a validation, or the recipe checks out.
+    """
+    if action.lower() != "validaterecipe" or not result.success:
+        return None
+    payload = result.data
+    if isinstance(payload, dict):
+        payload = next((v for v in payload.values() if isinstance(v, str)), "")
+    if not isinstance(payload, str) or not payload.strip():
+        return None
+    try:
+        verdict = json.loads(payload)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(verdict, dict) or verdict.get("valid") is not False:
+        return None
+    problems = verdict.get("errors") or ["no reason given"]
+    config = verdict.get("hal_config")
+    return ("La ricetta non è eseguibile con la configurazione hardware attiva"
+            + (f" ({config})" if config else "") + ": "
+            + "; ".join(str(e) for e in problems))
+
+
+async def _ask_operator(
+    req,
+    *,
+    intervention_id: str,
+    pending_interventions: dict,
+    pending_operator_actions: list,
+    pending_operator_actions_lock,
+    ws_manager,
+    state,
+    base_dir,
+    extra_broadcast: Optional[dict] = None,
+):
+    """Ask the operator to retry, skip or abort a step that failed.
+
+    The request goes into `pending_operator_actions` - the same queue manual
+    steps and tip refills use - and not only onto the websocket.
+
+    It used to be websocket-only, and that never worked, in any version of this
+    file. The Operator page pushes an incoming `intervention_required` into a
+    local array, and every three seconds `refreshPendingActions()` replaces that
+    array wholesale with `GET /api/operator/pending`, which interventions were
+    never part of. So the Retry/Skip/Abort buttons appeared and were wiped
+    within three seconds, before anyone could click them - and a page opened
+    after the failure, or reloaded, never saw the request at all. The workflow
+    then sat for the full hour and gave up on its own.
+
+    Being in the queue means it survives the refresh, survives a reload, and is
+    there for whoever walks up to the machine afterwards.
+    """
+    from src.lab_core import InterventionAction
+
+    loop = asyncio.get_event_loop()
+    future: asyncio.Future = loop.create_future()
+    pending_interventions[intervention_id] = future
+
+    notification = {
+        # The Operator page renders any entry carrying `is_intervention` with
+        # Retry/Skip/Abort instead of a Confirm button; `id` is what its
+        # acknowledge bookkeeping keys on.
+        "id": intervention_id,
+        "is_intervention": True,
+        "intervention_id": intervention_id,
+        "type": "intervention_required",
+        "title": f"Step {req.step_number} fallito — serve una decisione",
+        "message": (f"{req.instrument} → {req.action}\n"
+                    f"{req.error.details or req.error.message}"),
+        "priority": "urgent",
+        "requires_action": True,
+        "timestamp": datetime.now().isoformat(),
+        "step": req.step_number,
+        "instrument": req.instrument,
+        "action": req.action,
+        # CategorizedError.message is a category label ("Hardware error:
+        # ValidateRecipe on Opentrons Flex"); what tells an operator what
+        # actually went wrong is .details, the raw error text. Asking for a
+        # decision without saying what it is about is not a decision.
+        "error": req.error.details or req.error.message,
+        "category": req.error.category.value,
+        "category_label": req.error.message,
+    }
+    async with pending_operator_actions_lock:
+        pending_operator_actions.append(notification)
+
+    broadcast = dict(notification)
+    if extra_broadcast:
+        broadcast.update(extra_broadcast)
+    await ws_manager.broadcast(broadcast)
+    state.add_log("warning",
+                  f"Step {req.step_number} failed on {req.instrument}: "
+                  f"{req.error.details or req.error.message} "
+                  f"— waiting for a decision on the Operator page", "workflow")
+
+    timeout = get_settings(base_dir).webapp.timeouts.intervention_timeout
+    try:
+        return await asyncio.wait_for(future, timeout=timeout)
+    except asyncio.TimeoutError:
+        # Abort, not skip. Nobody answered, so nobody knows whether the rest of
+        # the workflow still makes sense without this step - and carrying on
+        # without it is the outcome that quietly ruins a plate. Skipping stays
+        # available, as a decision someone takes.
+        state.add_log("error",
+                      f"No decision on step {req.step_number} within {timeout}s "
+                      f"— aborting the workflow", "workflow")
+        await ws_manager.broadcast({
+            "type": "intervention_timeout",
+            "intervention_id": intervention_id,
+            "step": req.step_number,
+            "message": f"Nessuna risposta entro {timeout}s: workflow interrotto",
+        })
+        return InterventionAction.ABORT
+    finally:
+        pending_interventions.pop(intervention_id, None)
+        async with pending_operator_actions_lock:
+            pending_operator_actions[:] = [
+                a for a in pending_operator_actions
+                if a.get("id") != intervention_id
+            ]
+        await ws_manager.broadcast({
+            "type": "intervention_resolved",
+            "intervention_id": intervention_id,
+        })
 
 
 async def _wait_operator(action, params, state, ws_manager, pending_operator_actions, lock, timeout):

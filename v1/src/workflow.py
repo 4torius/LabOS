@@ -547,6 +547,11 @@ class PnPWorkflowExecutor:
     #: not: if the instrument cannot acknowledge a stop in this long, the
     #: operator needs to be told to intervene physically, not kept waiting.
     ABORT_TIMEOUT_S = 30.0
+    #: How many times one step may come back to the operator before the
+    #: executor stops asking. A human clicking Retry is not a runaway loop, so
+    #: this is only a backstop against a callback that answers on its own -
+    #: an unattended intervention timeout, say - and would otherwise spin.
+    MAX_INTERVENTION_ROUNDS = 20
 
     def request_abort(self):
         """Request workflow abortion.
@@ -1127,8 +1132,24 @@ class PnPWorkflowExecutor:
                 step_results[step.step_number] = outcome
 
                 if outcome.success:
-                    completed += 1
+                    # A step the operator chose to skip comes back successful so
+                    # that the rest of the workflow can carry on - that is what
+                    # they decided. It is still not a step that ran, and a run
+                    # summary reading "2 completed, 0 skipped" over a step
+                    # somebody waved past is the opposite of a record.
+                    operator_skipped = (
+                        isinstance(outcome.data, dict) and outcome.data.get("skipped")
+                    )
                     done.add(step.step_number)
+                    if operator_skipped:
+                        skipped += 1
+                        step.status = StepStatus.SKIPPED
+                        reason = (outcome.data.get("reason") or "operator decision")
+                        errors.append(f"Step {step.step_number} skipped: {reason}")
+                        _notify(step, StepStatus.SKIPPED,
+                                f"Skipped {step.action} on {step.instrument}: {reason}")
+                        continue
+                    completed += 1
                     step.status = StepStatus.SUCCESS
                     _notify(step, StepStatus.SUCCESS,
                             f"Completed {step.action} on {step.instrument}")
@@ -1314,63 +1335,87 @@ class PnPWorkflowExecutor:
                 if last_error.category == ErrorCategory.DEVICE_UNAVAILABLE:
                     break
         
-        # All retries exhausted - try human intervention if enabled
-        if (self._intervention_callback and 
-            self._error_config.enable_human_intervention and
-            last_error):
-            
+        # Automatic retries are exhausted; ask a human what to do.
+        #
+        # This is a loop, and it used to be a single pass. A retry that failed
+        # again fell straight through to "step failed" and the workflow halted
+        # without asking a second time - so pressing Retry was a one-shot
+        # gamble, and losing it ended the run with no further say. Each round
+        # asks again, carrying the error from the *latest* attempt rather than
+        # the one that started all this.
+        rounds = 0
+        while (self._intervention_callback and
+               self._error_config.enable_human_intervention and
+               last_error and
+               rounds < self.MAX_INTERVENTION_ROUNDS):
+            rounds += 1
             step.status = StepStatus.WAITING_INTERVENTION
-            
+
             request = InterventionRequest(
                 step_number=step.step_number,
                 instrument=step.instrument,
                 action=step.action,
                 error=last_error,
-                attempt=max_attempts,
+                attempt=max_attempts + rounds - 1,
                 max_attempts=max_attempts,
                 workflow_name=workflow_name
             )
-            
+
             try:
                 action = await self._intervention_callback(request)
-                
-                if action == InterventionAction.RETRY:
-                    # User wants to retry after fixing the issue
-                    step.status = StepStatus.RUNNING
-                    if self._step_executor_fn:
-                        result = await self._step_executor_fn(step, wf_context)
-                    else:
-                        result = await self.registry.execute(
-                            step.instrument,
-                            step.action,
-                            step.parameters,
-                            timeout=step_timeout
-                        )
-                    if result.success:
-                        step.end_time = datetime.now()
-                        step.result = result
-                        return result
-                    last_result = result
-                    
-                elif action == InterventionAction.SKIP:
-                    # User wants to skip this step
-                    step.status = StepStatus.SKIPPED
-                    step.end_time = datetime.now()
-                    return CommandResult(
-                        success=True,  # Treat as success for workflow continuation
-                        data={"skipped": True, "reason": "User intervention"}
-                    )
-                    
-                elif action == InterventionAction.ABORT:
-                    # User wants to abort workflow
-                    self.request_abort()
-                    
             except Exception as intervention_error:
                 import logging
                 logging.getLogger(__name__).error(
                     f"Intervention callback failed: {intervention_error}"
                 )
-        
+                break
+
+            if action == InterventionAction.SKIP:
+                step.status = StepStatus.SKIPPED
+                step.end_time = datetime.now()
+                return CommandResult(
+                    success=True,  # so the rest of the workflow can carry on
+                    data={"skipped": True, "reason": "User intervention"}
+                )
+
+            if action == InterventionAction.ABORT:
+                self.request_abort()
+                break
+
+            if action != InterventionAction.RETRY:
+                break
+
+            # Retry, and whatever happens, come back and ask again rather than
+            # silently giving up on the operator.
+            step.status = StepStatus.RUNNING
+            try:
+                if self._step_executor_fn:
+                    result = await self._step_executor_fn(step, wf_context)
+                else:
+                    result = await self.registry.execute(
+                        step.instrument,
+                        step.action,
+                        step.parameters,
+                        timeout=step_timeout
+                    )
+            except Exception as exc:
+                result = CommandResult(success=False, error=str(exc))
+
+            if result.success:
+                step.end_time = datetime.now()
+                step.result = result
+                return result
+
+            last_result = result
+            last_error = CategorizedError.from_result(result, context)
+
+        if rounds >= self.MAX_INTERVENTION_ROUNDS:
+            import logging
+            logging.getLogger(__name__).error(
+                f"Step {step.step_number} asked for a decision "
+                f"{self.MAX_INTERVENTION_ROUNDS} times; giving up."
+            )
+
         step.end_time = datetime.now()
         step.status = StepStatus.FAILED
         step.result = last_result
