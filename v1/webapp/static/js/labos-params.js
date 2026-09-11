@@ -128,6 +128,94 @@
         });
     }
 
+    /**
+     * A form field hands back a string. SiLA2 wants the declared type.
+     *
+     * Every HTML control produces text, so a Boolean parameter filled in from
+     * a form arrives as "false" - a non-empty string, which is emphatically
+     * not false - and the sila2 client refuses it with "Expected a bool
+     * value". The workflow builder had no Boolean field at all, so
+     * `SetModuleLatch` went out with `Open: "false"` and `MoveLabware` with
+     * `UseGripper: "UseGripper"`, the field's own name typed into a free-text
+     * box. Both failed four times and stopped the run, after the Tecan had
+     * already moved the plate.
+     *
+     * Numbers have the same shape of fault waiting: an Integer parameter
+     * submitted as "200" is a string too.
+     *
+     * Applied on the way out, so a workflow saved before this existed - with
+     * "false" already written into its JSON - is fixed when it runs, without
+     * anyone reopening it.
+     */
+    function coerce(value, declaredType) {
+        var type = String(declaredType || '').toLowerCase();
+
+        if (type === 'boolean') {
+            if (typeof value === 'boolean') return value;
+            if (value === null || value === undefined) return false;
+            var text = String(value).trim().toLowerCase();
+            // Anything that is not an affirmative is false, including the
+            // parameter's own name and an empty box.
+            return text === 'true' || text === '1' || text === 'yes' ||
+                   text === 'on' || text === 'si' || text === 'sì';
+        }
+
+        if (type === 'integer') {
+            if (value === '' || value === null || value === undefined) return value;
+            var whole = parseInt(value, 10);
+            return isNaN(whole) ? value : whole;
+        }
+
+        if (type === 'real' || type === 'float' || type === 'double' || type === 'number') {
+            if (value === '' || value === null || value === undefined) return value;
+            var real = parseFloat(value);
+            return isNaN(real) ? value : real;
+        }
+
+        return value;
+    }
+
+    /**
+     * Coerce every parameter of one step against the command's own metadata.
+     * Unknown parameters are passed through untouched - `hal_config` and the
+     * other workflow-only keys are not the command's business.
+     */
+    function coerceAll(params, cmd) {
+        if (!cmd || !cmd.parameters) return params;
+        var out = {};
+        Object.keys(params || {}).forEach(function (key) { out[key] = params[key]; });
+        cmd.parameters.forEach(function (p) {
+            if (Object.prototype.hasOwnProperty.call(out, p.name)) {
+                out[p.name] = coerce(out[p.name], p.type);
+            }
+        });
+        return out;
+    }
+
+    /** Required Boolean parameters need a value; nothing else supplies one. */
+    function applyRequiredBooleanDefaults(step, cmd) {
+        if (!cmd || !cmd.parameters) return;
+        cmd.parameters.forEach(function (p) {
+            if (String(p.type || '').toLowerCase() !== 'boolean') return;
+            if (!p.required) return;
+            if (Object.prototype.hasOwnProperty.call(step.params, p.name)) return;
+            // false is the conservative one for both booleans on this surface:
+            // UseGripper false pauses for a manual move, Open false keeps the
+            // latch shut.
+            step.params[p.name] = coerce(p.default, 'boolean');
+        });
+    }
+
+    /** The two choices, as a <select> that submits a real boolean. */
+    function buildBooleanSelect(paramName, currentValue, selectClass) {
+        var on = coerce(currentValue, 'boolean');
+        return '<select class="' + esc(selectClass || 'form-select form-select-sm') +
+               '" data-param="' + esc(paramName) + '" data-type="Boolean">' +
+               '<option value="true"' + (on ? ' selected' : '') + '>true</option>' +
+               '<option value="false"' + (on ? '' : ' selected') + '>false</option>' +
+               '</select>';
+    }
+
     /** True when a command is documented as physically moving the instrument. */
     function movesHardware(cmd) {
         return !!(cmd && cmd.description &&
@@ -137,8 +225,12 @@
     LabOS.params = {
         normalizeOptions: normalizeOptions,
         buildSelect: buildSelect,
+        buildBooleanSelect: buildBooleanSelect,
         applyRequiredSelectDefaults: applyRequiredSelectDefaults,
         applyRequiredStringDefaults: applyRequiredStringDefaults,
+        applyRequiredBooleanDefaults: applyRequiredBooleanDefaults,
+        coerce: coerce,
+        coerceAll: coerceAll,
         movesHardware: movesHardware
     };
 

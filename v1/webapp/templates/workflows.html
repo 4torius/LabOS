@@ -1451,12 +1451,26 @@ function renderProperties() {
             var uiHint = (paramObj.ui_hint || '').toLowerCase();
             var paramLower = param.toLowerCase();
             var currentValue = step.params[param] || paramObj.default || '';
+            var paramType = String(paramObj.type || '').toLowerCase();
             
             html += '<div class="property-group">' + '<label>' + displayName + '</label>';
             
             // Check ui_hint first, then check for known parameter types
             // Constrained SiLA2 params carry their own options list from the API
-            if (paramObj.options && paramObj.options.length > 0 &&
+            if (paramType === 'boolean') {
+                // A Boolean used to land in the free-text box below, so it
+                // submitted a string: "false", or the parameter's own name.
+                // The sila2 client refuses both with "Expected a bool value".
+                html += LabOS.params.buildBooleanSelect(
+                    param, currentValue, 'form-select form-select-sm param-input');
+            } else if (paramType === 'integer' || paramType === 'real' ||
+                       paramType === 'float' || paramType === 'double') {
+                html += '<input type="number" class="form-control form-control-sm param-input" ' +
+                       'data-param="' + param + '" data-type="' + paramObj.type + '" ' +
+                       (paramType === 'integer' ? '' : 'step="0.01" ') +
+                       'value="' + String(currentValue).replace(/"/g, '&quot;') + '" ' +
+                       'placeholder="Enter ' + param + '">';
+            } else if (paramObj.options && paramObj.options.length > 0 &&
                     uiHint !== 'recipe' && uiHint !== 'protocol' && uiHint !== 'hal_config' &&
                     uiHint !== 'location' && uiHint !== 'labware' && uiHint !== 'tip_rack' &&
                     uiHint !== 'liquid_class' && uiHint !== 'mobile_task') {
@@ -1628,6 +1642,7 @@ function _applyRequiredDefaultsToAllSteps() {
         if (cmd) {
             LabOS.params.applyRequiredSelectDefaults(step, cmd);
             LabOS.params.applyRequiredStringDefaults(step, cmd);
+            LabOS.params.applyRequiredBooleanDefaults(step, cmd);
         }
     });
 }
@@ -1642,6 +1657,7 @@ function updateCommand(cmdId) {
     var cmd = inst && inst.commands.find(function(c) { return c.id === cmdId; });
     LabOS.params.applyRequiredSelectDefaults(step, cmd);
     LabOS.params.applyRequiredStringDefaults(step, cmd);
+    LabOS.params.applyRequiredBooleanDefaults(step, cmd);
 
     step.params = normalizeStepParamsForCommand(step.command, step.params);
     renderSteps();
@@ -1714,7 +1730,7 @@ function saveWorkflow() {
             StepNumber: i + 1,
             Instrument: INSTRUMENTS[step.type].name,
             Action: step.command,
-            Parameters: normalizeStepParamsForCommand(step.command, step.params),
+            Parameters: _stepParams(step),
             DependsOn: step.dependsOn || []
         });
     }
@@ -1921,9 +1937,21 @@ function _showExecuteModal() {
     new bootstrap.Modal(document.getElementById('executeModal')).show();
 }
 
+function _stepParams(step) {
+    // Every form control hands back a string; the command declared types.
+    // Coercing here rather than only at edit time means a workflow saved
+    // before the Boolean field existed - with "false" already written into its
+    // JSON - is corrected on the way out, without anyone reopening it.
+    var params = normalizeStepParamsForCommand(step.command, step.params);
+    var inst = INSTRUMENTS[step.type];
+    var cmd = inst && inst.commands &&
+              inst.commands.find(function (c) { return c.id === step.command; });
+    return LabOS.params.coerceAll(params, cmd);
+}
+
 function _buildSteps(halConfig) {
     return workflowSteps.map(function(step, i) {
-        var params = normalizeStepParamsForCommand(step.command, step.params);
+        var params = _stepParams(step);
         if (step.type === 'opentrons' && halConfig) params.hal_config = halConfig;
         return {
             StepNumber: i + 1,
@@ -2091,7 +2119,7 @@ function saveCurrentAsTemplate() {
                 StepNumber: i + 1,
                 Instrument: (INSTRUMENTS[step.type] || {}).name || step.type,
                 Action: step.command,
-                Parameters: normalizeStepParamsForCommand(step.command, step.params),
+                Parameters: _stepParams(step),
                 DependsOn: step.dependsOn || []
             };
         });
@@ -2149,7 +2177,7 @@ function exportWorkflow() {
             StepNumber: i + 1,
             Instrument: (INSTRUMENTS[step.type] || {}).name || step.type,
             Action: step.command,
-            Parameters: normalizeStepParamsForCommand(step.command, step.params),
+            Parameters: _stepParams(step),
             DependsOn: step.dependsOn || []
         };
     });

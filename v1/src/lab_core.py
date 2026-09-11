@@ -212,6 +212,103 @@ class ExecutionResult:
 
 #                           LAB CORE
 
+def coerce_parameters(
+    parameters: Dict[str, Any], declared: List["CommandParameter"]
+) -> Dict[str, Any]:
+    """Parameter values as the types the command declared them.
+
+    Everything that reaches a command has been through something that only
+    carries text - an HTML form, a JSON workflow file somebody typed, a curl.
+    A Boolean written as "false" is a non-empty string, which is emphatically
+    not false, and SiLA2 refuses it with "Expected a bool value".
+
+    Two real runs died on exactly that, four attempts each, after the plate
+    reader had already moved the plate:
+
+        SetModuleLatch  {"ModuleName": "HeaterShaker", "Open": "false"}
+        MoveLabware     {"LabwareName": "TargetPlate", "UseGripper": "UseGripper"}
+
+    The second one is the parameter's own name, typed into a text box whose
+    placeholder said "Enter UseGripper" - the workflow builder had no Boolean
+    field, so both fell through to free text. The Dashboard, which renders a
+    checkbox, was fine with the same command on the same server.
+
+    Fixing the form was necessary and not sufficient: a workflow saved before
+    that fix still has "false" in its JSON, and the orchestrator is the one
+    place every client passes through. Only declared parameters are touched;
+    anything else (hal_config and the other workflow-only keys) goes by
+    untouched. A value that is not the declared type at all raises
+    ParameterTypeError, naming the parameter and what it accepts, rather than
+    being quietly reinterpreted.
+    """
+    if not declared:
+        return parameters
+    types = {p.name: (p.data_type or "").lower() for p in declared}
+    out: Dict[str, Any] = {}
+    for key, value in (parameters or {}).items():
+        kind = types.get(key)
+        if kind == "boolean":
+            out[key] = _as_bool(key, value)
+        elif kind == "integer":
+            out[key] = _as_number(key, value, int)
+        elif kind in ("real", "double", "float"):
+            out[key] = _as_number(key, value, float)
+        else:
+            out[key] = value
+    return out
+
+
+#: What a boolean may be written as. Anything outside both sets is not a
+#: mistyped boolean, it is not a boolean at all.
+_TRUTHY = frozenset({"true", "1", "yes", "on", "si", "sì", "y", "t"})
+_FALSY = frozenset({"false", "0", "no", "off", "n", "f", ""})
+
+
+class ParameterTypeError(ValueError):
+    """A parameter value that cannot be the type the command declared."""
+
+
+def _as_bool(name: str, value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in _TRUTHY:
+        return True
+    if text in _FALSY:
+        return False
+    # Deliberately not "anything unrecognised is false". MoveLabware arrived
+    # once with UseGripper="UseGripper" - the parameter's own name, typed into
+    # a text box - and reading that as false means a manual move: the robot
+    # loads the deck, then stops and waits at its touchscreen for somebody to
+    # carry the plate by hand. Confirmed on hardware. A nonsense value should
+    # say so immediately, not turn into a quiet instruction to a human.
+    raise ParameterTypeError(
+        f"'{name}' is a true/false parameter and cannot be {value!r}. "
+        f"Write true or false."
+    )
+
+
+def _as_number(name: str, value: Any, cast) -> Any:
+    if isinstance(value, bool):          # bool is an int; that is not intended here
+        return cast(int(value))
+    if isinstance(value, (int, float)):
+        return cast(value)
+    text = str(value).strip()
+    if not text:
+        return value
+    try:
+        return cast(float(text)) if cast is int else cast(text)
+    except (TypeError, ValueError):
+        raise ParameterTypeError(
+            f"'{name}' is a {'whole number' if cast is int else 'number'} "
+            f"parameter and cannot be {value!r}."
+        ) from None
+
+
 class LabCore:
     """
     Core module for lab automation.
@@ -1026,6 +1123,14 @@ class LabCore:
                     success=False,
                     error=f"Command '{command_id}' not found on {instrument.name}"
                 )
+
+            # Whatever sent these - a form, a saved workflow, a curl - carried
+            # them as text. SiLA2 wants the declared types.
+            try:
+                parameters = coerce_parameters(parameters, cmd.parameters)
+            except ParameterTypeError as exc:
+                self._log("error", f"{command_id}: {exc}")
+                return ExecutionResult(success=False, error=str(exc))
             
             # Execute via PnPClient (Strategy 0: sila2 SilaClient).
             # Observable SiLA2 commands (ExecuteRecipe, RunMeasurement, ...)
