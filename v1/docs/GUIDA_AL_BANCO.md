@@ -202,6 +202,23 @@ impedisce alla misura di partire mentre il robot sta ancora pipettando.
 Non esistono cicli né condizioni. LabOS fa sequenze con dipendenze, non controllo
 di flusso.
 
+### Tre campi che il builder non espone
+
+Si mettono a mano nel file in `Library/Workflows/`, accanto a `DependsOn`, e
+valgono per quel singolo step. Nessuno dei tre serve nell'uso normale: metterli
+è una scelta per un caso preciso.
+
+| Campo | Cosa fa |
+|-------|---------|
+| `RetryCount` | Quanti ritentativi automatici prima di chiamare te. Vuoto significa 3, cioè quattro tentativi in tutto. `0` ti chiama al primo errore |
+| `OnFailure` | Cosa succede agli step che dipendono da questo se fallisce: `stop` ferma tutto (predefinito), `skip` li salta, `continue` li fa partire lo stesso |
+| `TimeoutSeconds` | Limite di tempo per questo step. Scaduto, viene interrotto e te lo segnala come timeout. `0` significa senza limite |
+
+> **Dove va `TimeoutSeconds`.** Accanto a `Instrument` e `Action`, non dentro
+> `Parameters`. Nei parametri di `RequestOperatorTask` esiste un
+> `TimeoutSeconds` con lo stesso nome ma significato diverso: quello è quanto
+> tempo ha la persona per confermare.
+
 ### Quando uno step fallisce
 
 Il workflow non si ferma e basta, e non tira dritto. Chiede a te.
@@ -239,7 +256,8 @@ non una. La trovi in **Database** → **Runs & Log**.
 Non c'è niente da impostare, e il comportamento non è lo stesso per tutti i
 comandi.
 
-- **I comandi lunghi non hanno limite.** `ExecuteRecipe`, `RunMeasurement`,
+- **I comandi lunghi non hanno limite**, a meno che tu non gliene dia uno con
+  `TimeoutSeconds`. `ExecuteRecipe`, `RunMeasurement`,
   `MoveLabware`, `Home` finiscono quando lo strumento ha finito, che sia un
   minuto o tre ore. È voluto: un run da due ore non deve essere ucciso a metà
   perché un contatore è scaduto.

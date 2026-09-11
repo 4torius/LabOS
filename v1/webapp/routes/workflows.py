@@ -537,7 +537,12 @@ def create_workflows_router(
                     pending_operator_actions, pending_operator_actions_lock,
                     base_dir=BASE_DIR,
                 )
-            except Exception as exc:
+            except (Exception, asyncio.CancelledError) as exc:
+                # CancelledError too, and it is not an Exception subclass: a
+                # step cut off by its own TimeoutSeconds is cancelled from
+                # outside, so without this its row stayed "running" exactly
+                # like an uncaught failure used to.
+                #
                 # A failing step raises, so the completion write below never
                 # ran and the row stayed "running" for ever - four retries of
                 # one step showed up in the timeline as four steps still in
@@ -552,11 +557,12 @@ def create_workflows_router(
                     "instrument": step.instrument,
                     "action": step.action,
                     "parameters": step.parameters,
-                    "status": "failed",
+                    "status": "timeout" if isinstance(exc, asyncio.CancelledError) else "failed",
                     "ended_at": _failed_at.isoformat(),
                     "duration_seconds": ((_failed_at - _began_at).total_seconds()
                                          if _began_at else None),
-                    "error": str(exc),
+                    "error": (str(exc) or "interrotto: TimeoutSeconds dello step scaduto"
+                              if isinstance(exc, asyncio.CancelledError) else str(exc)),
                 })
                 raise
 

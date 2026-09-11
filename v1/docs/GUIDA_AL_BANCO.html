@@ -565,6 +565,24 @@
     <p>Non esistono cicli né condizioni. LabOS fa sequenze con dipendenze, non controllo di flusso.</p>
   </div>
 
+  <h3>Tre campi che il builder non espone</h3>
+  <p>Si mettono a mano nel file in <code>Library/Workflows/</code>, accanto a <code>DependsOn</code>, e valgono per quel singolo step. Nessuno dei tre serve nell'uso normale: metterli è una scelta per un caso preciso.</p>
+  <div class="tablebox">
+  <table>
+    <thead><tr><th>Campo</th><th>Cosa fa</th></tr></thead>
+    <tbody>
+      <tr><td><code>RetryCount</code></td><td>Quanti ritentativi automatici prima di chiamare te. Vuoto significa 3, cioè quattro tentativi in tutto. <code>0</code> ti chiama al primo errore</td></tr>
+      <tr><td><code>OnFailure</code></td><td>Cosa succede agli step che dipendono da questo se fallisce: <code>stop</code> ferma tutto (predefinito), <code>skip</code> li salta, <code>continue</code> li fa partire lo stesso</td></tr>
+      <tr><td><code>TimeoutSeconds</code></td><td>Limite di tempo per questo step. Scaduto, viene interrotto e te lo segnala come timeout. <code>0</code> significa senza limite</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note">
+    <span class="tag">Dove va TimeoutSeconds</span>
+    <p>Accanto a <code>Instrument</code> e <code>Action</code>, non dentro <code>Parameters</code>. Nei parametri di <code>RequestOperatorTask</code> esiste un <code>TimeoutSeconds</code> con lo stesso nome ma significato diverso: quello è quanto tempo ha la persona per confermare.</p>
+  </div>
+
   <h3>Quando uno step fallisce</h3>
   <p>Il workflow non si ferma e basta, e non tira dritto. Chiede a te.</p>
   <ol class="steps">
@@ -593,7 +611,7 @@
   <h3>Quanto tempo aspetta uno step</h3>
   <p>Non c'è niente da impostare, e il comportamento non è lo stesso per tutti i comandi.</p>
   <ul class="plain">
-    <li><b>I comandi lunghi non hanno limite.</b> <code>ExecuteRecipe</code>, <code>RunMeasurement</code>, <code>MoveLabware</code>, <code>Home</code> finiscono quando lo strumento ha finito, che sia un minuto o tre ore. È voluto: un run da due ore non deve essere ucciso a metà perché un contatore è scaduto.</li>
+    <li><b>I comandi lunghi non hanno limite</b>, a meno che tu non gliene dia uno con <code>TimeoutSeconds</code>. <code>ExecuteRecipe</code>, <code>RunMeasurement</code>, <code>MoveLabware</code>, <code>Home</code> finiscono quando lo strumento ha finito, che sia un minuto o tre ore. È voluto: un run da due ore non deve essere ucciso a metà perché un contatore è scaduto.</li>
     <li><b>I comandi brevi hanno un limite di 600 secondi</b> (<code>workflow.default_timeout</code>). Un comando che per progetto risponde subito e invece non risponde è un guasto, e dieci minuti bastano a riconoscerlo.</li>
     <li>Se uno step resta fermo senza motivo, guarda prima la pagina <b>Operator</b>: quasi sempre sta aspettando una conferma, non lo strumento.</li>
   </ul>

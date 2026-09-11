@@ -181,33 +181,41 @@ class TestTheTimelineClosesAFailedAttempt:
     stopped is worse than no timeline.
     """
 
+    HANDLER = "except (Exception, asyncio.CancelledError) as exc:"
+
+    def _failure_handler(self):
+        body = _function_body("web_execute_step")
+        return body[body.index(self.HANDLER):]
+
     def test_the_failure_is_recorded_before_it_is_re_raised(self):
         body = _function_body("web_execute_step")
-        assert "except Exception as exc:" in body
-        failure = body[body.index("except Exception as exc:"):]
+        assert self.HANDLER in body
+        failure = self._failure_handler()
         assert "runs.record_step" in failure
-        assert '"status": "failed"' in failure
+        assert '"status": "timeout" if isinstance' in failure
+
+    def test_a_cancelled_step_is_caught_too(self):
+        """A step cut off by its own TimeoutSeconds is cancelled from outside,
+        and CancelledError is not an Exception subclass."""
+        assert "asyncio.CancelledError" in self.HANDLER
+        assert self.HANDLER in _function_body("web_execute_step")
 
     def test_the_failure_still_reaches_the_retry_machinery(self):
         """Recorded, not swallowed."""
-        body = _function_body("web_execute_step")
-        failure = body[body.index("except Exception as exc:"):]
+        failure = self._failure_handler()
         assert "raise" in failure.split("runs.record_step")[1]
 
     def test_the_recorded_row_carries_the_reason(self):
-        body = _function_body("web_execute_step")
-        failure = body[body.index("except Exception as exc:"):]
-        assert '"error": str(exc)' in failure
+        failure = self._failure_handler()
+        assert "str(exc)" in failure
 
     def test_each_attempt_is_its_own_row(self):
         """So four retries read as four attempts, not one overwritten row."""
-        body = _function_body("web_execute_step")
-        failure = body[body.index("except Exception as exc:"):]
+        failure = self._failure_handler()
         assert '"attempt": _attempts.get(_n, 1)' in failure
 
     def test_the_row_is_closed_with_a_duration(self):
-        body = _function_body("web_execute_step")
-        failure = body[body.index("except Exception as exc:"):]
+        failure = self._failure_handler()
         assert '"ended_at"' in failure
         assert '"duration_seconds"' in failure
 

@@ -1272,21 +1272,38 @@ class PnPWorkflowExecutor:
             if step.timeout_seconds is not None
             else self._default_step_timeout
         )
+        # A TimeoutSeconds the author wrote down has to mean the same thing
+        # however the workflow is launched. It did not: the branch below that
+        # passes step_timeout only runs when there is no custom step executor,
+        # and the web interface always installs one - so the field worked from
+        # `labos run` and was silently ignored for every workflow started from
+        # a browser, which is every workflow anybody actually starts.
+        #
+        # Only an explicit value is enforced here. The 600s fallback stays off
+        # this path deliberately: applying it would start killing every long
+        # step that has always run unbounded - a two-hour recipe among them.
+        explicit_timeout = (
+            normalize_timeout(step.timeout_seconds)
+            if step.timeout_seconds is not None
+            else None
+        )
         context = f"{step.action} on {step.instrument}"
+
+        async def _dispatch():
+            """Run the step, honouring an explicit per-step timeout either way."""
+            if self._step_executor_fn:
+                # Custom executor (e.g. WebApp execute_step with operator notifications)
+                if explicit_timeout is None:
+                    return await self._step_executor_fn(step, wf_context)
+                return await asyncio.wait_for(
+                    self._step_executor_fn(step, wf_context), timeout=explicit_timeout)
+            # Default: execute via registry (pure gRPC)
+            return await self.registry.execute(
+                step.instrument, step.action, step.parameters, timeout=step_timeout)
 
         for attempt in range(max_attempts):
             try:
-                if self._step_executor_fn:
-                    # Custom executor (e.g. WebApp execute_step with operator notifications)
-                    result = await self._step_executor_fn(step, wf_context)
-                else:
-                    # Default: execute via registry (pure gRPC)
-                    result = await self.registry.execute(
-                        step.instrument,
-                        step.action,
-                        step.parameters,
-                        timeout=step_timeout
-                    )
+                result = await _dispatch()
                 
                 if result.success:
                     step.end_time = datetime.now()
@@ -1318,7 +1335,13 @@ class PnPWorkflowExecutor:
                 last_error = CategorizedError(
                     category=ErrorCategory.TIMEOUT,
                     message=f"Timeout after {step.timeout_seconds}s",
-                    details=context
+                    # Everywhere else .details carries the useful text and
+                    # .message the category label; here they were the other way
+                    # round, so the operator was asked to decide about
+                    # "CaptureImage on Opentrons Flex" with no mention of a
+                    # timeout at all.
+                    details=(f"{context}: nessuna risposta entro "
+                             f"{step.timeout_seconds}s (TimeoutSeconds dello step)")
                 )
                 last_result = CommandResult(
                     success=False,
@@ -1389,15 +1412,11 @@ class PnPWorkflowExecutor:
             # silently giving up on the operator.
             step.status = StepStatus.RUNNING
             try:
-                if self._step_executor_fn:
-                    result = await self._step_executor_fn(step, wf_context)
-                else:
-                    result = await self.registry.execute(
-                        step.instrument,
-                        step.action,
-                        step.parameters,
-                        timeout=step_timeout
-                    )
+                result = await _dispatch()
+            except asyncio.TimeoutError:
+                result = CommandResult(
+                    success=False,
+                    error=f"Timeout after {explicit_timeout}s")
             except Exception as exc:
                 result = CommandResult(success=False, error=str(exc))
 
