@@ -92,6 +92,30 @@ class ConnectionManager:
 # Application factory
 # ==============================================================================
 
+def _static_version(static_dir: Path) -> str:
+    """A token that changes when any static file does.
+
+    Every page links the shared scripts by a bare path, so a browser that has
+    seen them once keeps its copy. That is how a template calling a function
+    added to labos-params.js an hour earlier met a cached file that did not
+    have it: the call threw, renderProperties() never re-ran, and the workflow
+    builder went on showing the previous command's parameters while its own
+    dropdown said something else. Nothing on the page looked broken.
+
+    The newest modification time under static/, as a compact string: computed
+    once at startup, so a changed script is fetched and an unchanged one still
+    comes from cache.
+    """
+    newest = 0.0
+    try:
+        for path in static_dir.rglob("*"):
+            if path.is_file():
+                newest = max(newest, path.stat().st_mtime)
+    except OSError:
+        pass
+    return str(int(newest))
+
+
 def create_app() -> "FastAPI":
     if not FASTAPI_AVAILABLE:
         raise ImportError("FastAPI not installed")
@@ -202,6 +226,8 @@ def create_app() -> "FastAPI":
         lab_core.set_intervention_callback(webapp_intervention_handler)
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    # Available to every template without each route passing it along.
+    templates.env.globals["static_version"] = _static_version(STATIC_DIR)
     # Work around Jinja2 cache key issues when globals include unhashable objects.
     templates.env.cache = None
     if STATIC_DIR.exists():

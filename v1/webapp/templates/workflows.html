@@ -654,6 +654,7 @@ function loadInstrumentsFromServers() {
                             label: '⭐ ' + (cmd.name || cmd.id),
                             description: cmd.description || '',
                             important: true,
+                            feature: cmd.feature || '',
                             parameters: cmd.parameters || []
                         }, cmdProps));
                     }
@@ -668,6 +669,7 @@ function loadInstrumentsFromServers() {
                             label: cmd.name || cmd.id,
                             description: cmd.description || '',
                             important: false,
+                            feature: cmd.feature || '',
                             parameters: cmd.parameters || []
                         }, cmdProps));
                     }
@@ -1109,6 +1111,17 @@ function setupDragAndDrop() {
 // ============================================================================
 // STEP MANAGEMENT
 // ============================================================================
+function _defaultCommand(inst) {
+    // Not simply commands[0]. Every SiLA2 server answers SiLAService first,
+    // so an Opentrons step opened with GetFeatureDefinition selected and one
+    // field asking for a Feature Identifier - server plumbing presented as the
+    // first thing an operator does with a liquid handler.
+    var real = inst.commands.find(function (c) {
+        return c.feature && c.feature !== 'SiLAService';
+    });
+    return (real || inst.commands[0]).id;
+}
+
 function addStep(type) {
     var inst = INSTRUMENTS[type];
     // Guard: an instrument can be discovered with zero commands (offline,
@@ -1126,7 +1139,7 @@ function addStep(type) {
     var step = {
         id: Date.now(),
         type: type,
-        command: inst.commands[0].id,
+        command: _defaultCommand(inst),
         params: {},
         dependsOn: []
     };
