@@ -1,0 +1,764 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Guida operativa LabOS. Apribile con doppio clic: nessun server, nessuna
+     dipendenza. I caratteri arrivano da Google Fonts quando c'e' rete e
+     ricadono su quelli di sistema quando non ce n'e'. -->
+<style>
+  /* The baseline the artifact host supplies; a file opened with file:// gets
+     neither a document skeleton nor a reset, so both are written out here. */
+  :root { color-scheme: light dark; }
+  html, body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<title>LabOS al banco</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+  :root {
+    --ink:        #11171c;
+    --ink-soft:   #414f57;
+    --ink-faint:  #71828b;
+    --paper:      #f7f8f7;
+    --surface:    #ffffff;
+    --surface-2:  #eef1f0;
+    --rule:       #d3dad7;
+    --rule-soft:  #e4e9e7;
+    --accent:     #0f6d5c;
+    --accent-ink: #0b4f43;
+    --accent-wash:#e2efeb;
+    --hazard:     #b4541a;
+    --hazard-wash:#f8ebe2;
+    --deck:       #1b2226;
+    --deck-slot:  #e9ecea;
+
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink:        #e7ecea;
+      --ink-soft:   #a8b6b2;
+      --ink-faint:  #7d8d89;
+      --paper:      #0d1214;
+      --surface:    #141b1e;
+      --surface-2:  #1b2427;
+      --rule:       #2b373a;
+      --rule-soft:  #222c2f;
+      --accent:     #3fbda2;
+      --accent-ink: #7fd9c4;
+      --accent-wash:#122a26;
+      --hazard:     #e0873f;
+      --hazard-wash:#2c1f14;
+      --deck:       #05090a;
+      --deck-slot:  #2f3a3d;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ink:        #e7ecea;
+    --ink-soft:   #a8b6b2;
+    --ink-faint:  #7d8d89;
+    --paper:      #0d1214;
+    --surface:    #141b1e;
+    --surface-2:  #1b2427;
+    --rule:       #2b373a;
+    --rule-soft:  #222c2f;
+    --accent:     #3fbda2;
+    --accent-ink: #7fd9c4;
+    --accent-wash:#122a26;
+    --hazard:     #e0873f;
+    --hazard-wash:#2c1f14;
+    --deck:       #05090a;
+    --deck-slot:  #2f3a3d;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16.5px;
+    line-height: 1.58;
+    margin: 0;
+    padding-inline: 20px;
+    padding-block: 0 72px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 860px; margin-inline: auto; }
+
+  /* ── Masthead ─────────────────────────────────────────────── */
+  header.masthead {
+    padding-block: 52px 34px;
+    border-bottom: 2px solid var(--ink);
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(2.4rem, 7vw, 3.5rem);
+    line-height: 1.02;
+    letter-spacing: -.022em;
+    margin: 0 0 16px;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-size: 1.12rem;
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0;
+  }
+
+  /* ── Contents ─────────────────────────────────────────────── */
+  nav.toc {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 22px;
+    padding-block: 18px;
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 12.5px;
+  }
+  nav.toc a {
+    color: var(--ink-soft);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    padding-bottom: 1px;
+  }
+  nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent); border-bottom-color: var(--accent); }
+  nav.toc b { color: var(--accent); font-weight: 600; }
+
+  /* ── Phases ───────────────────────────────────────────────── */
+  section.phase { padding-block: 42px 8px; border-bottom: 1px solid var(--rule-soft); }
+  section.phase:last-of-type { border-bottom: none; }
+
+  .phase-head {
+    display: grid;
+    grid-template-columns: 62px 1fr;
+    gap: 18px;
+    align-items: start;
+    margin-bottom: 22px;
+  }
+  .phase-num {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--accent);
+    border: 1.5px solid var(--accent);
+    border-radius: 2px;
+    padding: 5px 0;
+    text-align: center;
+    letter-spacing: .04em;
+  }
+  .phase-head h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(1.45rem, 4vw, 1.85rem);
+    line-height: 1.15;
+    letter-spacing: -.016em;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  .phase-head p { margin: 0; color: var(--ink-soft); font-size: .98rem; }
+
+  h3 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 1.1rem;
+    letter-spacing: -.008em;
+    margin: 30px 0 10px;
+  }
+  h3:first-of-type { margin-top: 0; }
+
+  p { margin: 0 0 14px; max-width: 66ch; }
+
+  /* ── Ordered steps ────────────────────────────────────────── */
+  ol.steps { list-style: none; counter-reset: s; margin: 0 0 18px; padding: 0; }
+  ol.steps > li {
+    counter-increment: s;
+    position: relative;
+    padding-left: 34px;
+    margin-bottom: 13px;
+    max-width: 66ch;
+  }
+  ol.steps > li::before {
+    content: counter(s);
+    position: absolute;
+    left: 0; top: 1px;
+    width: 21px; height: 21px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    color: var(--ink-soft);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+  }
+  ol.steps ul { margin: 7px 0 0; padding-left: 17px; }
+  ol.steps ul li { margin-bottom: 5px; color: var(--ink-soft); }
+
+  ul.plain { margin: 0 0 16px; padding-left: 19px; max-width: 66ch; }
+  ul.plain li { margin-bottom: 8px; }
+
+  /* ── Inline code ──────────────────────────────────────────── */
+  code {
+    font-family: var(--mono);
+    font-size: .855em;
+    background: var(--surface-2);
+    border-radius: 2px;
+    padding: .1em .34em;
+    color: var(--accent-ink);
+  }
+  a { color: var(--accent); }
+
+  /* ── Callouts ─────────────────────────────────────────────── */
+  .note {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-wash);
+    padding: 14px 18px;
+    margin: 0 0 18px;
+    max-width: 66ch;
+  }
+  .note.hazard { border-left-color: var(--hazard); background: var(--hazard-wash); }
+  .note .tag {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 600;
+  }
+  .note.hazard .tag { color: var(--hazard); }
+  .note p { margin: 0; font-size: .96rem; }
+  .note p + p { margin-top: 9px; }
+
+  /* ── "Se lo salti" consequence line ───────────────────────── */
+  .skip {
+    font-size: .93rem;
+    color: var(--ink-faint);
+    border-top: 1px dashed var(--rule);
+    padding-top: 11px;
+    margin-top: 20px;
+    max-width: 66ch;
+  }
+  .skip b { color: var(--ink-soft); font-weight: 600; }
+
+  /* ── Tables ───────────────────────────────────────────────── */
+  .tablebox { overflow-x: auto; margin: 0 0 20px; }
+  table { border-collapse: collapse; width: 100%; font-size: .93rem; min-width: 460px; }
+  th, td { text-align: left; padding: 9px 14px 9px 0; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  th {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    border-bottom-color: var(--rule);
+    font-weight: 600;
+  }
+  td:first-child { white-space: nowrap; padding-right: 22px; }
+  td code { background: none; padding: 0; }
+
+  /* ── Deck map ─────────────────────────────────────────────── */
+  .deckwrap {
+    background: var(--deck);
+    border-radius: 3px;
+    padding: 18px;
+    margin: 0 0 10px;
+    overflow-x: auto;
+  }
+  .deck {
+    display: grid;
+    grid-template-columns: 20px repeat(3, minmax(84px, 1fr));
+    gap: 6px;
+    min-width: 320px;
+  }
+  .deck .rowlab, .deck .collab {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: #7d8d89;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .deck .slot {
+    background: var(--deck-slot);
+    border-radius: 2px;
+    min-height: 52px;
+    padding: 7px 8px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+  }
+  .deck .slot.empty { background: none; border: 1px dashed #3a464a; }
+  .deck .slot .nm {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1.25;
+  }
+  .deck .slot.empty .nm { color: #6c7b7f; font-weight: 400; }
+  .deck .slot .ty { font-size: 10.5px; color: var(--ink-soft); line-height: 1.25; }
+  .deckcap { font-size: .88rem; color: var(--ink-faint); margin: 0 0 22px; max-width: 66ch; }
+
+  /* ── Gap list (the answer to "manca qualcosa?") ───────────── */
+  .gaps { display: grid; gap: 2px; margin: 0 0 20px; }
+  .gap {
+    display: grid;
+    grid-template-columns: 26px 1fr;
+    gap: 14px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    align-items: baseline;
+  }
+  .gap:last-child { border-bottom: none; }
+  .gap .k {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--hazard);
+  }
+  .gap h4 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 1rem;
+    margin: 0 0 4px;
+  }
+  .gap p { margin: 0; font-size: .95rem; color: var(--ink-soft); max-width: 62ch; }
+
+  footer {
+    margin-top: 46px;
+    padding-top: 20px;
+    border-top: 2px solid var(--ink);
+    font-size: .9rem;
+    color: var(--ink-faint);
+  }
+
+  @media (max-width: 560px) {
+    .phase-head { grid-template-columns: 1fr; gap: 10px; }
+    .phase-num { width: 62px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Procedura operativa · Laboratorio Bicocca</p>
+  <h1>LabOS al banco</h1>
+  <p class="standfirst">Dall'accensione al risultato: cosa fare, in che ordine, e i punti dove il sistema si ferma se salti un passaggio. Opentrons Flex, Tecan M200 Pro, robot mobile GoFaGo.</p>
+</header>
+
+<nav class="toc">
+  <a href="#f1"><b>1</b> Avviare</a>
+  <a href="#f2"><b>2</b> Connettere il Tecan</a>
+  <a href="#f3"><b>3</b> Preparare</a>
+  <a href="#f4"><b>4</b> Eseguire</a>
+  <a href="#f5"><b>5</b> Durante e dopo</a>
+  <a href="#f6"><b>6</b> Robot mobile</a>
+  <a href="#gaps">Cosa mancava</a>
+  <a href="#ref">Riferimento</a>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<section class="phase" id="f1">
+  <div class="phase-head">
+    <div class="phase-num">FASE 1</div>
+    <div>
+      <h2>Avviare il sistema</h2>
+      <p>Due minuti. Il launcher accende i server degli strumenti e l'interfaccia web.</p>
+    </div>
+  </div>
+
+  <ol class="steps">
+    <li>Accendi prima <b>gli strumenti fisici</b>: Opentrons Flex e Tecan M200. Il Tecan deve essere acceso e collegato via USB <i>prima</i> che parta il suo server, altrimenti non trova nulla da enumerare.</li>
+    <li>Doppio clic su <code>LabOS_launcher.bat</code> sul desktop.</li>
+    <li>Premi <code>1</code> e <kbd>Invio</kbd> — <b>START ALL</b>. Ferma tutto quello che era rimasto acceso, riavvia i server SiLA2, avvia la webapp e apre il browser da solo.</li>
+    <li>Il browser si apre su <code>http://localhost:5000</code>. Se non si apre, scrivilo a mano.</li>
+    <li>Vai sulla <b>Dashboard</b> e controlla che ogni strumento abbia la card <b>verde</b>. Uno strumento offline qui è uno strumento che non risponderà nemmeno dentro un workflow.</li>
+  </ol>
+
+  <div class="note">
+    <span class="tag">Le altre voci del menu</span>
+    <p><code>2</code> solo i server, <code>3</code> solo la webapp, <code>4</code> aggiorna lo stato, <code>5</code> apre <code>lab_config.yaml</code>, <code>6</code> ferma tutto. A fine giornata usa <code>6</code>: chiudere solo la finestra lascia i server in esecuzione.</p>
+  </div>
+
+  <p class="skip"><b>Se lo salti:</b> uno strumento che non è online al momento dell'avvio non viene scoperto, e i suoi comandi non compaiono da nessuna parte nell'interfaccia.</p>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<section class="phase" id="f2">
+  <div class="phase-head">
+    <div class="phase-num">FASE 2</div>
+    <div>
+      <h2>Connettere il Tecan</h2>
+      <p>Obbligatorio a ogni avvio. Il lettore non si connette da solo.</p>
+    </div>
+  </div>
+
+  <ol class="steps">
+    <li><b>Chiudi iControl e Magellan.</b> Tengono la porta USB in esclusiva: finché uno dei due è aperto, il server non riesce a connettersi. Chiudere la finestra non basta sempre, verifica che il processo sia terminato.</li>
+    <li>Dashboard → card <b>Tecan M200 Pro</b> → comando <code>Connect</code>.</li>
+    <li>Lascia <code>ConnectionString</code> su <code>usb</code> e conferma.</li>
+    <li>La proprietà <code>IsConnected</code> passa a vero. Da qui in poi <code>PlateIn</code>, <code>RunMeasurement</code>, <code>PlateOut</code> funzionano.</li>
+  </ol>
+
+  <h3>I modi di connessione, e quando servono</h3>
+  <div class="tablebox">
+  <table>
+    <thead><tr><th>Valore</th><th>Cosa fa</th><th>Quando usarlo</th></tr></thead>
+    <tbody>
+      <tr><td><code>usb</code></td><td>Prova la connessione memorizzata, poi una scansione nuova</td><td>Sempre. È l'unico sicuro se non c'è nessuno davanti al PC</td></tr>
+      <tr><td><code>ask</code></td><td>Come sopra, poi apre la finestra di scelta strumento</td><td>Quando <code>usb</code> fallisce e tu sei lì</td></tr>
+      <tr><td><code>dialog</code></td><td>Apre subito la finestra di scelta</td><td>Più lettori collegati, vuoi scegliere tu</td></tr>
+      <tr><td><code>sim</code></td><td>Simulatore Tecan</td><td>Provare un workflow senza hardware</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note hazard">
+    <span class="tag">Attenzione</span>
+    <p><code>ask</code> e <code>dialog</code> aprono una finestra sul PC del laboratorio e <b>restano in attesa per sempre</b> finché qualcuno non risponde. Non usarli in un workflow che gira di notte.</p>
+  </div>
+
+  <p class="skip"><b>Se hai spostato il lettore su un'altra porta USB:</b> <code>usb</code> se ne accorge e lo ritrova da solo. Non serve fare altro.</p>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<section class="phase" id="f3">
+  <div class="phase-head">
+    <div class="phase-num">FASE 3</div>
+    <div>
+      <h2>Preparare l'esperimento</h2>
+      <p>Quattro pezzi, e devono combaciare tra loro: la ricetta, la configurazione hardware, il deck fisico, l'analisi Tecan.</p>
+    </div>
+  </div>
+
+  <h3>3a · La ricetta Opentrons</h3>
+  <ol class="steps">
+    <li>Vai su <b>Recipe Generator</b> (<code>/recipes</code>, la stessa pagina di <code>/batch</code>).</li>
+    <li>Carica o seleziona un piano di pipettaggio Excel da <code>Library/Recipes/excel/</code>.</li>
+    <li>Raggruppa le colonne in fasi, scegli la classe di liquido per ogni reagente, decidi la condivisione dei serbatoi, aggiungi eventuali trattamenti su modulo.</li>
+    <li>Genera. La ricetta finisce in <code>Library/Recipes/</code>.</li>
+    <li><b>Apri il pannello "Notes"</b>, è chiuso di default: lì dentro c'è la stima dello scarto per reagente, cioè quanto in eccesso devi preparare davvero.</li>
+  </ol>
+
+  <h3>3b · La configurazione hardware (HAL)</h3>
+  <div class="note hazard">
+    <span class="tag">Questo mancava dalla tua lista</span>
+    <p>La ricetta non nomina slot, nomina <b>etichette logiche</b>: <code>MyTips</code>, <code>TargetPlate</code>, <code>Source_1</code>. È la configurazione hardware a dire in quale slot sta ciascuna. Senza quella giusta attiva, la ricetta non parte, e se è attiva ma sbagliata il robot va a pescare nello slot sbagliato.</p>
+  </div>
+  <ol class="steps">
+    <li>Il Recipe Generator può generare una configurazione insieme alla ricetta. Usa quella se non ne hai già una compatibile.</li>
+    <li>Vai su <b>Hardware</b> (<code>/hardware</code>) e clicca <b>Set Active</b> sulla configurazione giusta. La scelta resta anche dopo un riavvio.</li>
+    <li>Se compare un avviso che il robot era offline, riapplica la configurazione dopo averlo visto online: l'attivazione non gli è arrivata.</li>
+  </ol>
+
+  <h3>3c · Allestire il deck e verificarlo</h3>
+  <p>Il deck fisico deve corrispondere alla configurazione attiva, slot per slot. Questo è <code>01_SPAAC</code>, per darti il formato:</p>
+
+  <div class="deckwrap">
+    <div class="deck">
+      <div class="rowlab"></div>
+      <div class="collab">1</div><div class="collab">2</div><div class="collab">3</div>
+
+      <div class="rowlab">A</div>
+      <div class="slot"><span class="nm">HeaterShaker</span><span class="ty">modulo</span></div>
+      <div class="slot empty"><span class="nm">libero</span></div>
+      <div class="slot"><span class="nm">MyTrash</span><span class="ty">cestino</span></div>
+
+      <div class="rowlab">B</div>
+      <div class="slot empty"><span class="nm">libero</span></div>
+      <div class="slot empty"><span class="nm">libero</span></div>
+      <div class="slot"><span class="nm">MyTips</span><span class="ty">tip rack 1000 µL</span></div>
+
+      <div class="rowlab">C</div>
+      <div class="slot empty"><span class="nm">libero</span></div>
+      <div class="slot empty"><span class="nm">libero</span></div>
+      <div class="slot empty"><span class="nm">libero</span></div>
+
+      <div class="rowlab">D</div>
+      <div class="slot"><span class="nm">Source_1</span><span class="ty">24 pozzetti</span></div>
+      <div class="slot"><span class="nm">TargetPlate</span><span class="ty">96 pozzetti</span></div>
+      <div class="slot empty"><span class="nm">libero</span></div>
+    </div>
+  </div>
+  <p class="deckcap">La colonna 4 (A4–D4) è l'area di staging, raggiungibile dal gripper ma non visibile qui. I moduli dichiarati devono essere <b>fisicamente collegati</b>: se la configurazione dichiara un heater-shaker che non c'è, il comando si rifiuta di partire e te lo dice.</p>
+
+  <ol class="steps">
+    <li>Metti tip rack, piastre e reagenti negli slot che la configurazione indica.</li>
+    <li>Dalla Dashboard lancia <code>CaptureImage</code> sull'Opentrons: scatta una foto del deck senza muovere niente, e te la ritrovi nella pagina Results. Usala per confrontare quello che vedi con quello che il software crede.</li>
+    <li>Lancia <code>ValidateRecipe</code> con il nome della tua ricetta. Ti dice esattamente quali etichette mancano nella configurazione attiva, <b>senza eseguire niente</b>. Costa cinque secondi e ti evita un run fallito a metà.</li>
+    <li>Se hai messo un tip rack nuovo, lancia <code>RefillTipRack</code>: il server conta le punte usate e altrimenti continua a crederle consumate.</li>
+  </ol>
+
+  <h3>3d · L'analisi Tecan</h3>
+  <ol class="steps">
+    <li>Apri <b>iControl</b> e costruisci il metodo di misura: lunghezze d'onda, tipo di piastra, tutto.</li>
+    <li>Salvalo come <code>.mdfx</code> dentro <code>Library/Analysis/</code>.</li>
+    <li><b>Chiudi iControl</b> prima di tornare a usare il Tecan da LabOS, vedi Fase 2.</li>
+    <li>Nel comando <code>RunMeasurement</code> il parametro <code>ProtocolFile</code> vuole il nome <b>senza estensione</b>: <code>abs_REAGENTI</code>, non <code>abs_REAGENTI.mdfx</code>.</li>
+  </ol>
+
+  <p class="skip"><b>Se lo salti:</b> i parametri della misura vivono solo nel file <code>.mdfx</code>. LabOS non ha modo di impostare una lunghezza d'onda, passa solo il nome del protocollo.</p>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<section class="phase" id="f4">
+  <div class="phase-head">
+    <div class="phase-num">FASE 4</div>
+    <div>
+      <h2>Eseguire</h2>
+      <p>Un comando alla volta dalla Dashboard, oppure una sequenza intera come workflow.</p>
+    </div>
+  </div>
+
+  <h3>Comando singolo</h3>
+  <p>Dashboard → card dello strumento → clic sul comando. Se ha parametri si apre un form, con i menu a tendina già riempiti (le ricette, le configurazioni, il labware sul deck, gli slot liberi). È la via giusta per un gesto isolato: una connessione, una foto, un <code>Home</code>, una misura al volo.</p>
+
+  <div class="note hazard">
+    <span class="tag">Muove hardware</span>
+    <p>I comandi la cui descrizione comincia con <b>MOVES HARDWARE</b> muovono davvero qualcosa. Su Opentrons: <code>Home</code>, <code>ExecuteRecipe</code>, <code>MoveLabware</code>, <code>ShakeModule</code>, <code>SetModuleLatch</code>, <code>SetModuleTemperature</code>, <code>ResumeRun</code>, <code>AbortRun</code>. Guarda il deck prima di premere.</p>
+  </div>
+
+  <h3>Comporre un workflow</h3>
+  <ol class="steps">
+    <li>Vai su <b>Workflows</b> (<code>/workflows</code>).</li>
+    <li><b>Aggiungi uno step</b> scegliendo lo strumento. Lo step compare nella lista a sinistra.</li>
+    <li><b>Scegli l'azione</b> nel pannello dei parametri: è la lista dei comandi che quello strumento espone davvero, non una lista fissa.</li>
+    <li><b>Compila i parametri.</b> Dove c'è una tendina, usala: i valori arrivano dalla libreria e dalla configurazione attiva, quindi sono valori che esistono.</li>
+    <li><b>Collega le dipendenze.</b> Nel pannello dello step ci sono le caselle <code>DependsOn</code>: spunta gli step che devono essere finiti prima di questo. È qui che si costruisce l'ordine, non trascinando.</li>
+    <li>Ripeti per ogni step. Un ordine tipico: Opentrons <code>ExecuteRecipe</code> → trasporto della piastra (step manuale oppure robot mobile) → Tecan <code>RunMeasurement</code>.</li>
+    <li><b>Salva.</b> Il workflow finisce in <code>Library/Workflows/</code> come <code>.workflow.json</code>.</li>
+    <li><b>Execute.</b> Compare una barra di stato in fondo a <b>ogni</b> pagina, con Pause, Resume e Abort. Puoi navigare altrove mentre gira.</li>
+  </ol>
+
+  <h3>Quello che il builder non espone</h3>
+  <p>Tre campi esistono nel formato ma si mettono a mano, aprendo il file in <code>Library/Workflows/</code>:</p>
+  <div class="tablebox">
+  <table>
+    <thead><tr><th>Campo</th><th>Cosa fa</th></tr></thead>
+    <tbody>
+      <tr><td><code>OnFailure</code></td><td><code>stop</code> ferma tutto (default), <code>continue</code> tira dritto, <code>skip</code> salta i dipendenti</td></tr>
+      <tr><td><code>RetryCount</code></td><td>Quanti tentativi prima di dichiarare fallito lo step</td></tr>
+      <tr><td><code>TimeoutSeconds</code></td><td>Limite di tempo per quello step. Vuoto usa il default globale, 600 s</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note">
+    <span class="tag">Come vengono ordinati gli step</span>
+    <p>L'esecuzione segue <code>DependsOn</code>, non il numero dello step. Di default gli step girano <b>uno alla volta</b>: l'esecuzione in parallelo è spenta in <code>lab_config.yaml</code> (<code>workflow.parallel_execution: false</code>) ed è una scelta globale, non per singolo workflow.</p>
+    <p>Non esistono cicli né condizioni. LabOS fa sequenze con dipendenze, non controllo di flusso.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<section class="phase" id="f5">
+  <div class="phase-head">
+    <div class="phase-num">FASE 5</div>
+    <div>
+      <h2>Durante e dopo</h2>
+      <p>Dove guardare mentre gira, e dove finiscono i dati.</p>
+    </div>
+  </div>
+
+  <h3>Mentre gira</h3>
+  <ul class="plain">
+    <li><b>Operator</b> (<code>/operator</code>) — qui l'umano risponde al sistema. Se un workflow ha uno step manuale, o chiede di ricaricare le punte, <b>resta fermo finché qualcuno non conferma qui</b>. Timeout: un'ora per un intervento, dieci minuti per un'azione manuale o un refill. Se nessuno guarda questa pagina, il workflow scade.</li>
+    <li><b>Barra di stato</b> — in fondo a ogni pagina mentre qualcosa è in esecuzione. Pause, Resume, Abort. L'Abort arriva davvero allo strumento, non si limita a smettere di guardare.</li>
+    <li><b>EmergencyStop</b> — sulla card Opentrons della Dashboard, per fermare tutto subito.</li>
+  </ul>
+
+  <h3>Dopo</h3>
+  <ul class="plain">
+    <li><b>Database</b> (<code>/database</code>) → tab <b>Plates</b>: ogni <code>ExecuteRecipe</code> riuscito crea una piastra con il contenuto pozzetto per pozzetto. Cliccando un pozzetto vedi reagenti, volumi e le misure collegate.</li>
+    <li>Tab <b>Runs &amp; Log</b>: la cronologia degli step dell'orchestratore, con rinomina, note ed export.</li>
+    <li><b>Results</b> (<code>/results</code>): i file grezzi degli strumenti, Excel e AnIML, più le foto del deck.</li>
+  </ul>
+
+  <div class="note">
+    <span class="tag">Collegare una misura a una piastra</span>
+    <p>Il collegamento automatico avviene solo <b>dentro un singolo workflow</b>. Un comando manuale dalla Dashboard, o un'analisi fatta giorni dopo, non eredita niente. Per quel caso usa <b>"Aggiungi analisi"</b> nel dettaglio della piastra: lancia una <code>RunMeasurement</code> con il <code>PlateID</code> giusto già impostato.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<section class="phase" id="f6">
+  <div class="phase-head">
+    <div class="phase-num">FASE 6</div>
+    <div>
+      <h2>Il robot mobile</h2>
+      <p>GoFaGo: base Robotnik, braccio ABB, gripper OnRobot. Gira su un suo PC Linux, non su quello del laboratorio.</p>
+    </div>
+  </div>
+
+  <h3>Localizzare il robot</h3>
+  <ol class="steps">
+    <li>Collegati all'<b>hotspot del robot</b>.</li>
+    <li>Apri <b>AnyDesk</b> verso <code>192.168.11.22</code>.</li>
+    <li>Sul desktop remoto apri <b>Chrome</b> e vai al sito di <b>Proxima</b>, è tra le <i>fast action</i>.</li>
+    <li>Accedi con <code>admin</code> / <code>admin</code>.</li>
+    <li>Vai sulla pagina <b>Mission</b> e localizza il robot:
+      <ul>
+        <li>se è fermo su un punto noto della mappa, seleziona il <b>waypoint</b> e localizza da lì;</li>
+        <li>altrimenti fallo <b>a mano</b>, trascinando la posa e verificando che la scansione laser combaci con i muri della mappa. Se i laser non combaciano, la navigazione andrà a sbattere.</li>
+      </ul>
+    </li>
+  </ol>
+
+  <div class="note hazard">
+    <span class="tag">Questo mancava dalla tua lista</span>
+    <p>Localizzare è solo il <b>prerequisito</b>. Serve perché il robot sappia dov'è, ma non basta per fargli fare qualcosa da LabOS: mancano l'attivazione dell'hardware e i task.</p>
+  </div>
+
+  <h3>Poi, da LabOS</h3>
+  <ol class="steps">
+    <li>Dashboard → card <b>Mobile Robot</b>. Se è grigia, il container non risponde: controlla che sia acceso e sulla stessa rete.</li>
+    <li><b>Attiva l'hardware</b> con <code>ActivateAllHardware</code>, oppure pezzo per pezzo con <code>SetHardwareActivationByRole</code> (<code>MobileBase</code>, <code>Arm</code>, <code>Gripper</code>, <code>Camera</code>). La base va attivata prima del braccio, e <code>ActivateAllHardware</code> lo garantisce da solo.</li>
+    <li>Lancia <code>RefreshTasks</code>: riporta dal robot la lista dei task disponibili e la salva in <code>Library/MobileTasks/</code>. Senza questo, la tendina dei task nel workflow builder è vuota.</li>
+    <li>Nel workflow aggiungi uno step <code>ExecuteTask</code> con il <code>TaskId</code> scelto dalla tendina e <code>ExecutionMode</code>:
+      <ul>
+        <li><code>DryRun</code> — simula, non muove. Provaci sempre la prima volta.</li>
+        <li><code>StepByStep</code> — un sotto-task alla volta.</li>
+        <li><code>Normal</code> — esecuzione piena.</li>
+      </ul>
+    </li>
+  </ol>
+
+  <h3>Prima di farlo muovere davvero</h3>
+  <ul class="plain">
+    <li><b>Marker ArUco puliti e non ostruiti.</b> Le traiettorie del braccio sono relative al marker della postazione, non alla mappa. Marker sporco o coperto significa presa sbagliata.</li>
+    <li><b>Batteria sopra il 20%</b>, altrimenti si rifiuta di operare.</li>
+    <li>Il robot si ferma da solo se trova un ostacolo entro <b>30 cm</b>. Velocità massime: 0,5 m/s la base, 0,3 m/s il braccio.</li>
+    <li>Postazioni già calibrate: <code>Home</code>, <code>Opentrons</code>, <code>Tecan</code>, <code>Storage_A1</code>, <code>Storage_A2</code>, <code>Incubator</code>.</li>
+  </ul>
+
+  <p class="skip"><b>Se un task fallisce:</b> la causa più frequente è il marker. Poi la localizzazione. Poi il container fermo sul PC remoto.</p>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<section class="phase" id="gaps">
+  <div class="phase-head">
+    <div class="phase-num">EXTRA</div>
+    <div>
+      <h2>Cosa mancava alla tua lista</h2>
+      <p>La sequenza che hai descritto è giusta. Questi sono i punti in cui si inceppa.</p>
+    </div>
+  </div>
+
+  <div class="gaps">
+    <div class="gap"><div class="k">01</div><div>
+      <h4>La configurazione hardware</h4>
+      <p>Il pezzo più importante. La ricetta parla di etichette, la configurazione le trasforma in slot. Va scelta, attivata e fatta combaciare col deck vero. Senza, la ricetta non parte.</p>
+    </div></div>
+    <div class="gap"><div class="k">02</div><div>
+      <h4>Allestire il deck e verificarlo</h4>
+      <p><code>ValidateRecipe</code> controlla la ricetta contro la configurazione attiva senza eseguire niente. <code>CaptureImage</code> fotografa il deck senza muovere niente. Entrambi costano secondi.</p>
+    </div></div>
+    <div class="gap"><div class="k">03</div><div>
+      <h4>Chiudere iControl</h4>
+      <p>Tiene la USB in esclusiva. È la causa numero uno dei fallimenti di <code>Connect</code>.</p>
+    </div></div>
+    <div class="gap"><div class="k">04</div><div>
+      <h4>Il conteggio delle punte</h4>
+      <p>Il server ricorda quante punte ha usato. Se cambi un rack senza dirglielo, continua a contarle consumate e a un certo punto chiede un refill che non serve.</p>
+    </div></div>
+    <div class="gap"><div class="k">05</div><div>
+      <h4>Qualcuno deve guardare la pagina Operator</h4>
+      <p>Uno step manuale o una richiesta di refill bloccano il workflow fino alla conferma. Se nessuno conferma, scade.</p>
+    </div></div>
+    <div class="gap"><div class="k">06</div><div>
+      <h4>Il robot mobile dopo la localizzazione</h4>
+      <p>Attivare l'hardware, lanciare <code>RefreshTasks</code>, e solo allora <code>ExecuteTask</code>. Più i marker ArUco e la batteria.</p>
+    </div></div>
+    <div class="gap"><div class="k">07</div><div>
+      <h4>Spegnere</h4>
+      <p>Opzione <code>6</code> del launcher. Chiudere la finestra lascia i server accesi e il prossimo avvio trova le porte occupate.</p>
+    </div></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<section class="phase" id="ref">
+  <div class="phase-head">
+    <div class="phase-num">REF</div>
+    <div>
+      <h2>Riferimento rapido</h2>
+      <p>Indirizzi, cartelle, e i guasti che tornano.</p>
+    </div>
+  </div>
+
+  <h3>Indirizzi e cartelle</h3>
+  <div class="tablebox">
+  <table>
+    <thead><tr><th>Cosa</th><th>Dove</th></tr></thead>
+    <tbody>
+      <tr><td>Webapp</td><td><code>http://localhost:5000</code></td></tr>
+      <tr><td>Opentrons Flex</td><td><code>localhost:50302</code> → robot su <code>:31950</code></td></tr>
+      <tr><td>Tecan M200 Pro</td><td><code>localhost:50051</code> (USB)</td></tr>
+      <tr><td>Robot mobile</td><td><code>192.168.11.22:50053</code> · AnyDesk sullo stesso indirizzo</td></tr>
+      <tr><td>Ricette</td><td><code>Library/Recipes/</code></td></tr>
+      <tr><td>Piani Excel</td><td><code>Library/Recipes/excel/</code></td></tr>
+      <tr><td>Configurazioni hardware</td><td><code>Library/HardwareConfig/</code></td></tr>
+      <tr><td>Analisi Tecan</td><td><code>Library/Analysis/</code> · <code>.mdfx</code></td></tr>
+      <tr><td>Workflow</td><td><code>Library/Workflows/</code> · <code>.workflow.json</code></td></tr>
+      <tr><td>Task robot mobile</td><td><code>Library/MobileTasks/</code></td></tr>
+      <tr><td>Risultati e foto</td><td><code>Results/</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Quando qualcosa non va</h3>
+  <div class="tablebox">
+  <table>
+    <thead><tr><th>Sintomo</th><th>Prima cosa da controllare</th></tr></thead>
+    <tbody>
+      <tr><td>Tecan: <code>Connect</code> fallisce</td><td>iControl aperto. Poi: lettore acceso, cavo USB. Poi prova <code>ask</code>.</td></tr>
+      <tr><td>Strumento grigio sulla Dashboard</td><td>Era acceso quando hai lanciato il launcher? Rifai <code>1</code>.</td></tr>
+      <tr><td>La ricetta fallisce subito</td><td><code>ValidateRecipe</code>. Quasi sempre la configurazione hardware non è quella giusta.</td></tr>
+      <tr><td>Comando su modulo rifiutato</td><td>Il modulo è dichiarato in configurazione ma non collegato, o viceversa. Leggi <code>ModulesStatus</code>.</td></tr>
+      <tr><td>Il workflow è fermo e non fa niente</td><td>Pagina <b>Operator</b>: sta aspettando una conferma.</td></tr>
+      <tr><td>Il robot mobile dice "Server offline"</td><td>Container fermo sul PC remoto, oppure non sei sulla sua rete.</td></tr>
+      <tr><td>Task del robot fallito</td><td>Marker ArUco sporco o coperto. Poi la localizzazione.</td></tr>
+      <tr><td>"Non ci sono punte"</td><td>Hai cambiato un rack senza <code>RefillTipRack</code>.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note">
+    <span class="tag">La camera del Flex</span>
+    <p><code>CaptureImage</code> fotografa il deck senza muovere il robot, e accende e rispegne la camera da sola. <b>Il video non è possibile</b> su questo Flex: il firmware dichiara uno stream ma non lo trasmette mai.</p>
+  </div>
+</section>
+
+<footer>
+  Procedura verificata sul banco contro il Flex, il Tecan e il robot mobile reali.
+  Per il dettaglio tecnico di ogni comando: <code>docs/SERVERS.md</code>, <code>docs/WORKFLOW_SYSTEM.md</code>, <code>docs/HAL_SYSTEM.md</code>.
+</footer>
+
+</div>
+</body>
+</html>
