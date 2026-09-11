@@ -278,18 +278,45 @@ su quello del laboratorio.
 ### Poi, da LabOS
 
 1. Dashboard → card **Mobile Robot**. Se è grigia, il container non risponde:
-   controlla che sia acceso e sulla stessa rete.
-2. **Attiva l'hardware** con `ActivateAllHardware`, oppure pezzo per pezzo con
-   `SetHardwareActivationByRole` (`MobileBase`, `Arm`, `Gripper`, `Camera`). La
-   base va attivata prima del braccio, e `ActivateAllHardware` lo garantisce da
-   solo.
-3. Lancia `RefreshTasks`: riporta dal robot la lista dei task disponibili e la
-   salva in `Library/MobileTasks/`. Senza questo, la tendina dei task nel workflow
-   builder è vuota.
-4. Nel workflow aggiungi uno step `ExecuteTask` e scegli il `TaskId` dalla
+   controlla che sia acceso e che tu sia sulla sua rete.
+2. **Attiva l'hardware** con `ActivateAllHardware`. All'accensione è tutto
+   disattivato. Se preferisci pezzo per pezzo usa `SetHardwareActivationByRole`
+   con `MobileBase`, `Arm`, `Gripper`, `Camera`: la base va attivata prima del
+   braccio, e `ActivateAllHardware` lo garantisce da solo.
+3. Lancia `RefreshTasks`: riporta dal robot la lista dei task e la salva in
+   `Library/MobileTasks/`. Senza questo la tendina dei task nel workflow builder
+   è vuota.
+4. Aggiungi uno step `ExecuteTask` per ogni task e scegli il `TaskId` dalla
    tendina. Il parametro `ExecutionMode` esiste ancora nell'interfaccia ma il
    server attuale **lo ignora**: lascialo su `Normal` e non aspettarti che
    `DryRun` simuli qualcosa.
+
+> **Un trasporto non è uno step solo.** Ogni task fa una cosa sola. Portare una
+> piastra dall'Opentrons al Tecan sono **quattro step** di workflow, in
+> quest'ordine:
+>
+> `go_to_opentrons` → `pick_from_opentrons` → `go_to_tecan` → `place_on_TC`
+>
+> Al contrario, dal Tecan all'Opentrons: `go_to_tecan` → `pick_from_tecan` →
+> `go_to_opentrons` → `place_on_OT`.
+
+### I task che esistono davvero
+
+Letti dal robot. La piastra viaggia appoggiata alla **dima** a bordo: prenderla
+da uno strumento significa anche posarla sulla dima, e posarla su uno strumento
+significa anche riportare il braccio a riposo.
+
+| Task | Cosa fa |
+|------|---------|
+| `go_to_opentrons` | Naviga fino all'Opentrons |
+| `go_to_tecan` | Naviga fino al Tecan |
+| `pick_from_opentrons` | Prende la piastra dall'Opentrons e la appoggia sulla dima |
+| `pick_from_tecan` | Prende la piastra dal Tecan |
+| `place_on_OT` | Posa la piastra sull'Opentrons, poi il braccio torna a riposo |
+| `place_on_TC` | Posa la piastra sul Tecan, poi il braccio torna a riposo |
+| `pick_from_dima` | Riprende la piastra dalla dima, se è rimasta lì |
+| `docking` | Torna alla stazione di ricarica |
+| `TestFra`, `BaseFra` | Taratura dei frame. Non servono all'uso normale |
 
 ### Prima di farlo muovere davvero
 
@@ -299,8 +326,9 @@ su quello del laboratorio.
 - **Batteria sopra il 20%**, altrimenti si rifiuta di operare.
 - Il robot si ferma da solo se trova un ostacolo entro **30 cm**. Velocità
   massime: 0,5 m/s la base, 0,3 m/s il braccio.
-- Le postazioni calibrate sono quelle configurate sul robot. Non fidarti di un
-  elenco scritto qui: guarda i task che `RefreshTasks` riporta davvero.
+- L'hardware a bordo: braccio **ABB GoFa5**, gripper **OnRobot 2FG7**, camera
+  **Intel RealSense D415**, base **Robotnik Summit-XL Steel**. Nella lista
+  compaiono con i loro nomi interni; usa i ruoli e non dovrai conoscerli.
 
 **Se un task fallisce:** la causa più frequente è il marker. Poi la
 localizzazione. Poi il container fermo sul PC remoto.

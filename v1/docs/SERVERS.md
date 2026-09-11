@@ -516,15 +516,32 @@ Defined execution errors: `TaskNotFound`, `TaskExecutionFailed`, `RobotNotConnec
 
 From the current `config.yaml`, the robot controller manages: an ABB GoFa arm, an OnRobot gripper, a camera, and the Robotnik mobile base — each independently activatable via the hardware-activation commands above (`Arm`/`Gripper`/`Camera`/`MobileBase` roles).
 
-### Registered Stations & Gripper Profiles (from the remote `config.yaml`)
+### Tasks and Hardware (read from the robot)
 
-**Do not trust the station list that used to be written here.** An earlier
-documentation pass copied `Home`, `Opentrons`, `Tecan`, `Storage_A1`,
-`Storage_A2` and `Incubator` out of the remote `config.yaml`; the lab does not
-recognise the last three, and the host was unreachable when this was checked, so
-the list could not be confirmed either way. The authority on what stations exist
-is the robot: call `RefreshTasks` and read `AvailableTasks`, or read
-`config.yaml` on the remote host directly.
+An earlier documentation pass listed stations `Home`, `Opentrons`, `Tecan`,
+`Storage_A1`, `Storage_A2`, `Incubator` "from the remote `config.yaml`". The
+last three do not exist. What the robot actually reports, read live from
+`AvailableTasks` and `GetTaskDetails`:
+
+| Task | Subtasks | What it does |
+|------|----------|--------------|
+| `go_to_opentrons` | `nav` | Navigate to the Opentrons |
+| `go_to_tecan` | `nav` | Navigate to the Tecan |
+| `pick_from_opentrons` | `pick_from_opentrons`, `place_on_dima` | Lift the plate off the Opentrons and set it on the onboard jig |
+| `pick_from_tecan` | `pick_from_tecan`, `pick_from_tecan_robot_frame` | Lift the plate off the Tecan |
+| `place_on_OT` | `place_on_OT`, `home` | Set the plate on the Opentrons, then return the arm |
+| `place_on_TC` | `place_on_TC`, `home` | Set the plate on the Tecan, then return the arm |
+| `pick_from_dima` | `pick_from_dima` | Take the plate back off the onboard jig |
+| `docking` | `docking` | Return to the charging station |
+| `TestFra`, `BaseFra` | one each | Frame calibration, not for normal use |
+
+**One task is one action.** A transport is a sequence of workflow steps:
+`go_to_opentrons` → `pick_from_opentrons` → `go_to_tecan` → `place_on_TC`.
+
+Hardware registered on the controller, all **deactivated at startup**: arm
+`gofa_bicocca` (ABB GoFa5), gripper `2fg7` (OnRobot 2FG7), camera `realsense`
+(Intel D415), mobile base `test` (Robotnik Summit-XL Steel). Address them by
+role (`Arm`/`Gripper`/`Camera`/`MobileBase`) rather than by those names.
 
 Gripper labware profiles (width / grip force / grip offset) are pre-defined for `96_well_plate`, `384_well_plate`, `reservoir`, and `tube_rack` — the server selects grip parameters based on what's being handled.
 

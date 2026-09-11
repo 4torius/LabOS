@@ -635,18 +635,44 @@
 
   <h3>Poi, da LabOS</h3>
   <ol class="steps">
-    <li>Dashboard → card <b>Mobile Robot</b>. Se è grigia, il container non risponde: controlla che sia acceso e sulla stessa rete.</li>
-    <li><b>Attiva l'hardware</b> con <code>ActivateAllHardware</code>, oppure pezzo per pezzo con <code>SetHardwareActivationByRole</code> (<code>MobileBase</code>, <code>Arm</code>, <code>Gripper</code>, <code>Camera</code>). La base va attivata prima del braccio, e <code>ActivateAllHardware</code> lo garantisce da solo.</li>
-    <li>Lancia <code>RefreshTasks</code>: riporta dal robot la lista dei task disponibili e la salva in <code>Library/MobileTasks/</code>. Senza questo, la tendina dei task nel workflow builder è vuota.</li>
-    <li>Nel workflow aggiungi uno step <code>ExecuteTask</code> e scegli il <code>TaskId</code> dalla tendina. Il parametro <code>ExecutionMode</code> esiste ancora nell'interfaccia ma il server attuale <b>lo ignora</b>: lascialo su <code>Normal</code> e non aspettarti che <code>DryRun</code> simuli qualcosa.</li>
+    <li>Dashboard → card <b>Mobile Robot</b>. Se è grigia, il container non risponde: controlla che sia acceso e che tu sia sulla sua rete.</li>
+    <li><b>Attiva l'hardware</b> con <code>ActivateAllHardware</code>. All'accensione è tutto disattivato. Se preferisci pezzo per pezzo usa <code>SetHardwareActivationByRole</code> con <code>MobileBase</code>, <code>Arm</code>, <code>Gripper</code>, <code>Camera</code>: la base va attivata prima del braccio, e <code>ActivateAllHardware</code> lo garantisce da solo.</li>
+    <li>Lancia <code>RefreshTasks</code>: riporta dal robot la lista dei task e la salva in <code>Library/MobileTasks/</code>. Senza questo la tendina dei task nel workflow builder è vuota.</li>
+    <li>Aggiungi uno step <code>ExecuteTask</code> per ogni task e scegli il <code>TaskId</code> dalla tendina. Il parametro <code>ExecutionMode</code> esiste ancora nell'interfaccia ma il server attuale <b>lo ignora</b>: lascialo su <code>Normal</code> e non aspettarti che <code>DryRun</code> simuli qualcosa.</li>
   </ol>
+
+  <div class="note hazard">
+    <span class="tag">Un trasporto non è uno step solo</span>
+    <p>Ogni task fa una cosa sola. Portare una piastra dall'Opentrons al Tecan sono <b>quattro step</b> di workflow, in quest'ordine:</p>
+    <p><code>go_to_opentrons</code> → <code>pick_from_opentrons</code> → <code>go_to_tecan</code> → <code>place_on_TC</code></p>
+    <p>Al contrario, dal Tecan all'Opentrons: <code>go_to_tecan</code> → <code>pick_from_tecan</code> → <code>go_to_opentrons</code> → <code>place_on_OT</code>.</p>
+  </div>
+
+  <h3>I task che esistono davvero</h3>
+  <p>Letti dal robot. La piastra viaggia appoggiata alla <b>dima</b> a bordo: prenderla da uno strumento significa anche posarla sulla dima, e posarla su uno strumento significa anche riportare il braccio a riposo.</p>
+  <div class="tablebox">
+  <table>
+    <thead><tr><th>Task</th><th>Cosa fa</th></tr></thead>
+    <tbody>
+      <tr><td><code>go_to_opentrons</code></td><td>Naviga fino all'Opentrons</td></tr>
+      <tr><td><code>go_to_tecan</code></td><td>Naviga fino al Tecan</td></tr>
+      <tr><td><code>pick_from_opentrons</code></td><td>Prende la piastra dall'Opentrons e la appoggia sulla dima</td></tr>
+      <tr><td><code>pick_from_tecan</code></td><td>Prende la piastra dal Tecan</td></tr>
+      <tr><td><code>place_on_OT</code></td><td>Posa la piastra sull'Opentrons, poi il braccio torna a riposo</td></tr>
+      <tr><td><code>place_on_TC</code></td><td>Posa la piastra sul Tecan, poi il braccio torna a riposo</td></tr>
+      <tr><td><code>pick_from_dima</code></td><td>Riprende la piastra dalla dima, se è rimasta lì</td></tr>
+      <tr><td><code>docking</code></td><td>Torna alla stazione di ricarica</td></tr>
+      <tr><td><code>TestFra</code>, <code>BaseFra</code></td><td>Taratura dei frame. Non servono all'uso normale</td></tr>
+    </tbody>
+  </table>
+  </div>
 
   <h3>Prima di farlo muovere davvero</h3>
   <ul class="plain">
     <li><b>Marker ArUco puliti e non ostruiti.</b> Le traiettorie del braccio sono relative al marker della postazione, non alla mappa. Marker sporco o coperto significa presa sbagliata.</li>
     <li><b>Batteria sopra il 20%</b>, altrimenti si rifiuta di operare.</li>
     <li>Il robot si ferma da solo se trova un ostacolo entro <b>30 cm</b>. Velocità massime: 0,5 m/s la base, 0,3 m/s il braccio.</li>
-    <li>Le postazioni calibrate sono quelle configurate sul robot. Non fidarti di un elenco scritto qui: guarda i task che <code>RefreshTasks</code> riporta davvero.</li>
+    <li>L'hardware a bordo: braccio <b>ABB GoFa5</b>, gripper <b>OnRobot 2FG7</b>, camera <b>Intel RealSense D415</b>, base <b>Robotnik Summit-XL Steel</b>. Nella lista compaiono con i loro nomi interni; usa i ruoli e non dovrai conoscerli.</li>
   </ul>
 
   <p class="skip"><b>Se un task fallisce:</b> la causa più frequente è il marker. Poi la localizzazione. Poi il container fermo sul PC remoto.</p>
