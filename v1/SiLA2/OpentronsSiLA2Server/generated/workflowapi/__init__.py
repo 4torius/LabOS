@@ -5,7 +5,6 @@ from .workflowapi_feature import WorkflowAPIFeature
 from .workflowapi_types import (
     AbortRun_Responses,
     CaptureImage_Responses,
-    CaptureTimelapse_Responses,
     EmergencyStop_Responses,
     ExecuteRecipe_Responses,
     Home_Responses,
@@ -44,5 +43,4 @@ __all__ = [
     "SetModuleTemperature_Responses",
     "ShakeModule_Responses",
     "CaptureImage_Responses",
-    "CaptureTimelapse_Responses",
 ]

@@ -138,11 +138,3 @@ class CaptureImage_Responses(NamedTuple):
     """
     JSON: {saved, path, url, method, detail}.
     """
-
-
-class CaptureTimelapse_Responses(NamedTuple):
-
-    TimelapseResult: str
-    """
-    JSON: {saved, frames, path, run_id, detail}.
-    """

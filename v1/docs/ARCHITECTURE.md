@@ -50,7 +50,7 @@ Each instrument is wrapped by a dedicated SiLA2 server built with the **`sila2` 
 
 | Server | Feature | Commands | Port |
 |--------|---------|----------|------|
-| `OpentronsSiLA2Server` | `WorkflowAPI` v1.1 | 18 commands + 7 properties (ExecuteRecipe, MoveLabware, heater-shaker control, CaptureImage, camera live stream, …) | 50302 |
+| `OpentronsSiLA2Server` | `WorkflowAPI` v1.1 | 17 commands + 7 properties (ExecuteRecipe, MoveLabware, heater-shaker control, CaptureImage, …) | 50302 |
 | `TecanM200SiLA2Server` | `PlateReaderService` | 8 (RunMeasurement, Connect/Disconnect, PlateIn/PlateOut, SetTemperature, …) | 50051 (bridge internal: 50055) |
 | `ManualStationSiLA2Server` | `ManualStation` | 6 (RequestOperatorTask, ConfirmTaskComplete, SendNotification, …) | 50500 |
 

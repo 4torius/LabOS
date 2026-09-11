@@ -377,10 +377,13 @@ active hardware config, the move is validated before the gripper starts, and
 the config is rewritten afterwards — otherwise it lies from the moment a plate
 moves.
 
-**`CaptureTimelapse`** answers "can it record video": it cannot, because every
-frame travels base64-encoded through the run log, which is fine for a
-photograph and impractical for a clip. A timelapse is what the transport
-supports, in one run so the robot homes once.
+**Video was asked for and is not possible on this robot.** The Flex advertises
+an HLS and an RTMP live stream and has a service for it; the service restarts
+cleanly and never publishes a segment, with the camera idle and nothing in the
+robot's logs. Single frames arrive about one every two seconds. A
+`CaptureTimelapse` command existed briefly to make a clip out of those and was
+removed - a sped-up slideshow was not what was wanted. `CaptureImage` remains,
+and switches the camera on and back off around the shot.
 
 ---
 

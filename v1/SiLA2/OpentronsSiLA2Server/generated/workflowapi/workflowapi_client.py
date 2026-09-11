@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from workflowapi_types import (
         AbortRun_Responses,
         CaptureImage_Responses,
-        CaptureTimelapse_Responses,
         EmergencyStop_Responses,
         ExecuteRecipe_Responses,
         Home_Responses,
@@ -188,10 +187,15 @@ class WorkflowAPIClient:
         must be closed before shaking and open before the gripper can place
         or remove a plate.
 
+        MOVES HARDWARE means the module actuates - the latch, the shaker,
+        the heater. The robot arm does not move and does not home: this
+        goes straight to the module, outside any protocol run, and returns
+        in milliseconds. Run it while a protocol is running only if you
+        know what that protocol is doing.
+
         The module must be declared in the active hardware config AND
         reported attached by the robot. If it is not, the command fails
-        immediately and nothing moves - checked before any protocol is
-        generated, because playing a protocol homes the robot.
+        immediately and nothing actuates.
 
         """
         ...
@@ -279,10 +283,15 @@ class WorkflowAPIClient:
         MOVES HARDWARE. Set a heater-shaker or temperature module's target
         temperature. Set Celsius to 0 to deactivate heating.
 
+        MOVES HARDWARE means the module actuates - the latch, the shaker,
+        the heater. The robot arm does not move and does not home: this
+        goes straight to the module, outside any protocol run, and returns
+        in milliseconds. Run it while a protocol is running only if you
+        know what that protocol is doing.
+
         The module must be declared in the active hardware config AND
         reported attached by the robot. If it is not, the command fails
-        immediately and nothing moves - checked before any protocol is
-        generated, because playing a protocol homes the robot.
+        immediately and nothing actuates.
 
         """
         ...
@@ -300,10 +309,15 @@ class WorkflowAPIClient:
         MOVES HARDWARE. Shake a heater-shaker for a set time. The latch must
         be closed; set DurationSeconds to 0 to stop shaking immediately.
 
+        MOVES HARDWARE means the module actuates - the latch, the shaker,
+        the heater. The robot arm does not move and does not home: this
+        goes straight to the module, outside any protocol run, and returns
+        in milliseconds. Run it while a protocol is running only if you
+        know what that protocol is doing.
+
         The module must be declared in the active hardware config AND
         reported attached by the robot. If it is not, the command fails
-        immediately and nothing moves - checked before any protocol is
-        generated, because playing a protocol homes the robot.
+        immediately and nothing actuates.
 
         """
         ...
@@ -322,35 +336,6 @@ class WorkflowAPIClient:
         the robot — and starting a protocol HOMES THE ROBOT, so the fallback
         is refused unless AllowRobotMotion is true. The response always says
         which path was used and why the other was not.
-
-        """
-        ...
-
-    def CaptureTimelapse(
-        self,
-        Count: int,
-        IntervalSeconds: int,
-        Label: str,
-        AllowRobotMotion: bool,
-        *,
-        metadata: Optional[Iterable[ClientMetadataInstance]] = None,
-    ) -> ClientObservableCommandInstance[CaptureTimelapse_Responses]:
-        """
-
-        MOVES HARDWARE. Take a series of photographs of the deck at a fixed
-        interval, in a single run.
-
-        The robot cannot send a video back. A protocol runs *on* the robot,
-        and the only channel to the orchestrator is the run log, where each
-        frame travels base64-encoded — fine for a photograph, impractical
-        for the megabytes of a clip. A timelapse is the form this transport
-        supports, and for watching a gel set or a plate fill it is the more
-        useful one anyway: frames at chosen moments, each a full-resolution
-        still.
-
-        All the frames come from one protocol run, so the robot homes once
-        at the start rather than once per photograph. That homing is why
-        AllowRobotMotion must be set: see CaptureImage.
 
         """
         ...

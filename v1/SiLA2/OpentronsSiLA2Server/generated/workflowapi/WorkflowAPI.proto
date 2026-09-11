@@ -50,10 +50,15 @@ service WorkflowAPI {
             MOVES HARDWARE. Set a heater-shaker or temperature module's target
             temperature. Set Celsius to 0 to deactivate heating.
 
+            MOVES HARDWARE means the module actuates - the latch, the shaker,
+            the heater. The robot arm does not move and does not home: this
+            goes straight to the module, outside any protocol run, and returns
+            in milliseconds. Run it while a protocol is running only if you
+            know what that protocol is doing.
+
             The module must be declared in the active hardware config AND
             reported attached by the robot. If it is not, the command fails
-            immediately and nothing moves - checked before any protocol is
-            generated, because playing a protocol homes the robot.
+            immediately and nothing actuates.
          */
   rpc SetModuleTemperature (sila2.org.labos.workflow.workflowapi.v1.SetModuleTemperature_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
   /* Monitor the state of SetModuleTemperature */
@@ -64,17 +69,22 @@ service WorkflowAPI {
             MOVES HARDWARE. Shake a heater-shaker for a set time. The latch must
             be closed; set DurationSeconds to 0 to stop shaking immediately.
 
+            MOVES HARDWARE means the module actuates - the latch, the shaker,
+            the heater. The robot arm does not move and does not home: this
+            goes straight to the module, outside any protocol run, and returns
+            in milliseconds. Run it while a protocol is running only if you
+            know what that protocol is doing.
+
             The module must be declared in the active hardware config AND
             reported attached by the robot. If it is not, the command fails
-            immediately and nothing moves - checked before any protocol is
-            generated, because playing a protocol homes the robot.
+            immediately and nothing actuates.
          */
   rpc ShakeModule (sila2.org.labos.workflow.workflowapi.v1.ShakeModule_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
   /* Monitor the state of ShakeModule */
   rpc ShakeModule_Info (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.ExecutionInfo) {}
   /* Retrieve result of ShakeModule */
   rpc ShakeModule_Result(sila2.org.silastandard.CommandExecutionUUID) returns (sila2.org.labos.workflow.workflowapi.v1.ShakeModule_Responses) {}
-  /* MOVES HARDWARE. Open or close a heater-shaker's labware latch. It must be closed before shaking and open before the gripper can place or remove a plate. The module must be declared in the active hardware config AND reported attached by the robot. If it is not, the command fails immediately and nothing moves - checked before any protocol is generated, because playing a protocol homes the robot. */
+  /* MOVES HARDWARE. Open or close a heater-shaker's labware latch. It must be closed before shaking and open before the gripper can place or remove a plate. MOVES HARDWARE means the module actuates - the latch, the shaker, the heater. The robot arm does not move and does not home: this goes straight to the module, outside any protocol run, and returns in milliseconds. Run it while a protocol is running only if you know what that protocol is doing. The module must be declared in the active hardware config AND reported attached by the robot. If it is not, the command fails immediately and nothing actuates. */
   rpc SetModuleLatch (sila2.org.labos.workflow.workflowapi.v1.SetModuleLatch_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.SetModuleLatch_Responses) {}
   /* Record that a tip rack has been physically refilled. */
   rpc RefillTipRack (sila2.org.labos.workflow.workflowapi.v1.RefillTipRack_Parameters) returns (sila2.org.labos.workflow.workflowapi.v1.RefillTipRack_Responses) {}
@@ -98,27 +108,6 @@ service WorkflowAPI {
   rpc CaptureImage_Info (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.ExecutionInfo) {}
   /* Retrieve result of CaptureImage */
   rpc CaptureImage_Result(sila2.org.silastandard.CommandExecutionUUID) returns (sila2.org.labos.workflow.workflowapi.v1.CaptureImage_Responses) {}
-  /* 
-            MOVES HARDWARE. Take a series of photographs of the deck at a fixed
-            interval, in a single run.
-
-            The robot cannot send a video back. A protocol runs *on* the robot,
-            and the only channel to the orchestrator is the run log, where each
-            frame travels base64-encoded — fine for a photograph, impractical
-            for the megabytes of a clip. A timelapse is the form this transport
-            supports, and for watching a gel set or a plate fill it is the more
-            useful one anyway: frames at chosen moments, each a full-resolution
-            still.
-
-            All the frames come from one protocol run, so the robot homes once
-            at the start rather than once per photograph. That homing is why
-            AllowRobotMotion must be set: see CaptureImage.
-         */
-  rpc CaptureTimelapse (sila2.org.labos.workflow.workflowapi.v1.CaptureTimelapse_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
-  /* Monitor the state of CaptureTimelapse */
-  rpc CaptureTimelapse_Info (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.ExecutionInfo) {}
-  /* Retrieve result of CaptureTimelapse */
-  rpc CaptureTimelapse_Result(sila2.org.silastandard.CommandExecutionUUID) returns (sila2.org.labos.workflow.workflowapi.v1.CaptureTimelapse_Responses) {}
   /* 
             Current robot state as JSON: state, run_id, connected, config.
             Replaces the former GetStatus command — reading state is not an
@@ -324,19 +313,6 @@ message CaptureImage_Parameters {
 /* Responses of CaptureImage */
 message CaptureImage_Responses {
   sila2.org.silastandard.String CaptureResult = 1;  /* JSON: {saved, path, url, method, detail}. */
-}
-
-/* Parameters for CaptureTimelapse */
-message CaptureTimelapse_Parameters {
-  sila2.org.silastandard.Integer Count = 1;  /* How many photographs to take (1-240). */
-  sila2.org.silastandard.Integer IntervalSeconds = 2;  /* Seconds between frames. */
-  sila2.org.silastandard.String Label = 3;  /* Short name for the image files. Optional. */
-  sila2.org.silastandard.Boolean AllowRobotMotion = 4;  /* Required. Running the protocol homes the robot; leave this false unless someone is watching the deck. */
-}
-
-/* Responses of CaptureTimelapse */
-message CaptureTimelapse_Responses {
-  sila2.org.silastandard.String TimelapseResult = 1;  /* JSON: {saved, frames, path, run_id, detail}. */
 }
 
 /* Parameters for Status */

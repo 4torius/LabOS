@@ -105,7 +105,6 @@ Descriptions beginning **MOVES HARDWARE** physically move the robot.
 |---------|-----------|--------------|
 | `SetCameraEnabled` | `Camera`, `LiveStream` | Turn the robot's camera and live stream on or off. Nothing moves; the setting lives on the robot |
 | `CaptureImage` (obs) | `Label`, `AllowRobotMotion` | Photograph the deck — see below |
-| `CaptureTimelapse` (obs) | `Count`, `IntervalSeconds`, `Label`, `AllowRobotMotion` | MOVES HARDWARE. A series of photographs in one run — see below |
 
 ### `MoveLabware`: what it offers, and what it records
 
@@ -192,49 +191,24 @@ along with permission to take one photograph. The error-recovery camera flag is
 left alone - whether the robot films its own error recovery is a third,
 separate decision.
 
-### Video: yes, as a live stream
+### Video: no
 
-**The Flex can send back live video.** Its camera service publishes an HLS
-stream and an RTMP stream; `CameraStatus` reports the URLs.
+The Flex advertises a live stream - `CameraStatus` reports an HLS and an RTMP
+URL, and the firmware has a whole service for it. It does not work on this
+robot. Enabling it restarts the live-stream service cleanly, port 1935 listens,
+the robot's own logs show no error, and no playlist or segment is ever
+published. Checked with the camera completely idle, in case the stills endpoint
+was holding the device. It is not.
 
-```json
-{"cameraEnabled": true, "liveStreamEnabled": true,
- "hls": "http://<robot>:31950/hls/stream.m3u", "rtmp": "/live/stream"}
-```
+Single frames come back at about one every two seconds, so there is no way to
+build a video out of them either. A `CaptureTimelapse` command existed briefly
+for that and was removed: a sped-up slideshow is not what anyone wanted.
 
-The HLS URL plays in a browser or in VLC. Source device, resolution, framerate
-and bitrate are configurable on the robot through its own
-`/camera/stream/settings` endpoint.
+The stream URLs are still reported, because reporting what the robot claims
+costs nothing and is how anyone would notice if a firmware update fixed it.
 
-What the robot cannot do is hand a *recorded clip* back through a protocol run.
-A protocol executes on the robot and its only channel to the orchestrator is
-the run log, where each frame travels base64-encoded - fine for one photograph
-at a couple of hundred kilobytes, impractical for the megabytes of a clip. So
-there are two different things here, and they answer different questions:
-
-| Want | Use |
-|------|-----|
-| Watch what is happening now | the live stream (`CameraStatus` → `hls`) |
-| A file of what happened at chosen moments | `CaptureTimelapse` |
-| One photograph, now | `CaptureImage` |
-
-### `CaptureTimelapse`: stills at intervals, saved as files
-
-For watching a gel set or a plate fill, frames at chosen moments - each a
-full-resolution still that lands in `Results/Images/` - are more useful than a
-low-bitrate video of a mostly-static deck.
-
-```
-CaptureTimelapse(Count=12, IntervalSeconds=300, Label="curing", AllowRobotMotion=true)
-```
-
-All frames come from **one** protocol run, so the robot homes once at the start
-rather than once per photograph. Count is capped at 240. The frames land in
-`Results/Images/` alongside single captures and appear in the same gallery,
-named so they sort in order.
-
-The protocol it generates is a `TakeSnapshot` and a `Delay` per frame; the
-same thing can be written by hand in a recipe file.
+So: **one photograph, on demand.** `CaptureImage` switches the camera on, takes
+it, and switches the camera back to however it was found.
 
 ### Safety features (in `src/server.py`, not exposed as commands)
 

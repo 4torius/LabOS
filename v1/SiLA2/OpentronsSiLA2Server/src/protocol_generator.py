@@ -405,6 +405,12 @@ def run(ctx: protocol_api.ProtocolContext):
         ctx.comment(f"Loaded custom liquid class: {name}")
 
     # 1. LOAD MODULES
+    #
+    # The latch is opened here on purpose: it is what lets a plate be put on
+    # the module, by hand or by a later MoveLabware, and recipes rely on it.
+    # Anything that then needs it shut closes it (HeaterShakerCloseLatch, or
+    # HeaterShakerSetShake below, for which a closed latch is a precondition
+    # the robot enforces).
     if "Modules" in settings:
         for i, c in settings["Modules"].items():
             m = ctx.load_module(c["Type"], c["Slot"])
@@ -898,6 +904,11 @@ def run(ctx: protocol_api.ProtocolContext):
 
         elif cmd == "HeaterShakerSetShake":
             hs = objects["Modules"][step["ModuleID"]]
+            # A closed latch is a precondition of shaking, not a side effect:
+            # the API raises CannotPerformModuleAction otherwise. Closing it
+            # clamps whatever is on the module, which is what you want before
+            # spinning it.
+            hs.close_labware_latch()
             hs.set_and_wait_for_shake_speed(step["RPM"])
 
         elif cmd == "HeaterShakerDeactivateShaker":

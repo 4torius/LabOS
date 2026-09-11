@@ -124,3 +124,66 @@ class TestSetCameraEnabled:
     ])
     def test_the_request_uses_the_robots_own_field_names(self, payload_key):
         assert payload_key in _method_body("    async def _set_camera(")
+
+
+class TestThereIsNoVideoFromThisRobot:
+    """Asked for, and looked into properly before being dropped.
+
+    The Flex advertises an HLS and an RTMP live stream. Enabling it restarts
+    the live-stream service cleanly, port 1935 listens, the robot's own logs
+    show no error - and no playlist or segment is ever published, checked with
+    the camera completely idle. Single frames come back at about one every two
+    seconds, which is not a frame rate.
+
+    A timelapse command existed for a while as the nearest thing. It was
+    removed: nobody wanted a sped-up slideshow, they wanted video.
+    """
+
+    def test_the_capture_surface_is_one_photograph(self):
+        commands = re.findall(r"<Command>\s*<Identifier>(\w+)</Identifier>", FDL)
+        assert "CaptureImage" in commands
+        assert "CaptureTimelapse" not in commands
+
+    def test_nothing_is_left_behind_in_the_implementation(self):
+        for leftover in ("CaptureTimelapse", "_animate", "MAX_TIMELAPSE"):
+            assert leftover not in IMPL, f"{leftover} survived the removal"
+
+    def test_the_stream_urls_are_still_reported(self):
+        """Reporting what the robot claims costs nothing and is how anyone
+        would notice if a firmware update ever made it work."""
+        body = _method_body("    async def _camera_state(")
+        assert "/camera/stream" in body
+
+
+class TestTheCameraIsBorrowedNotLeftOn:
+    """A capture switches the camera on and puts it back how it was found.
+
+    The Flex ships with it disabled, so asking for a frame gets 422 and looks
+    broken; turning it on is part of taking a picture. Leaving it on afterwards
+    is a decision about the lab, not a side effect a capture gets to make.
+    """
+
+    def test_capturing_a_still_borrows_the_camera(self):
+        body = _method_body("    def CaptureImage(")
+        assert "_borrow_camera()" in body
+        assert "_return_camera(" in body
+
+    def test_it_is_put_back_even_when_the_capture_fails(self):
+        body = _method_body("    def CaptureImage(")
+        assert "finally:" in body
+        assert body.index("finally:") < body.index("_return_camera(")
+
+    def test_a_camera_already_on_is_left_on(self):
+        """Nothing to restore means nothing is switched off underneath someone."""
+        body = _method_body("    def _borrow_camera(")
+        assert 'before.get("cameraEnabled")' in body
+        assert "return None" in body
+
+    def test_putting_it_back_never_raises(self):
+        body = _method_body("    def _return_camera(")
+        assert "except Exception" in body
+
+    def test_the_live_stream_flag_is_carried_through_untouched(self):
+        """Borrowing the camera for a photograph must not start broadcasting."""
+        body = _method_body("    def _borrow_camera(")
+        assert 'bool(before.get("liveStreamEnabled"))' in body

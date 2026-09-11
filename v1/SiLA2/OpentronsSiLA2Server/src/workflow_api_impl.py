@@ -39,7 +39,6 @@ from generated.workflowapi import (
     WorkflowAPIBase,
     AbortRun_Responses,
     CaptureImage_Responses,
-    CaptureTimelapse_Responses,
     EmergencyStop_Responses,
     ExecuteRecipe_Responses,
     Home_Responses,
@@ -569,15 +568,11 @@ class WorkflowAPIImpl(WorkflowAPIBase):
                        f"{' with the gripper' if UseGripper else ' (manual move)'}{hal_note}"
         )
 
-    def _require_module(self, module_name: str) -> str:
-        """The module a command names, or a refusal that costs no motion.
+    def _require_module(self, module_name: str) -> "tuple[str, str]":
+        """The module a command names, as (config name, the robot's module id).
 
-        Everything a module command does reaches the robot by generating a
-        one-step protocol and playing it - and playing a run homes the robot
-        first. So a mistyped module name used to home the Flex and only then
-        fail on a loadModule the deck could not satisfy. The operator saw the
-        arm move and an error afterwards, which reads like the command half
-        worked.
+        The id is what POST /commands addresses the module by, so resolving the
+        name and finding the attached module are the same lookup.
 
         Two things have to be true, and they are different things:
           * the active hardware config declares the module - otherwise the
@@ -621,20 +616,62 @@ class WorkflowAPIImpl(WorkflowAPIBase):
         except Exception as exc:
             # Not reachable is not the same as not attached; do not block on it.
             logger.warning("Could not ask the robot which modules are attached: %s", exc)
-            return match
+            return match, ""
 
         spec = declared.get(match) or {}
         wanted = (spec.get("Type") or "").lower()
+        for module in attached:
+            model = str(module.get("moduleModel", "")).lower()
+            if wanted and (wanted in model or model in wanted):
+                return match, str(module.get("id") or "")
+
         present = {str(m.get("moduleModel", "")).lower() for m in attached}
-        if wanted and not any(wanted in model or model in wanted for model in present):
-            raise ValueError(
-                f"The hardware config declares '{match}' ({spec.get('Type')}) at slot "
-                f"{spec.get('Slot', '?')}, but the robot reports "
-                f"{'no modules attached' if not attached else 'only: ' + ', '.join(sorted(present))}. "
-                f"Nothing was moved. Either plug the module in, or load a hardware "
-                f"config that matches the deck."
+        raise ValueError(
+            f"The hardware config declares '{match}' ({spec.get('Type')}) at slot "
+            f"{spec.get('Slot', '?')}, but the robot reports "
+            f"{'no modules attached' if not attached else 'only: ' + ', '.join(sorted(present))}. "
+            f"Nothing was moved. Either plug the module in, or load a hardware "
+            f"config that matches the deck."
+        )
+
+    async def _module_command(self, command_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Send one protocol-engine command straight to the robot.
+
+        Module control does not belong in a protocol run. A run homes the robot
+        before it starts, takes twenty to thirty seconds to upload, analyse and
+        play, and - the part that actually broke things - the engine deactivates
+        the modules when the run ends. So SetModuleTemperature reported success
+        and left the heater off: the target was set and then dropped along with
+        the run that set it. Confirmed on hardware.
+
+        POST /commands runs the same command outside any run. Nothing homes, it
+        returns in milliseconds, and the module keeps the state it was given.
+        The robot itself says so: /modules/{serial} answers 410 "This endpoint
+        has been removed. Use POST /commands instead."
+        """
+        import httpx
+
+        ot = self._require_ot()
+        if ot.robot is None or not ot.robot.is_connected:
+            raise RuntimeError("Not connected to the robot")
+        url = f"http://{ot.robot.host}:{ot.robot.port}/commands"
+        async with httpx.AsyncClient(timeout=120.0,
+                                     headers={"Opentrons-Version": "*"}) as client:
+            response = await client.post(
+                url, params={"waitUntilComplete": True},
+                json={"data": {"commandType": command_type, "params": params}},
             )
-        return match
+            if not response.is_success:
+                raise RuntimeError(
+                    f"{command_type} refused by the robot ({response.status_code}): "
+                    f"{response.text[:300]}"
+                )
+            data = response.json().get("data", {})
+        error = data.get("error")
+        if error or data.get("status") == "failed":
+            detail = (error or {}).get("detail") or (error or {}).get("errorType") or "failed"
+            raise RuntimeError(f"{command_type} failed on the robot: {detail}")
+        return data
 
     def SetModuleTemperature(
         self,
@@ -647,27 +684,34 @@ class WorkflowAPIImpl(WorkflowAPIBase):
     ) -> SetModuleTemperature_Responses:
         instance.begin_execution()
         instance.progress = 0.05
-        ModuleName = self._require_module(ModuleName)
+        ModuleName, module_id = self._require_module(ModuleName)
+        instance.progress = 0.2
+
         if Celsius <= 0:
-            steps = [{"Command": "HeaterShakerDeactivateHeater", "ModuleID": ModuleName}]
-            message = f"{ModuleName}: heating deactivated"
-        else:
-            steps = [{
-                "Command": "HeaterShakerSetTemperature",
-                "ModuleID": ModuleName,
-                "Temperature": Celsius,
-            }]
-            if WaitForTemperature:
-                steps.append({
-                    "Command": "HeaterShakerWaitForTemperature",
-                    "ModuleID": ModuleName,
-                    "Temperature": Celsius,
-                })
-            message = f"{ModuleName}: target {Celsius} C"
-        self._run_inline(steps, f"SetModuleTemperature {ModuleName}",
-                         requirements={ModuleName: ModuleName})
+            self._run_async(
+                self._module_command("heaterShaker/deactivateHeater",
+                                     {"moduleId": module_id}), timeout=60)
+            instance.progress = 1.0
+            return SetModuleTemperature_Responses(
+                TemperatureResult=f"{ModuleName}: heating deactivated")
+
+        self._run_async(
+            self._module_command("heaterShaker/setTargetTemperature",
+                                 {"moduleId": module_id, "celsius": Celsius}), timeout=60)
+        instance.progress = 0.5
+        if WaitForTemperature:
+            # The robot blocks until it is there; no client-side polling loop.
+            self._run_async(
+                self._module_command("heaterShaker/waitForTemperature",
+                                     {"moduleId": module_id, "celsius": Celsius}),
+                timeout=None)
+            instance.progress = 1.0
+            return SetModuleTemperature_Responses(
+                TemperatureResult=f"{ModuleName}: reached {Celsius} C")
+
         instance.progress = 1.0
-        return SetModuleTemperature_Responses(TemperatureResult=message)
+        return SetModuleTemperature_Responses(
+            TemperatureResult=f"{ModuleName}: heating to {Celsius} C")
 
     def ShakeModule(
         self,
@@ -680,32 +724,47 @@ class WorkflowAPIImpl(WorkflowAPIBase):
     ) -> ShakeModule_Responses:
         instance.begin_execution()
         instance.progress = 0.05
-        ModuleName = self._require_module(ModuleName)
+        ModuleName, module_id = self._require_module(ModuleName)
+        instance.progress = 0.2
+
         if DurationSeconds <= 0:
-            steps = [{"Command": "HeaterShakerDeactivateShaker", "ModuleID": ModuleName}]
-            message = f"{ModuleName}: shaking stopped"
-        else:
-            steps = [
-                {"Command": "HeaterShakerSetShake", "ModuleID": ModuleName, "RPM": RPM},
-                {"Command": "Delay", "Seconds": DurationSeconds},
-                {"Command": "HeaterShakerDeactivateShaker", "ModuleID": ModuleName},
-            ]
-            message = f"{ModuleName}: shook at {RPM} rpm for {DurationSeconds}s"
-        self._run_inline(steps, f"ShakeModule {ModuleName}",
-                         requirements={ModuleName: ModuleName})
+            self._run_async(
+                self._module_command("heaterShaker/deactivateShaker",
+                                     {"moduleId": module_id}), timeout=60)
+            instance.progress = 1.0
+            return ShakeModule_Responses(ShakeResult=f"{ModuleName}: shaking stopped")
+
+        # A closed latch is a precondition of shaking, not a side effect: the
+        # robot raises CannotPerformModuleAction otherwise. Closing it clamps
+        # whatever is on the module, which is what you want before spinning it.
+        self._run_async(
+            self._module_command("heaterShaker/closeLabwareLatch",
+                                 {"moduleId": module_id}), timeout=60)
+        instance.progress = 0.35
+        self._run_async(
+            self._module_command("heaterShaker/setAndWaitForShakeSpeed",
+                                 {"moduleId": module_id, "rpm": RPM}), timeout=120)
+        instance.progress = 0.5
+
+        self._run_async(asyncio.sleep(DurationSeconds), timeout=DurationSeconds + 30)
+        instance.progress = 0.9
+
+        self._run_async(
+            self._module_command("heaterShaker/deactivateShaker",
+                                 {"moduleId": module_id}), timeout=60)
         instance.progress = 1.0
-        return ShakeModule_Responses(ShakeResult=message)
+        return ShakeModule_Responses(
+            ShakeResult=f"{ModuleName}: shook at {RPM} rpm for {DurationSeconds}s")
 
     def SetModuleLatch(
         self, ModuleName: str, Open: bool, *, metadata: MetadataDict
     ) -> SetModuleLatch_Responses:
-        ModuleName = self._require_module(ModuleName)
-        command = "HeaterShakerOpenLatch" if Open else "HeaterShakerCloseLatch"
-        self._run_inline(
-            [{"Command": command, "ModuleID": ModuleName}],
-            f"SetModuleLatch {ModuleName}",
-            requirements={ModuleName: ModuleName},
-        )
+        ModuleName, module_id = self._require_module(ModuleName)
+        self._run_async(
+            self._module_command(
+                "heaterShaker/openLabwareLatch" if Open
+                else "heaterShaker/closeLabwareLatch",
+                {"moduleId": module_id}), timeout=60)
         return SetModuleLatch_Responses(
             LatchResult=f"{ModuleName}: latch {'opened' if Open else 'closed'}"
         )
@@ -738,6 +797,38 @@ class WorkflowAPIImpl(WorkflowAPIBase):
     # ═════════════════════════════════════════════════════════════════════════
     #  CAMERA
     # ═════════════════════════════════════════════════════════════════════════
+
+    def _borrow_camera(self) -> Optional[Dict[str, Any]]:
+        """Switch the camera on for the duration of a capture.
+
+        The Flex ships with its camera disabled, so a capture command that
+        merely asks for a frame gets 422 "Cannot take photo, camera is
+        disabled" and looks broken. Turning it on is part of taking a picture.
+
+        Returns the state to restore, or None if nothing needed changing.
+        Always paired with _return_camera in a finally.
+        """
+        try:
+            before = self._run_async(self._camera_state(), timeout=20)
+        except Exception as exc:
+            logger.warning("Could not read the camera state: %s", exc)
+            return None
+        if before.get("cameraEnabled"):
+            return None
+        self._run_async(
+            self._set_camera(True, bool(before.get("liveStreamEnabled"))), timeout=30)
+        return before
+
+    def _return_camera(self, before: Optional[Dict[str, Any]]) -> None:
+        """Put the camera back how it was found. Never raises."""
+        if not before:
+            return
+        try:
+            self._run_async(
+                self._set_camera(bool(before.get("cameraEnabled")),
+                                 bool(before.get("liveStreamEnabled"))), timeout=30)
+        except Exception as exc:
+            logger.warning("Could not switch the camera back off: %s", exc)
 
     def SetCameraEnabled(
         self, Camera: bool, LiveStream: bool, *, metadata: MetadataDict
@@ -811,6 +902,7 @@ class WorkflowAPIImpl(WorkflowAPIBase):
         instance.progress = 0.3
         http_detail = "not attempted"
         if getattr(self._config, "camera_http_probe", True):
+            restore = self._borrow_camera()
             try:
                 data = self._run_async(self._capture_over_http(), timeout=30)
                 if data:
@@ -818,11 +910,16 @@ class WorkflowAPIImpl(WorkflowAPIBase):
                     instance.progress = 1.0
                     return CaptureImage_Responses(CaptureResult=json.dumps({
                         "saved": True, "path": str(target), "url": f"/api/images/{filename}",
-                        "method": "http", "detail": "Captured via the robot's camera endpoint; nothing moved",
+                        "method": "http",
+                        "detail": ("Captured via the robot's camera endpoint; nothing moved"
+                                   + (". The camera was switched on for this and switched back off"
+                                      if restore else "")),
                     }))
                 http_detail = "robot has no HTTP camera endpoint"
             except Exception as exc:
                 http_detail = f"HTTP capture failed: {exc}"
+            finally:
+                self._return_camera(restore)
         else:
             http_detail = "disabled in config (camera.http_probe: false)"
 
@@ -852,96 +949,6 @@ class WorkflowAPIImpl(WorkflowAPIBase):
             "method": "protocol", "run_id": run_id,
             "detail": (f"{http_detail}. Captured by running a one-step protocol "
                        f"(the robot was homed). {saved} image(s) extracted from the run log."),
-        }))
-
-    #: Bound on a timelapse. Each frame is a full-resolution JPEG carried
-    #: base64-encoded through the run log; a few hundred is already a very
-    #: large log, and a run that never ends is worse than a refused one.
-    MAX_TIMELAPSE_FRAMES = 240
-
-    def CaptureTimelapse(
-        self,
-        Count: int,
-        IntervalSeconds: int,
-        Label: str,
-        AllowRobotMotion: bool,
-        *,
-        metadata: MetadataDict,
-        instance: ObservableCommandInstance,
-    ) -> CaptureTimelapse_Responses:
-        """Photograph the deck repeatedly, in a single run.
-
-        The robot cannot hand back a video. A protocol executes *on* the robot,
-        and the only channel to this process is the run log, where each frame
-        travels base64-encoded — fine for one photograph, impractical for the
-        megabytes of a clip. A timelapse is the form this transport supports,
-        and for watching a gel set or a plate fill it is the more useful one:
-        frames at chosen moments, each a full-resolution still.
-
-        All frames come from one protocol run, so the robot homes once at the
-        start rather than once per frame.
-        """
-        ot = self._require_ot()
-        instance.begin_execution()
-        instance.progress = 0.02
-
-        if not getattr(self._config, "camera_enabled", True):
-            return CaptureTimelapse_Responses(TimelapseResult=json.dumps({
-                "saved": False, "frames": 0,
-                "detail": "Camera disabled in config.yaml (camera.enabled: false)",
-            }))
-
-        if Count < 1 or Count > self.MAX_TIMELAPSE_FRAMES:
-            raise ValueError(
-                f"Count must be between 1 and {self.MAX_TIMELAPSE_FRAMES}; got {Count}. "
-                f"Every frame is carried base64-encoded through the run log."
-            )
-        interval = max(0, int(IntervalSeconds))
-
-        # Running a protocol homes the robot, exactly as for CaptureImage —
-        # and here it is the only available path, since the HTTP camera
-        # endpoint takes one picture and cannot be scheduled.
-        if not AllowRobotMotion:
-            return CaptureTimelapse_Responses(TimelapseResult=json.dumps({
-                "saved": False, "frames": 0, "detail": (
-                    "A timelapse runs a protocol on the robot, which homes it. "
-                    "Refused because AllowRobotMotion is false. Set it true only "
-                    "with someone watching the deck."
-                ),
-            }))
-
-        label = "".join(c if c.isalnum() or c in "-_" else "_" for c in (Label or "timelapse"))
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        device = getattr(self._config, "camera_device", "/dev/video2")
-        target_dir = self._images_dir()
-        target_dir.mkdir(parents=True, exist_ok=True)
-
-        steps: List[Dict[str, Any]] = []
-        for frame in range(Count):
-            if frame and interval:
-                steps.append({"Command": "Delay", "Seconds": interval})
-            steps.append({
-                "Command": "TakeSnapshot",
-                "Filename": f"{stamp}_{label}_{frame + 1:03d}.jpg",
-                "Device": device,
-            })
-
-        instance.progress = 0.1
-        run_id = self._run_inline(steps, f"CaptureTimelapse {label} x{Count}")
-
-        saved = self._run_async(
-            ot.robot.extract_images_from_log(run_id, str(target_dir)), timeout=300
-        ) if ot.robot else 0
-        instance.progress = 1.0
-
-        return CaptureTimelapse_Responses(TimelapseResult=json.dumps({
-            "saved": bool(saved), "frames": saved, "requested": Count,
-            "path": str(target_dir), "url": "/api/images", "run_id": run_id,
-            "detail": (
-                f"{saved} of {Count} frame(s) captured at {interval}s intervals "
-                f"and extracted from the run log. The robot was homed once at "
-                f"the start of the run."
-            ),
         }))
 
     def _images_dir(self) -> Path:

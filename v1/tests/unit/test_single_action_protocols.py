@@ -145,14 +145,6 @@ class TestTheImplementationDeclaresThem:
     IMPL = (V1_DIR / "SiLA2" / "OpentronsSiLA2Server" / "src"
             / "workflow_api_impl.py").read_text(encoding="utf-8")
 
-    @pytest.mark.parametrize("command", [
-        "SetModuleTemperature", "ShakeModule", "SetModuleLatch",
-    ])
-    def test_each_module_command_requires_its_module(self, command):
-        start = self.IMPL.index(f"    def {command}(")
-        body = self.IMPL[start:self.IMPL.index("requirements=", start) + 200]
-        assert "requirements={ModuleName: ModuleName}" in body
-
     def test_a_move_requires_both_ends(self):
         assert "requirements=self._move_requirements(LabwareName, NewLocation)" in self.IMPL
         assert "_move_requirements" in self.IMPL
@@ -183,3 +175,41 @@ class TestTheDestinationOfAMoveIsChecked:
         modules_branch = self.IMPL.index("if NewLocation not in modules:")
         slot_check = self.IMPL.index("if NewLocation not in _FLEX_SLOTS:")
         assert modules_branch < slot_check
+
+
+class TestTheHeaterShakerLatch:
+    """Shaking has a precondition the robot enforces.
+
+    The Opentrons API refuses "cannot start or deactivate shaking while the
+    labware latch is open". Loading a heater-shaker opens its latch, on
+    purpose - that is what lets a plate be put on it, by hand or by a later
+    MoveLabware, and recipes depend on it. So the close belongs at the shake,
+    not at the load: a recipe that opens the latch, places a plate, closes it,
+    heats and shakes must keep working exactly as it did.
+    """
+
+    GENERATOR = (V1_DIR / "SiLA2" / "OpentronsSiLA2Server" / "src"
+                 / "protocol_generator.py").read_text(encoding="utf-8")
+
+    def test_loading_a_heater_shaker_still_opens_its_latch(self):
+        """Recipes rely on this to place a plate on the module."""
+        assert 'if "heaterShaker" in c["Type"]: m.open_labware_latch()' in self.GENERATOR
+
+    def test_a_move_onto_the_module_still_opens_the_latch(self):
+        assert "target_to_check.open_labware_latch()" in self.GENERATOR
+
+    def test_an_explicit_close_latch_step_is_still_honoured(self):
+        assert 'elif cmd == "HeaterShakerCloseLatch":' in self.GENERATOR
+
+    def test_shaking_closes_the_latch_first(self):
+        start = self.GENERATOR.index('elif cmd == "HeaterShakerSetShake":')
+        body = self.GENERATOR[start:start + 700]
+        assert "close_labware_latch()" in body
+        assert body.index("close_labware_latch") < body.index("set_and_wait_for_shake_speed")
+
+    def test_the_close_is_a_no_op_for_a_recipe_that_already_closed_it(self):
+        """Nothing else about the composite HeaterShaker step changed."""
+        start = self.GENERATOR.index('elif cmd == "HeaterShaker":')
+        body = self.GENERATOR[start:start + 900]
+        assert 'if step.get("CloseLatch"): hs.close_labware_latch()' in body
+        assert 'if step.get("OpenLatch"): hs.open_labware_latch()' in body

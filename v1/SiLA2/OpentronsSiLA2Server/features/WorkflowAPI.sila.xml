@@ -323,10 +323,15 @@
             MOVES HARDWARE. Set a heater-shaker or temperature module's target
             temperature. Set Celsius to 0 to deactivate heating.
 
+            MOVES HARDWARE means the module actuates - the latch, the shaker,
+            the heater. The robot arm does not move and does not home: this
+            goes straight to the module, outside any protocol run, and returns
+            in milliseconds. Run it while a protocol is running only if you
+            know what that protocol is doing.
+
             The module must be declared in the active hardware config AND
             reported attached by the robot. If it is not, the command fails
-            immediately and nothing moves - checked before any protocol is
-            generated, because playing a protocol homes the robot.
+            immediately and nothing actuates.
         </Description>
         <Observable>Yes</Observable>
         <Parameter>
@@ -366,10 +371,15 @@
             MOVES HARDWARE. Shake a heater-shaker for a set time. The latch must
             be closed; set DurationSeconds to 0 to stop shaking immediately.
 
+            MOVES HARDWARE means the module actuates - the latch, the shaker,
+            the heater. The robot arm does not move and does not home: this
+            goes straight to the module, outside any protocol run, and returns
+            in milliseconds. Run it while a protocol is running only if you
+            know what that protocol is doing.
+
             The module must be declared in the active hardware config AND
             reported attached by the robot. If it is not, the command fails
-            immediately and nothing moves - checked before any protocol is
-            generated, because playing a protocol homes the robot.
+            immediately and nothing actuates.
         </Description>
         <Observable>Yes</Observable>
         <Parameter>
@@ -410,10 +420,15 @@
             must be closed before shaking and open before the gripper can place
             or remove a plate.
 
+            MOVES HARDWARE means the module actuates - the latch, the shaker,
+            the heater. The robot arm does not move and does not home: this
+            goes straight to the module, outside any protocol run, and returns
+            in milliseconds. Run it while a protocol is running only if you
+            know what that protocol is doing.
+
             The module must be declared in the active hardware config AND
             reported attached by the robot. If it is not, the command fails
-            immediately and nothing moves - checked before any protocol is
-            generated, because playing a protocol homes the robot.
+            immediately and nothing actuates.
         </Description>
         <Observable>No</Observable>
         <Parameter>
@@ -551,61 +566,6 @@
             <Identifier>CaptureResult</Identifier>
             <DisplayName>Capture Result</DisplayName>
             <Description>JSON: {saved, path, url, method, detail}.</Description>
-            <DataType><Basic>String</Basic></DataType>
-        </Response>
-    </Command>
-
-    <Command>
-        <Identifier>CaptureTimelapse</Identifier>
-        <DisplayName>Capture Timelapse</DisplayName>
-        <Description>
-            MOVES HARDWARE. Take a series of photographs of the deck at a fixed
-            interval, in a single run.
-
-            The robot cannot send a video back. A protocol runs *on* the robot,
-            and the only channel to the orchestrator is the run log, where each
-            frame travels base64-encoded — fine for a photograph, impractical
-            for the megabytes of a clip. A timelapse is the form this transport
-            supports, and for watching a gel set or a plate fill it is the more
-            useful one anyway: frames at chosen moments, each a full-resolution
-            still.
-
-            All the frames come from one protocol run, so the robot homes once
-            at the start rather than once per photograph. That homing is why
-            AllowRobotMotion must be set: see CaptureImage.
-        </Description>
-        <Observable>Yes</Observable>
-        <Parameter>
-            <Identifier>Count</Identifier>
-            <DisplayName>Frames</DisplayName>
-            <Description>How many photographs to take (1-240).</Description>
-            <DataType><Basic>Integer</Basic></DataType>
-        </Parameter>
-        <Parameter>
-            <Identifier>IntervalSeconds</Identifier>
-            <DisplayName>Interval (s)</DisplayName>
-            <Description>Seconds between frames.</Description>
-            <DataType><Basic>Integer</Basic></DataType>
-        </Parameter>
-        <Parameter>
-            <Identifier>Label</Identifier>
-            <DisplayName>Label</DisplayName>
-            <Description>Short name for the image files. Optional.</Description>
-            <DataType><Basic>String</Basic></DataType>
-        </Parameter>
-        <Parameter>
-            <Identifier>AllowRobotMotion</Identifier>
-            <DisplayName>Allow Robot Motion</DisplayName>
-            <Description>
-                Required. Running the protocol homes the robot; leave this
-                false unless someone is watching the deck.
-            </Description>
-            <DataType><Basic>Boolean</Basic></DataType>
-        </Parameter>
-        <Response>
-            <Identifier>TimelapseResult</Identifier>
-            <DisplayName>Timelapse Result</DisplayName>
-            <Description>JSON: {saved, frames, path, run_id, detail}.</Description>
             <DataType><Basic>String</Basic></DataType>
         </Response>
     </Command>
