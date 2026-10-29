@@ -313,3 +313,62 @@ only protects what somebody actually named correctly.
 See [ADDING_NEW_INSTRUMENT.md](ADDING_NEW_INSTRUMENT.md) for how to declare
 resources on a new instrument, and `SiLA2/_NewInstrumentTemplate/` for a
 working example.
+
+---
+
+## The same rule elsewhere: library types and dropdowns
+
+The rule this document arrives at — *in the server what the server can know, in
+`lab_config.yaml` what no server can speak for* — is not specific to resources.
+It should decide every "where does this fact live" question in the system, and
+today it does not, consistently. Written down here because the inconsistency is
+real and the fix is a separate piece of work.
+
+Where things stand:
+
+| Fact | Declared by | Layer |
+|---|---|---|
+| `recipe`, `analysis`, `hal_config`, `liquid_class` | the server, in `library_catalog.json` | 1 ✅ |
+| `mobile_task` | `lab_config.yaml` | 2, by hand |
+| `pipette`, `plate`, `tiprack` | `lab_config.yaml` `ui_dropdowns` | — |
+| `plate`, `labware` option lists | **hardcoded in `lab_core._get_options_for_hint`** | none |
+
+Three things to notice.
+
+**`mobile_task` is already layer 2, invented before it was named.** Its comment
+in `lab_config.yaml` reads: *"A server can declare this in its own
+library_catalog.json; the mobile robot's server runs on another machine and does
+not yet, so the declaration lives here."* That is exactly the argument for
+`resources.declare`, reached independently for a different kind of fact. It
+should become the same mechanism rather than a parallel one.
+
+**The labware catalogs belong in the config by right, not as a fallback.** This
+is the part worth being careful about: `plate`, `tiprack` and `pipette` are
+properties of *the lab's inventory*, not of any one instrument. The Opentrons
+does not own the list of plate definitions this lab possesses. Applying the rule
+honestly puts them in the config and leaves them there — "who can know" is
+answered by "the lab", and the lab's voice is `lab_config.yaml`. Moving them
+into a server would be the mistake, not the fix.
+
+**The hardcoded branches are the actual defect.** `_get_options_for_hint` has
+`if ui_hint == "plate"` and `if ui_hint == "labware"` with the folder walk
+written into the orchestrator. They are instrument-agnostic, so they do not
+break plug-and-play the way a `"tecan" in name` check would — but they are
+*code* where the architecture promises *data*, and they are a second source
+alongside the `ui_dropdowns` entry for the same hint. That is the same
+two-sources-that-can-disagree shape `provides` was introduced to kill.
+
+What the work would be, when it happens:
+
+1. one reader for library types and dropdown sources, layered exactly as
+   `resources` is: server declares, config supplements for servers that
+   cannot, config owns what belongs to the lab;
+2. the `plate` and `labware` branches become declarations, not branches;
+3. `mobile_task` moves from its bespoke `ui_dropdowns` shape onto the same
+   `declare` mechanism;
+4. the Settings panel gains the same visibility for dropdown sources that it
+   now has for resources — which hint comes from where, and which resolve to
+   nothing.
+
+Nothing about resources depends on this, which is why it is a later phase
+rather than part of the work above.
