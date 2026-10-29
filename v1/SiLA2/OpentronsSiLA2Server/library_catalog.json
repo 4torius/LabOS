@@ -84,5 +84,88 @@
       "role": "prepares_plate",
       "recipe_parameter": "RecipeName"
     }
+  },
+  "resources": {
+    "_comment": "What this server's commands physically occupy. deck:opentrons is this deck as a space: the mobile robot's place_on_OT / pick_from_OT tasks claim the same id, which is what stops a recipe starting with an arm inside it. control:true marks a command that must run WHILE the robot is busy. See v1/docs/RESOURCE_MODEL.md.",
+    "provides": [
+      "instrument:opentrons",
+      "deck:opentrons"
+    ],
+    "commands": {
+      "ExecuteRecipe": {
+        "claims": [
+          "instrument:opentrons",
+          "deck:opentrons"
+        ]
+      },
+      "Home": {
+        "claims": [
+          "instrument:opentrons",
+          "deck:opentrons"
+        ]
+      },
+      "MoveLabware": {
+        "claims": [
+          "instrument:opentrons",
+          "deck:opentrons"
+        ]
+      },
+      "LoadHardwareConfig": {
+        "claims": [
+          "deck:opentrons"
+        ]
+      },
+      "RefillTipRack": {
+        "claims": [
+          "deck:opentrons"
+        ]
+      },
+      "ShakeModule": {
+        "claims": [
+          "instrument:opentrons"
+        ]
+      },
+      "SetModuleTemperature": {
+        "claims": [
+          "instrument:opentrons"
+        ]
+      },
+      "SetModuleLatch": {
+        "claims": [
+          "instrument:opentrons"
+        ]
+      },
+      "CaptureImage": {
+        "claims": [
+          "instrument:opentrons"
+        ]
+      },
+      "SetCameraEnabled": {
+        "claims": [
+          "instrument:opentrons"
+        ]
+      },
+      "EmergencyStop": {
+        "control": true
+      },
+      "AbortRun": {
+        "control": true
+      },
+      "PauseRun": {
+        "control": true
+      },
+      "ResumeRun": {
+        "control": true
+      },
+      "SetLights": {
+        "control": true
+      },
+      "ValidateRecipe": {
+        "control": true
+      },
+      "ResetTipTracking": {
+        "control": true
+      }
+    }
   }
 }

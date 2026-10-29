@@ -71,6 +71,13 @@ def _step(number, instrument, action, parameters=None, depends_on=None):
     )
 
 
+#: These tests build their own catalogs, so the executor must not also pick up
+#: the repository's real `lab_config.yaml` — which does declare `mobile`, and
+#: would quietly make a test about undeclared instruments pass for the wrong
+#: reason. The shipped declarations are verified in test_shipped_resources.py.
+_ISOLATED = Path(__file__).resolve().parent / "_no_such_config_dir"
+
+
 def _executor(catalogs, hold=0.05):
     """An executor whose registry serves the given catalogs, recording overlap."""
     servers = {
@@ -93,7 +100,7 @@ def _executor(catalogs, hold=0.05):
         return CommandResult(success=True, data={})
 
     registry.execute = AsyncMock(side_effect=_execute)
-    executor = PnPWorkflowExecutor(registry)
+    executor = PnPWorkflowExecutor(registry, base_dir=_ISOLATED)
     executor._error_config = executor._error_config.__class__(
         retry_strategy="none", base_delay_seconds=0.0, max_delay_seconds=0.0,
         max_retries=0, enable_human_intervention=False,

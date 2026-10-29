@@ -130,3 +130,75 @@ webapp:
     auto_refresh_interval: 3
     toast_duration: 15
     workflow_status_auto_hide: 10
+
+# ── Physical resource claims ──────────────────────────────────────────────────
+# Normally empty. An instrument declares what it occupies in its own
+# library_catalog.json, served over LabOSLibraryProvider — so the Opentrons,
+# the Tecan and the Manual Station need nothing here.
+#
+# This section is only for what no server can speak for, and the mobile robot
+# is exactly that case: its SiLA2 server is deployed and maintained on the
+# remote host (192.168.11.22), its code is not in this repository, and its
+# catalog cannot be edited from here. Without this layer the model would be
+# closed to every instrument we did not write ourselves.
+#
+# The claims below mirror the tasks taught by demonstration against each
+# workstation's ArUco marker. `deck:opentrons` and `tray:tecan` are the ids
+# those two servers declare they own, so a transport task and the instrument's
+# own work exclude each other without either server knowing the other exists.
+# Re-teaching a task, or teaching a new one, means adding a line here.
+#
+# See docs/RESOURCE_MODEL.md.
+resources:
+  declare:
+    mobile:
+      provides:
+      - instrument:mobile
+      commands:
+        ExecuteTask:
+          claims:
+          - instrument:mobile
+          by_parameter:
+            # Keyed on BOTH spellings on purpose. The workflow builder writes
+            # TaskId (the opaque id the robot's platform assigns when a task is
+            # taught); a hand-written workflow or a future UI may write
+            # TaskName. Declaring only TaskName would have matched nothing in
+            # Test_Bicocca, and a claim that never matches means no exclusion,
+            # silently — which is the one failure this model exists to prevent.
+            # Unmatched entries simply contribute nothing, so listing both is
+            # free. Keep the two lists in step when a task is re-taught: the
+            # id changes.
+            TaskId:
+              dxvadjvibetfceaybdybsqsqcmzimdfj:   # place_on_OT
+              - deck:opentrons
+              qufptekmeyycpckgbvcpudozfdfkctba:   # pick_from_opentrons
+              - deck:opentrons
+              obwlfxkzdevvwcueaeekddafeaabccyb:   # go_to_opentrons (lowercase twin)
+              - instrument:mobile
+              nnegfohactaltbahtxfnejaaycafskaq:   # pick_from_tecan
+              - tray:tecan
+              rxzeeofvewbamneadgvdafucvefidfgb:   # place_on_TC
+              - tray:tecan
+            TaskName:
+              place_on_OT:
+              - deck:opentrons
+              pick_from_opentrons:
+              - deck:opentrons
+              pick_from_tecan:
+              - tray:tecan
+              place_on_TC:
+              - tray:tecan
+              # go_to_Opentrons, go_to_Tecan, Docking, WorkingPose and
+              # pick_from_dima move the base or the arm without entering
+              # another instrument, so they occupy only the robot.
+        CancelTask:
+          control: true
+        RefreshTasks:
+          control: true
+        GetTaskDetails:
+          control: true
+  # Aliases exist for the one binding that is genuinely deployment-variable:
+  # a task is taught against a marker, so swapping the instrument behind that
+  # marker changes the claim target while the taught motion stays valid.
+  # None needed today.
+  aliases: {}

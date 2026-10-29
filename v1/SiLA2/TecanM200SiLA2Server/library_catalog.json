@@ -103,5 +103,58 @@
       "plate_parameter": "PlateID",
       "protocol_parameter": "ProtocolFile"
     }
+  },
+  "resources": {
+    "_comment": "tray:tecan is the plate tray as a space; the mobile robot's pick_from_tecan / place_on_tecan tasks claim the same id. A plate sitting in the reader between PlateIn and PlateOut is held across steps rather than by one of them — that is phase 6 of v1/docs/RESOURCE_MODEL.md; until then the workflow's DependsOn is what keeps the robot out in between.",
+    "provides": [
+      "instrument:tecan",
+      "tray:tecan"
+    ],
+    "commands": {
+      "RunMeasurement": {
+        "claims": [
+          "instrument:tecan",
+          "tray:tecan"
+        ]
+      },
+      "PlateIn": {
+        "claims": [
+          "instrument:tecan",
+          "tray:tecan"
+        ]
+      },
+      "PlateOut": {
+        "claims": [
+          "instrument:tecan",
+          "tray:tecan"
+        ]
+      },
+      "Connect": {
+        "claims": [
+          "instrument:tecan"
+        ]
+      },
+      "Disconnect": {
+        "claims": [
+          "instrument:tecan"
+        ]
+      },
+      "SetTemperature": {
+        "claims": [
+          "instrument:tecan"
+        ]
+      },
+      "TurnOffTemperature": {
+        "claims": [
+          "instrument:tecan"
+        ]
+      },
+      "ListProtocols": {
+        "control": true
+      },
+      "GetAnIMLResult": {
+        "control": true
+      }
+    }
   }
 }

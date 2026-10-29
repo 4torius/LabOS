@@ -17,5 +17,35 @@
       "Level": "info",
       "SourceInstrument": "Workflow"
     }
+  },
+  "resources": {
+    "_comment": "The scarce resource here is the operator, not a machine: two steps that both need someone at the bench must not be issued at once, or the second is silently queued behind a human. operator:bench is that person. Notifications and queries occupy nobody. See v1/docs/RESOURCE_MODEL.md.",
+    "provides": [
+      "instrument:manual_station",
+      "operator:bench"
+    ],
+    "commands": {
+      "RequestOperatorTask": {
+        "claims": [
+          "instrument:manual_station",
+          "operator:bench"
+        ]
+      },
+      "ConfirmTaskComplete": {
+        "control": true
+      },
+      "CancelTask": {
+        "control": true
+      },
+      "GetActiveTasks": {
+        "control": true
+      },
+      "GetTaskHistory": {
+        "control": true
+      },
+      "SendNotification": {
+        "control": true
+      }
+    }
   }
 }

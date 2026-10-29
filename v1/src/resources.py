@@ -79,10 +79,19 @@ class CommandResources:
     `by_parameter` carries the robot case: every transport is `ExecuteTask`, and
     what it occupies depends on *which task* — so the indirection sits where the
     variability actually is.
+
+    `control` marks a command that occupies nothing and must run *while* the
+    instrument is busy: a stop, a pause, a status read. Without it the implicit
+    per-instrument claim would queue `EmergencyStop` behind the recipe it is
+    meant to interrupt, which is the opposite of what exclusion is for. It is a
+    deliberate opt-out rather than an empty `claims` list, because an empty list
+    is too easy to arrive at by accident for something that switches a safety
+    rule off.
     """
 
     claims: Tuple[str, ...] = ()
     by_parameter: Mapping[str, Mapping[str, Tuple[str, ...]]] = field(default_factory=dict)
+    control: bool = False
 
     def resolve(self, parameters: Optional[Mapping[str, Any]] = None) -> FrozenSet[str]:
         """Every resource this command occupies for the given parameters."""
@@ -121,6 +130,7 @@ class CommandResources:
                 parameter: {value: list(ids) for value, ids in mapping.items()}
                 for parameter, mapping in self.by_parameter.items()
             },
+            "control": self.control,
         }
 
 
@@ -230,8 +240,15 @@ def parse_declaration(raw: Any, source: str = "") -> ResourceDeclaration:
             if values:
                 by_parameter[str(parameter)] = values
 
+        control = bool(spec.get("control", False))
+        if control and (claims or by_parameter):
+            declaration.problems.append(
+                f"{label}resources.commands.{name} is marked control but also "
+                "claims resources; a control command occupies nothing")
+            claims, by_parameter = (), {}
+
         declaration.commands[str(name)] = CommandResources(
-            claims=claims, by_parameter=by_parameter)
+            claims=claims, by_parameter=by_parameter, control=control)
 
     return declaration
 
@@ -352,14 +369,19 @@ class ResourceTopology:
         when the server declared no resources at all, which keeps undeclared
         steps serialised against each other rather than mutually disjoint.
         """
-        found: Set[str] = {instrument_resource(instrument_id)}
         declaration = self.declarations.get(instrument_id)
+        spec = declaration.commands.get(command) if declaration is not None else None
+
+        # A control command occupies nothing, not even its own instrument:
+        # a stop that queues behind the run it is stopping is not a stop.
+        if spec is not None and spec.control:
+            return frozenset()
+
+        found: Set[str] = {instrument_resource(instrument_id)}
         if declaration is None or not declaration.declared:
             found.add(UNDECLARED)
-        if declaration is not None:
-            spec = declaration.commands.get(command)
-            if spec is not None:
-                found.update(self._resolve_alias(r) for r in spec.resolve(parameters))
+        if spec is not None:
+            found.update(self._resolve_alias(r) for r in spec.resolve(parameters))
         return frozenset(found)
 
     def conflicts(self, left: Iterable[str], right: Iterable[str]) -> bool:

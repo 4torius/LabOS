@@ -398,3 +398,50 @@ class TestTheLedger:
         await ledger.release("holder")
         await asyncio.wait_for(ledger.acquire("later", {"tray:tecan"}), timeout=1)
         assert ledger.holder_of("tray:tecan") == "later"
+
+
+class TestControlCommandsOccupyNothing:
+    """A stop that queues behind the run it is stopping is not a stop.
+
+    The implicit per-instrument claim is what makes this need saying: without
+    an opt-out, `EmergencyStop` would claim `instrument:opentrons` and wait for
+    the recipe it exists to interrupt.
+    """
+
+    DECL = {
+        "provides": ["instrument:opentrons", "deck:opentrons"],
+        "commands": {
+            "ExecuteRecipe": {"claims": ["instrument:opentrons", "deck:opentrons"]},
+            "EmergencyStop": {"control": True},
+            "PauseRun": {"control": True},
+        },
+    }
+
+    def test_a_control_command_claims_nothing_at_all(self):
+        topology = _topology(opentrons=self.DECL)
+        assert topology.claims_for("opentrons", "EmergencyStop") == frozenset()
+
+    def test_a_control_command_never_conflicts_with_a_running_step(self):
+        topology = _topology(opentrons=self.DECL)
+        assert not topology.conflicts(
+            topology.claims_for("opentrons", "EmergencyStop"),
+            topology.claims_for("opentrons", "ExecuteRecipe"),
+        )
+
+    def test_an_ordinary_command_still_claims_its_instrument(self):
+        topology = _topology(opentrons=self.DECL)
+        assert "instrument:opentrons" in topology.claims_for("opentrons", "ExecuteRecipe")
+
+    def test_control_plus_claims_is_contradictory_and_reported(self):
+        declaration = parse_declaration({
+            "provides": ["instrument:x"],
+            "commands": {"Stop": {"control": True, "claims": ["instrument:x"]}},
+        })
+        assert declaration.commands["Stop"].claims == ()
+        assert any("occupies nothing" in p for p in declaration.problems)
+
+    def test_an_undeclared_command_on_a_declaring_server_is_not_control(self):
+        # Silence is not permission: a command the server did not list still
+        # claims its instrument.
+        topology = _topology(opentrons=self.DECL)
+        assert "instrument:opentrons" in topology.claims_for("opentrons", "SetLights")
