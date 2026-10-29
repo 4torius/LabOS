@@ -37,6 +37,8 @@ from src.discovery import PnPServer
 from src.catalog import MEASURES_PLATE, PREPARES_PLATE, ServerCatalog
 from src.client import PnPRegistry, CommandResult, map_parameters
 from src.resolver import resolve
+from src.resources import (ResourceDeclaration, ResourceLedger, ResourceTopology,
+                           build_topology, instrument_resource)
 from src.settings import get_settings, normalize_timeout
 
 
@@ -505,6 +507,10 @@ class PnPWorkflowExecutor:
         _settings = get_settings(self.base_dir)
         self._error_config = _settings.error_handling
         self._default_step_timeout = _settings.workflow.default_timeout
+        #: Cap on steps in flight, on top of resource exclusion. A deployment
+        #: that still carries `parallel_execution: false` is read as a cap of 1
+        #: rather than silently ignored - see settings._concurrency_cap.
+        self._max_concurrency = _settings.workflow.max_concurrency
 
     def set_step_executor(self, fn: Callable):
         """Override step execution. fn must be: async (step: WorkflowStep, context: WorkflowContext) -> CommandResult."""
@@ -840,6 +846,34 @@ class PnPWorkflowExecutor:
                     step, {"RecipeName": normalized_params.get(recipe_key, "")})
                 errors.extend(cap_errors)
 
+        # A claim naming a resource nobody provides fails closed. Letting it
+        # through would silently mean "no exclusion", which is the one outcome
+        # the resource model exists to prevent: a safety rule that does not
+        # engage without saying so is worse than none, because it is trusted
+        # meanwhile. The instruments this workflow touches are enough - an
+        # unresolved claim elsewhere in the lab is the Settings panel's problem.
+        topology = self._topology()
+        if topology.unresolved:
+            touched = set()
+            for step in workflow.steps:
+                if is_locally_handled(step.instrument, step.action):
+                    continue
+                server = self.registry.get_server_by_name(step.instrument)
+                if server is not None:
+                    touched.add(server.name)
+            for unresolved in topology.unresolved:
+                if unresolved.instrument not in touched:
+                    continue
+                errors.append(ValidationError(
+                    step_number=0,
+                    field="resources",
+                    message=(
+                        f"{unresolved} — fix the declaring server's "
+                        "library_catalog.json, or add a resources.aliases entry "
+                        "in lab_config.yaml"
+                    ),
+                ))
+
         return errors
 
     def _validate_recipe_capacity(
@@ -931,16 +965,19 @@ class PnPWorkflowExecutor:
         self,
         workflow: Workflow,
         validate: bool = True,
-        parallel: bool = False
+        parallel: Optional[bool] = None,
     ) -> WorkflowResult:
-        """
-        Execute a workflow.
-        
+        """Execute a workflow.
+
         Args:
             workflow: The workflow to execute
             validate: Whether to validate before execution
-            parallel: Whether to run independent steps in parallel
-        
+            parallel: Deprecated and ignored except as a brake. Whether two
+                steps overlap is now decided by what they physically occupy,
+                not by configuration - see docs/RESOURCE_MODEL.md. Passing
+                `False` still forces strictly one step at a time, which is
+                what `workflow.max_concurrency: 1` is for.
+
         Returns:
             WorkflowResult with execution summary
         """
@@ -979,12 +1016,11 @@ class PnPWorkflowExecutor:
         # Create workflow context for automatic plate_id propagation
         context = WorkflowContext(workflow_name=workflow.name)
         
-        if parallel:
-            # Parallel execution with dependency tracking
-            completed, failed, skipped, step_results, errors = await self._execute_parallel(workflow, context)
-        else:
-            # Sequential execution
-            completed, failed, skipped, step_results, errors = await self._execute_sequential(workflow, context)
+        # `parallel=False` from an old caller means "one at a time", which is
+        # a concurrency limit rather than a different execution mode.
+        limit = 1 if parallel is False else self._max_concurrency
+        completed, failed, skipped, step_results, errors = await self._execute_waves(
+            workflow, context, max_concurrency=limit)
         
         # Finalize
         workflow.end_time = datetime.now()
@@ -1003,18 +1039,24 @@ class PnPWorkflowExecutor:
         )
     
     async def _execute_sequential(self, workflow: Workflow, context: WorkflowContext) -> tuple:
-        """Run one step at a time, in dependency order."""
-        return await self._execute_waves(workflow, context, parallel=False)
+        """One step at a time, in dependency order. Kept as the name callers use."""
+        return await self._execute_waves(workflow, context, max_concurrency=1)
 
     async def _execute_parallel(self, workflow: Workflow, context: WorkflowContext) -> tuple:
-        """Run each dependency wave concurrently."""
-        return await self._execute_waves(workflow, context, parallel=True)
+        """Dependency order, overlapping whatever the instruments allow.
+
+        Not a second implementation: both names reach the same wave runner, and
+        what may overlap is decided by resource claims rather than by which of
+        these was called. Kept because callers and tests refer to them.
+        """
+        return await self._execute_waves(workflow, context)
 
     async def _execute_waves(
         self,
         workflow: Workflow,
         context: WorkflowContext,
-        parallel: bool,
+        max_concurrency: Optional[int] = None,
+        parallel: Optional[bool] = None,
     ) -> tuple:
         """Execute a workflow in topological waves.
 
@@ -1028,9 +1070,21 @@ class PnPWorkflowExecutor:
         order is preserved so two independent steps still run in the order the
         author wrote them.
 
-        `parallel` only changes how a single wave is dispatched - concurrently,
-        or one step after another - never the ordering.
+        Within a wave, what may overlap is decided by what each step
+        physically occupies: a step takes its resource claims before it runs
+        and gives them back after, so steps that contend serialise and steps
+        that do not run together. `max_concurrency` is a cap on top of that,
+        not the rule - `1` forces strictly one step at a time.
         """
+        # `parallel` is the retired flag, kept as a translation so callers and
+        # tests written against the two old modes keep asserting the same
+        # behaviour through the new mechanism: False meant one step at a time,
+        # True meant "as much as the instruments allow", which is the default.
+        if parallel is not None and max_concurrency is None:
+            max_concurrency = 1 if parallel is False else None
+
+        topology = self._topology()
+        ledger = ResourceLedger(max_concurrency=max_concurrency)
         completed = failed = skipped = 0
         step_results: Dict[int, CommandResult] = {}
         errors: List[str] = []
@@ -1087,50 +1141,50 @@ class PnPWorkflowExecutor:
             if not runnable:
                 continue
 
-            if parallel and len(runnable) > 1:
-                # Different instruments at once; one instrument one step at a
-                # time. Two steps in a wave can share an instrument, and a
-                # SiLA2 server is not obliged to accept a second command while
-                # it is executing the first - a liquid handler certainly
-                # should not be asked to.
-                outcome_of: Dict[int, Any] = {}
+            # One dispatch path. Whether two steps in this wave overlap is
+            # decided by what they physically occupy, not by a config flag:
+            # a step waits for its claims, so steps that contend serialise and
+            # steps that do not run together. `workflow.parallel_execution`
+            # used to choose between two implementations here - see
+            # docs/RESOURCE_MODEL.md for why it had to go.
+            outcome_of: Dict[int, Any] = {}
 
-                async def _lane(steps: List[WorkflowStep]) -> None:
-                    for lane_step in steps:
-                        if self._abort_requested:
-                            outcome_of[lane_step.step_number] = None
-                            continue
-                        _notify(lane_step, StepStatus.RUNNING,
-                                f"Starting {lane_step.action} on {lane_step.instrument}")
-                        try:
-                            outcome_of[lane_step.step_number] = await self._run_one(
-                                lane_step, workflow, context)
-                        except asyncio.CancelledError:
-                            outcome_of[lane_step.step_number] = CommandResult(
-                                success=False, error="Aborted by operator")
-                        except Exception as exc:
-                            outcome_of[lane_step.step_number] = exc
-
-                await asyncio.gather(*[_lane(lane) for lane in self._lanes(runnable)])
-                outcomes = [outcome_of.get(step.step_number) for step in runnable]
-            else:
-                outcomes = []
-                for step in runnable:
+            async def _guarded(step: WorkflowStep) -> None:
+                holder = f"step-{step.step_number}"
+                # Pause before taking anything: a paused run must not sit on a
+                # deck it is not using.
+                if self._pause_requested and self._resume_event and not self._abort_requested:
+                    await self._resume_event.wait()
+                if self._abort_requested:
+                    outcome_of[step.step_number] = None
+                    return
+                try:
+                    await ledger.acquire(holder, self._claims_of(step, topology))
+                except asyncio.CancelledError:
+                    outcome_of[step.step_number] = CommandResult(
+                        success=False, error="Aborted by operator")
+                    return
+                try:
                     if self._abort_requested:
-                        outcomes.append(None)
-                        continue
+                        outcome_of[step.step_number] = None
+                        return
                     _notify(step, StepStatus.RUNNING,
                             f"Starting {step.action} on {step.instrument}")
-                    try:
-                        outcomes.append(await self._run_one(step, workflow, context))
-                    except asyncio.CancelledError:
-                        outcomes.append(CommandResult(success=False, error="Aborted by operator"))
-                    except Exception as exc:  # pragma: no cover - defensive
-                        outcomes.append(exc)
-                    # Pause takes effect between steps; a wave dispatched
-                    # concurrently cannot be interrupted mid-wave.
-                    if self._pause_requested and self._resume_event and not self._abort_requested:
-                        await self._resume_event.wait()
+                    outcome_of[step.step_number] = await self._run_one(
+                        step, workflow, context)
+                except asyncio.CancelledError:
+                    outcome_of[step.step_number] = CommandResult(
+                        success=False, error="Aborted by operator")
+                except Exception as exc:  # pragma: no cover - defensive
+                    outcome_of[step.step_number] = exc
+                finally:
+                    await ledger.release(holder)
+
+            # Tasks are created in written order, and the ledger wakes waiters
+            # in the order they asked, so steps that contend keep the order the
+            # author wrote them in.
+            await asyncio.gather(*[_guarded(step) for step in runnable])
+            outcomes = [outcome_of.get(step.step_number) for step in runnable]
 
             for step, outcome in zip(runnable, outcomes):
                 if outcome is None:  # aborted before it started
@@ -1200,20 +1254,38 @@ class PnPWorkflowExecutor:
 
         return completed, failed, skipped, step_results, errors
 
-    def _lanes(self, steps: List[WorkflowStep]) -> List[List[WorkflowStep]]:
-        """Split one wave into per-instrument lanes, keeping written order.
+    def _topology(self) -> ResourceTopology:
+        """Resolve what every discovered instrument occupies.
 
-        Steps are in the same lane when they resolve to the same server; a
-        step that resolves to none (a Delay, or a name validation would have
-        rejected) gets a lane of its own.
+        Built per run rather than cached: a workflow starts rarely, the
+        registry changes under us as servers come and go, and a stale topology
+        is a stale safety rule. Keyed by server name, which is what a workflow
+        step writes and what `get_server_by_name` resolves.
         """
-        lanes: Dict[Any, List[WorkflowStep]] = {}
-        for step in steps:
-            server = (self.registry.get_server_by_name(step.instrument)
-                      if not is_locally_handled(step.instrument, step.action) else None)
-            key = ("server", id(server)) if server is not None else ("step", step.step_number)
-            lanes.setdefault(key, []).append(step)
-        return list(lanes.values())
+        declarations = {}
+        for server in self.registry.list_servers():
+            catalog = getattr(server, "catalog", None)
+            declarations[server.name] = (getattr(catalog, "resources", None)
+                                         or ResourceDeclaration())
+        return build_topology(declarations, get_settings(self.base_dir).resources)
+
+    def _claims_of(self, step: WorkflowStep, topology: ResourceTopology) -> frozenset:
+        """What this step occupies, for exclusion purposes.
+
+        A step with no server behind it - a Delay, or an operator task handled
+        in the orchestrator - occupies nothing physical, so it gets a token of
+        its own and never blocks or is blocked. Everything else goes through
+        the topology, which always answers with at least the instrument.
+        """
+        if is_locally_handled(step.instrument, step.action):
+            return frozenset({f"step:{step.step_number}"})
+        server = self.registry.get_server_by_name(step.instrument)
+        if server is None:
+            # Validation rejects an unresolvable instrument before execution;
+            # if one reaches here, exclude it from everything rather than let
+            # it run unguarded.
+            return frozenset({instrument_resource(step.instrument)})
+        return topology.claims_for(server.name, step.action, step.parameters)
 
     async def _run_one(
         self,
