@@ -22,6 +22,12 @@ Nothing in the orchestrator, the web interface or the workflow engine changes:
 everything they know about an instrument comes from what the server itself
 publishes at runtime — its feature definition, and its `library_catalog.json`.
 
+One part of that file has a physical consequence and is worth reading before
+you write it: [**what your commands occupy**](#5-declare-what-your-commands-occupy),
+which is how the orchestrator knows your instrument must not run while a robot
+arm is inside it — and how your stop command avoids queueing behind the run it
+is meant to stop.
+
 This used to be nine manual steps involving four renames, three consistent
 edits and a codegen run into a temp directory. Each was a chance to get
 something subtly wrong, and the failure mode was a server that starts and then
@@ -168,6 +174,7 @@ written. Every section is optional.
 | `library_types` | a parameter named in `parameter_names` becomes a picker over that folder. Instead of `folder`: `values` (+ `value_labels`) for a fixed list, `json_keys_file` for the keys of a Library JSON file, or `source_property` (+ `value_field`, `label_field`, and `folder` for the offline snapshot) for a list the server itself holds |
 | `result_types` | a folder under `Results/` the instrument writes. Created when the server starts, created again by the orchestrator at discovery (which is what matters for a server on another computer), and listed as a tab on the Results page |
 | `parameter_defaults` | parameters a workflow step may leave out; dispatch fills them in. The step's own value always wins |
+| `resources` | what each command physically occupies, so two steps that would collide never run together. Its own section below — **read it before you write it** |
 | `traceability` | `prepares_plate` (with `recipe_parameter`) or `measures_plate` (with `plate_parameter`, `protocol_parameter`): the plate prepared earlier in a run is passed to a measuring command that did not name one, and the AnIML result is recorded against it on the Database page |
 
 Folders must be under `Library/` or `Results/`; anything else is refused, on
@@ -176,7 +183,132 @@ both sides. They are relative to the LabOS root — the directory holding
 
 `python labos.py doctor` checks every server's catalog.
 
-### 5. Run it, and test it from the command line
+### 5. Declare what your commands occupy
+
+This is the one section with a physical consequence: it is how the orchestrator
+knows that two steps must not run at the same time. The full reasoning is in
+[RESOURCE_MODEL.md](RESOURCE_MODEL.md); what you need to write it is here.
+
+```json
+"resources": {
+  "provides": ["instrument:centrifuge", "bucket:centrifuge"],
+  "commands": {
+    "Spin":       {"claims": ["instrument:centrifuge", "bucket:centrifuge"]},
+    "OpenLid":    {"claims": ["bucket:centrifuge"]},
+    "SetSpeed":   {"claims": ["instrument:centrifuge"]},
+    "Stop":       {"control": true},
+    "GetStatus":  {"control": true}
+  }
+}
+```
+
+#### The rule in one line
+
+**Two steps whose claims share an id never run together.** Everything else
+follows from that.
+
+#### `provides` — name the things you own
+
+List the physical things *this* instrument owns. Keep `instrument:<your key>`,
+and **add an id for anything another instrument can physically reach into** — a
+deck, a tray, a bucket, a carousel slot. That id is how a robot excludes itself
+from your instrument without either server knowing the other exists: the robot
+claims `bucket:centrifuge`, you provide it, and the orchestrator does the rest.
+
+If nothing can reach into your instrument, `["instrument:<your key>"]` is the
+whole list.
+
+An id is `kind:name`. The kind is a lowercase category (`instrument`, `deck`,
+`tray`, `bucket`, `operator`); the name is whatever you call the thing. One
+owner per id — if two servers both claim to provide one, discovery says so.
+
+#### `commands` — what each one occupies while it runs
+
+Ask of each command: *while this is running, what must nothing else touch?*
+
+| If the command… | Claim |
+|---|---|
+| moves the instrument's own mechanics | `instrument:<key>` |
+| exposes a space another instrument reaches into | that space's id too |
+| only changes a setting or reads a value | mark it `control: true` |
+| can and must run *during* another command | mark it `control: true` |
+
+A command you do not list claims `instrument:<key>` by default. That is the
+safe choice, so omitting a command is never dangerous — only conservative.
+
+#### `control: true` — get this one right
+
+A control command occupies **nothing at all**, not even its own instrument, so
+it can run while the instrument is busy. Your stop, abort, pause and status
+commands belong here.
+
+> Mark your stop command `control: true`. Without it the implicit
+> `instrument:<key>` claim makes `Stop` wait for the command it is meant to
+> interrupt — and a stop that queues behind the run it is stopping is not a
+> stop.
+
+Do not mark anything that moves hardware as `control`. Declaring both `control`
+and `claims` is contradictory: the claims are dropped and discovery reports it.
+
+#### `by_parameter` — when the command is not the whole story
+
+Use it when what a command occupies depends on an *argument* rather than on
+which command it is. The mobile robot is the case: every transport is one
+`ExecuteTask`, and where the arm ends up is in the parameter.
+
+```json
+"ExecuteTask": {
+  "claims": ["instrument:mobile"],
+  "by_parameter": {
+    "TaskName": {
+      "place_on_centrifuge": ["bucket:centrifuge"],
+      "pick_from_centrifuge": ["bucket:centrifuge"]
+    }
+  }
+}
+```
+
+A value that is not listed contributes nothing, so the command falls back to
+its unconditional `claims`.
+
+**The trap, and it is a real one:** declare the parameter under the name the
+workflow actually sends. The shipped mobile robot sends `TaskId` — an opaque
+id — while a hand-written workflow may send `TaskName`. Keying on only one of
+them matches nothing, and *a claim that never matches means no exclusion, with
+no error*. Declare both spellings when in doubt; an unmatched key costs
+nothing. Check a real workflow file rather than assuming.
+
+#### If you declare nothing
+
+The section is optional, and leaving it out is safe but costly: every step of
+your instrument will serialise against every other instrument that also
+declares nothing. Nothing of yours ever overlaps with anything. Concurrency is
+earned by declaring — the default fails towards "do not run these together",
+which is the right direction for hardware.
+
+#### Check it
+
+```bash
+python labos.py doctor        # catalog parses, no unresolved claim, one owner per id
+python labos.py resources     # the resolved topology: who provides what, who claims it
+```
+
+A claim naming an id nobody provides is a **configuration error**: any workflow
+touching your instrument fails validation before anything moves, naming the
+command and the id. That is deliberate — the alternative is a safety rule that
+silently does not engage.
+
+Before you call it done:
+
+- [ ] every space another instrument can reach into has an id in `provides`
+- [ ] your stop/abort/pause commands are `control: true`
+- [ ] no command that moves hardware is `control: true`
+- [ ] any `by_parameter` key matches what a real workflow sends
+- [ ] `labos.py doctor` reports no resource problems
+
+---
+
+### 6. Run it, and test it from the command line
 
 ```bash
 cd SiLA2/CentrifugeSiLA2Server && python main.py

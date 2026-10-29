@@ -1,5 +1,5 @@
 {
-  "_comment": "Everything the orchestrator needs to know about this instrument beyond its commands. Delete the sections you do not need. library_types: files it reads (a parameter becomes a picker). result_types: folders under Results/ it writes (created when the server starts, listed on the Results page). parameter_defaults: parameters a workflow may omit. traceability: commands that prepare (prepares_plate) or measure (measures_plate) a plate. See v1/src/catalog.py.",
+  "_comment": "Everything the orchestrator needs to know about this instrument beyond its commands. Delete the sections you do not need. library_types: files it reads (a parameter becomes a picker). result_types: folders under Results/ it writes (created when the server starts, listed on the Results page). parameter_defaults: parameters a workflow may omit. traceability: commands that prepare (prepares_plate) or measure (measures_plate) a plate. resources: what each command physically occupies, so the orchestrator knows what must not run at the same time — READ docs/ADDING_NEW_INSTRUMENT.md before editing that one. See v1/src/catalog.py and v1/src/resources.py.",
   "display": {
     "icon": "bi-cpu",
     "color": "secondary"
@@ -26,5 +26,31 @@
     }
   ],
   "parameter_defaults": {},
-  "traceability": {}
+  "traceability": {},
+  "resources": {
+    "_comment": "Delete this section and the orchestrator serialises every step of this instrument against every other instrument that also declares nothing — safe, but nothing of yours will ever overlap with anything. Declaring is how concurrency is earned. provides: the physical things THIS instrument owns. Give an id to anything another instrument can reach into (a deck, a tray, a carousel) so a robot can claim it by name; keep instrument:<key> as the instrument itself. commands: what each command occupies while it runs. Two steps whose claims share an id never run together. control: true marks a command that occupies NOTHING and must run while the instrument is busy — a stop, a pause, a status read. Get this wrong and your abort will queue behind the run it is meant to abort. by_parameter: use it when what a command occupies depends on an argument rather than on the command (one ExecuteTask that goes to different stations). Full guide and worked examples: docs/ADDING_NEW_INSTRUMENT.md.",
+    "provides": [
+      "instrument:newinstrument",
+      "tray:newinstrument"
+    ],
+    "commands": {
+      "DoSomething": {
+        "claims": [
+          "instrument:newinstrument"
+        ]
+      },
+      "LoadPlate": {
+        "claims": [
+          "instrument:newinstrument",
+          "tray:newinstrument"
+        ]
+      },
+      "Stop": {
+        "control": true
+      },
+      "GetStatus": {
+        "control": true
+      }
+    }
+  }
 }

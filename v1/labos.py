@@ -681,6 +681,93 @@ def _register_server(key: str, name: str, port: int, directory: str) -> None:
 #  doctor
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _shipped_topology():
+    """The resource topology from the catalogs on disk plus lab_config.yaml.
+
+    Deliberately offline: `doctor` has to work before any server is started,
+    and a catalog on disk is what that server will publish. `labos.py
+    resources` prefers live discovery and falls back to this.
+    """
+    import yaml
+
+    from src.catalog import parse_catalog
+    from src.resources import ResourceDeclaration, build_topology, parse_config
+
+    declarations, problems = {}, []
+    config = {}
+    try:
+        config = yaml.safe_load((BASE_DIR / "lab_config.yaml").read_text(encoding="utf-8")) or {}
+    except Exception as exc:  # pragma: no cover - doctor must not crash
+        problems.append(f"lab_config.yaml unreadable ({exc})")
+
+    # A catalog is found by folder (SiLA2/OpentronsSiLA2Server) but every other
+    # part of the system keys a server by its config key (opentrons). Without
+    # this mapping each local server is counted twice - once declaring, once
+    # undeclared - which reads as two owners for one resource.
+    key_of_folder = {}
+    for key, spec in (config.get("servers") or {}).items():
+        folder = (spec or {}).get("directory") or ""
+        name = folder.replace("\\", "/").rstrip("/").split("/")[-1]
+        if name:
+            key_of_folder[name] = key
+
+    for catalog_path in sorted((BASE_DIR / "SiLA2").glob("*/library_catalog.json")):
+        folder = catalog_path.parent.name
+        if folder.startswith("_"):
+            continue  # the template is not a deployed server
+        key = key_of_folder.get(folder, folder)
+        try:
+            catalog = parse_catalog(catalog_path.read_text(encoding="utf-8-sig"), source=key)
+        except OSError as exc:
+            problems.append(f"{key}: catalog unreadable ({exc})")
+            continue
+        problems.extend(catalog.problems)
+        declarations[key] = catalog.resources
+
+    # A server named in the config but with no catalog of its own is exactly
+    # the remote-host case the config layer exists for.
+    for key in (config.get("servers") or {}):
+        declarations.setdefault(key, ResourceDeclaration())
+
+    return build_topology(declarations, parse_config(config.get("resources"))), problems
+
+
+def cmd_resources(args: argparse.Namespace) -> int:
+    """The resolved resource topology: who owns what, and who reaches into it.
+
+    This is the model that decides which steps may run at the same time, and it
+    is invisible when it works — which is the reason to be able to print it.
+    """
+    topology, problems = _shipped_topology()
+
+    heading("Resources, and who owns them")
+    claimants = topology.claimants()
+    if not topology.providers:
+        info("nothing declared")
+    for resource in sorted(topology.providers):
+        owner = topology.providers[resource]
+        reaching = [c for c in claimants.get(resource, []) if not c.startswith(f"{owner}.")]
+        line = f"{resource:<34} owned by {owner}"
+        ok(line)
+        for claimant in reaching:
+            info(f"{'':<4}also claimed by {claimant}")
+
+    if topology.undeclared:
+        heading("Declaring nothing")
+        for key in topology.undeclared:
+            warn(f"{key} — its steps serialise against every other undeclared instrument")
+
+    heading("Problems")
+    for problem in problems + topology.problems:
+        warn(problem)
+    for unresolved in topology.unresolved:
+        bad(str(unresolved))
+    if not (problems or topology.problems or topology.unresolved):
+        ok("none")
+
+    return 1 if topology.unresolved else 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     problems = 0
 
@@ -769,6 +856,21 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     else:
         ok(f"all workflows at SchemaVersion {SCHEMA_VERSION}")
 
+    heading("Resource declarations")
+    topology, catalog_problems = _shipped_topology()
+    for problem in catalog_problems + topology.problems:
+        warn(problem)
+    for unresolved in topology.unresolved:
+        bad(str(unresolved))
+        problems += 1
+    if not topology.unresolved:
+        if topology.providers:
+            ok(f"{len(topology.providers)} resource(s) declared, every claim resolved")
+        else:
+            warn("no instrument declares what it occupies — every step serialises")
+    if topology.undeclared:
+        warn(f"declaring nothing: {', '.join(topology.undeclared)}")
+
     heading("Code generation")
     if shutil.which("sila2-codegen") or (BASE_DIR / ".venv" / "Scripts" / "sila2-codegen.exe").exists():
         ok("sila2-codegen available")
@@ -838,6 +940,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("server", help="folder under SiLA2/, e.g. OpentronsSiLA2Server")
     p.set_defaults(func=cmd_codegen)
 
+    sub.add_parser("resources", help="the resolved resource topology: who owns what, "
+                                     "who reaches into it, what does not resolve"
+                   ).set_defaults(func=cmd_resources)
     sub.add_parser("doctor", help="check the installation").set_defaults(func=cmd_doctor)
     return parser
 

@@ -32,6 +32,7 @@ First time on a new computer? See [SETUP.md](SETUP.md) for the full deployment g
 | [GUIDA_AL_BANCO.md](GUIDA_AL_BANCO.md) | Bench procedure, Italian: start the system, connect the Tecan, prepare recipe + hardware config + deck, compose and run a workflow, drive the mobile robot. Standalone HTML copy: [GUIDA_AL_BANCO.html](GUIDA_AL_BANCO.html) |
 | [TRAINING_GUIDE.md](TRAINING_GUIDE.md) | Operator-facing walkthrough: talking points, page-by-page usage, setup, basic troubleshooting (Italian: [TRAINING_GUIDE_IT.md](TRAINING_GUIDE_IT.md)) |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Four-layer system architecture, directory structure, design decisions |
+| [RESOURCE_MODEL.md](RESOURCE_MODEL.md) | What a step physically occupies, who declares it, and why two steps may or may not run at once |
 | [WORKFLOW_SYSTEM.md](WORKFLOW_SYSTEM.md) | JSON workflow format, DAG execution model, control flow, manual steps |
 | [HAL_SYSTEM.md](HAL_SYSTEM.md) | Hardware Abstraction Layer: recipe format, HAL config, translation pipeline |
 | [SILA2_INTEGRATION.md](SILA2_INTEGRATION.md) | SiLA2 standard, FDL format, sila2 library, execution strategies |
