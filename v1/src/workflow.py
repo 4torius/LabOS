@@ -173,6 +173,17 @@ class WorkflowStep:
     retry_count: Optional[int] = None  # None = use error_handling.max_retries from config
     timeout_seconds: Optional[float] = None
     on_failure: str = "stop"  # stop, continue, skip
+    #: Earliest this step may start, in seconds after its last dependency
+    #: finished (or after the run started, for a step with no dependencies).
+    #: This is how an incubation is expressed: the reading waits for it.
+    not_before_seconds: Optional[float] = None
+    #: Latest this step may start, measured the same way. Exceeding it does not
+    #: fail the step - the measurement still happened and the data is still
+    #: real - but it is recorded against the step and reported, because a plate
+    #: read at 45 minutes when the protocol said 30 is a result with a caveat,
+    #: not a result. Getting the reading to happen *on time* would be a
+    #: scheduler's job; saying it did not is the executor's.
+    deadline_seconds: Optional[float] = None
     
     # Runtime state
     status: StepStatus = StepStatus.PENDING
@@ -215,7 +226,9 @@ class Workflow:
                 depends_on=step_data.get("DependsOn", []),
                 retry_count=step_data.get("RetryCount", None),
                 timeout_seconds=step_data.get("TimeoutSeconds"),
-                on_failure=step_data.get("OnFailure", "stop")
+                on_failure=step_data.get("OnFailure", "stop"),
+                not_before_seconds=step_data.get("NotBeforeSeconds"),
+                deadline_seconds=step_data.get("DeadlineSeconds"),
             )
             steps.append(step)
         
@@ -250,6 +263,8 @@ class Workflow:
                     "DependsOn": s.depends_on,
                     "RetryCount": s.retry_count,
                     "TimeoutSeconds": s.timeout_seconds,
+                    "NotBeforeSeconds": s.not_before_seconds,
+                    "DeadlineSeconds": s.deadline_seconds,
                     "OnFailure": s.on_failure
                 }
                 for s in self.steps
@@ -1157,9 +1172,11 @@ class PnPWorkflowExecutor:
             async def _guarded(step: WorkflowStep) -> None:
                 holder = f"step-{step.step_number}"
                 # Pause before taking anything: a paused run must not sit on a
-                # deck it is not using.
+                # deck it is not using. The same reasoning applies to a timed
+                # wait, so NotBeforeSeconds is also honoured before any claim.
                 if self._pause_requested and self._resume_event and not self._abort_requested:
                     await self._resume_event.wait()
+                await self._await_not_before(step, workflow)
                 if self._abort_requested:
                     outcome_of[step.step_number] = None
                     return
@@ -1173,10 +1190,22 @@ class PnPWorkflowExecutor:
                     if self._abort_requested:
                         outcome_of[step.step_number] = None
                         return
+                    overrun = self._deadline_overrun(step, workflow)
+                    if overrun is not None:
+                        # Recorded and said out loud, never silently tolerated:
+                        # the step still runs, because the measurement is still
+                        # worth having, but it is worth having with a caveat.
+                        message = (f"Step {step.step_number} started {overrun:.0f}s past its "
+                                   f"DeadlineSeconds of {step.deadline_seconds:.0f}s")
+                        logger.warning(message)
+                        errors.append(message)
+                        _notify(step, StepStatus.RUNNING, message)
                     _notify(step, StepStatus.RUNNING,
                             f"Starting {step.action} on {step.instrument}")
-                    outcome_of[step.step_number] = await self._run_one(
-                        step, workflow, context)
+                    result = await self._run_one(step, workflow, context)
+                    if overrun is not None and getattr(result, "data", None) is not None:
+                        result.data["deadline_exceeded_by_seconds"] = round(overrun, 3)
+                    outcome_of[step.step_number] = result
                 except asyncio.CancelledError:
                     outcome_of[step.step_number] = CommandResult(
                         success=False, error="Aborted by operator")
@@ -1259,6 +1288,52 @@ class PnPWorkflowExecutor:
 
         self._ledger = None
         return completed, failed, skipped, step_results, errors
+
+    @staticmethod
+    def _timing_origin(step: WorkflowStep, workflow: Workflow) -> Optional[datetime]:
+        """When this step's clock starts: its last dependency finishing.
+
+        A step with no dependencies is measured from the start of the run,
+        which is the only other thing it could sensibly mean.
+        """
+        if not step.depends_on:
+            return workflow.start_time
+        ends = [
+            other.end_time for other in workflow.steps
+            if other.step_number in step.depends_on and other.end_time is not None
+        ]
+        return max(ends) if ends else workflow.start_time
+
+    async def _await_not_before(self, step: WorkflowStep, workflow: Workflow) -> None:
+        """Hold a step until its earliest permitted start.
+
+        Done before the step takes any resource claim, so a workflow waiting
+        out an incubation is not sitting on a deck or a reader tray it is not
+        using - which would block everything else for the length of the wait.
+        """
+        if not step.not_before_seconds:
+            return
+        origin = self._timing_origin(step, workflow)
+        if origin is None:
+            return
+        remaining = step.not_before_seconds - (datetime.now() - origin).total_seconds()
+        while remaining > 0:
+            if self._abort_requested:
+                return
+            # Woken periodically rather than slept through, so an abort during
+            # a long incubation does not have to wait the incubation out.
+            await asyncio.sleep(min(remaining, 1.0))
+            remaining = step.not_before_seconds - (datetime.now() - origin).total_seconds()
+
+    def _deadline_overrun(self, step: WorkflowStep, workflow: Workflow) -> Optional[float]:
+        """How late this step is starting, in seconds, or None if it is in time."""
+        if not step.deadline_seconds:
+            return None
+        origin = self._timing_origin(step, workflow)
+        if origin is None:
+            return None
+        late = (datetime.now() - origin).total_seconds() - step.deadline_seconds
+        return late if late > 0 else None
 
     def _topology(self) -> ResourceTopology:
         """Resolve what every discovered instrument occupies.

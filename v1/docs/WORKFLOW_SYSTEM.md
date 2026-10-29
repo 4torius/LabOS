@@ -257,6 +257,42 @@ There is currently no loop or conditional (IF/Else) mechanism in LabOS beyond li
 
 ---
 
+## Timing a step
+
+Two optional fields express a time constraint. Both are measured from the
+moment the step's **last dependency finished** — or from the start of the run,
+for a step with no dependencies.
+
+```json
+{
+  "StepNumber": 14, "Instrument": "tecan", "Action": "RunMeasurement",
+  "DependsOn": [7],
+  "NotBeforeSeconds": 1800,
+  "DeadlineSeconds": 1920
+}
+```
+
+`NotBeforeSeconds` is a guarantee: the step waits. This is how an incubation is
+expressed — the reading does not go out until thirty minutes after the step
+that set the plate up completed. The wait happens **before** the step takes any
+resource claim, so a run waiting out an incubation is not sitting on a deck or
+a reader tray it is not using. An abort during a long wait takes effect
+promptly rather than waiting the incubation out.
+
+`DeadlineSeconds` is deliberately **not** a guarantee, and the distinction
+matters. Nothing here can promise the reader is free at exactly thirty minutes;
+making that happen would be a scheduler's job, and there is no scheduler (see
+[RESOURCE_MODEL.md](RESOURCE_MODEL.md) for why that is a deliberate division).
+What the executor can do is tell you the truth: if the step starts late it
+still runs — the measurement happened and the data is real — and the overrun is
+written into the step's result as `deadline_exceeded_by_seconds` and reported
+in the run's errors. A plate read at 45 minutes when the protocol said 30 is a
+result with a caveat, not a result, and the caveat should not be something you
+have to reconstruct from timestamps afterwards.
+
+Omitting both is the normal case and changes nothing.
+
+
 ## Workflow Library
 
 Workflows are stored in `Library/Workflows/`. The webapp reads this folder live — adding a new `.json` file makes it available immediately, no restart needed. Templates (a separate, parameterized concept) live in `Library/Templates/` and support instantiate-with-variables plus version snapshots.
