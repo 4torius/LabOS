@@ -30,6 +30,10 @@ REQUIRED_TOP_LEVEL_KEYS = {
 OPTIONAL_TOP_LEVEL_KEYS = {
     "paths",
     "ui_dropdowns",
+    # Physical resource claims — only for servers that cannot declare their own,
+    # plus workstation aliases. Normally absent: an instrument states what it
+    # occupies itself. See docs/RESOURCE_MODEL.md and src/resources.py.
+    "resources",
 }
 
 KNOWN_TOP_LEVEL_KEYS = REQUIRED_TOP_LEVEL_KEYS | OPTIONAL_TOP_LEVEL_KEYS

@@ -535,7 +535,7 @@ def create_app() -> "FastAPI":
             new_config = await request.json()
             config_path = BASE_DIR / "lab_config.yaml"
             existing, _ = load_lab_config(config_path, apply_defaults=False, strict=False)
-            for section in ['servers', 'system', 'discovery', 'workflow', 'error_handling', 'webapp', 'paths', 'ui_dropdowns']:
+            for section in ['servers', 'system', 'discovery', 'workflow', 'error_handling', 'webapp', 'paths', 'ui_dropdowns', 'resources']:
                 if section in new_config:
                     # Deep merge (not .update()): a partial nested payload — e.g. only
                     # {"mobile": {"host": "..."}} inside "servers" — must not silently

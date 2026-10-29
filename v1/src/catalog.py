@@ -17,7 +17,8 @@ already declared. This module is the one reader of that document:
       "library_types":      [...],   # inputs: files in Library/ -> pickers
       "result_types":       [...],   # outputs: folders in Results/ -> Results page
       "parameter_defaults": {"Command": {"Parameter": value}},
-      "traceability":       {"Command": {"role": "prepares_plate" | "measures_plate", ...}}
+      "traceability":       {"Command": {"role": "prepares_plate" | "measures_plate", ...}},
+      "resources":          {"provides": [...], "commands": {...}}   # see src/resources.py
     }
 
 Every section is optional, so a catalog written before this module existed
@@ -38,6 +39,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
+
+from .resources import ResourceDeclaration, parse_declaration
 
 #: Roles a command can play in a plate's history.
 PREPARES_PLATE = "prepares_plate"
@@ -116,6 +119,10 @@ class ServerCatalog:
     display: Dict[str, str] = field(default_factory=dict)
     parameter_defaults: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     traceability: Dict[str, Traceability] = field(default_factory=dict)
+    #: What this server's commands physically occupy. Parsed by
+    #: src/resources.py, which also explains why it is declared here and
+    #: not inferred from the instrument.
+    resources: ResourceDeclaration = field(default_factory=ResourceDeclaration)
     problems: List[str] = field(default_factory=list)
 
     def defaults_for(self, command: str) -> Dict[str, Any]:
@@ -153,6 +160,7 @@ class ServerCatalog:
                     "protocol_parameter": t.protocol_parameter}
                 for k, t in self.traceability.items()
             },
+            "resources": self.resources.to_dict(),
         }
 
 
@@ -294,6 +302,14 @@ def parse_catalog(raw: Union[str, bytes, Mapping[str, Any], List[Any], None],
             )
     else:
         catalog.problems.append(f"{label}traceability is not an object")
+
+    # ── resources ──────────────────────────────────────────────────────────────
+    # Absent means "said nothing", which is not the same as an empty
+    # section: see ResourceDeclaration.declared.
+    if "resources" in raw:
+        catalog.resources = parse_declaration(raw.get("resources"), source=source)
+        catalog.problems.extend(catalog.resources.problems)
+        catalog.resources.problems = []
 
     return catalog
 

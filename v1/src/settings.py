@@ -33,6 +33,8 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from src.config_schema import ConfigValidationResult, load_lab_config
 
+from .resources import ResourceConfig, parse_config as parse_resource_config
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Timeout normalisation — the single implementation of "0/null = unlimited"
@@ -173,6 +175,10 @@ class Settings:
     webapp: WebappSettings
     paths: Mapping[str, str]
     ui_dropdowns: Mapping[str, Any]
+    #: Only what no server can speak for: declarations on behalf of servers
+    #: that cannot declare their own resources, and workstation aliases.
+    #: See docs/RESOURCE_MODEL.md.
+    resources: ResourceConfig
     validation: ConfigValidationResult
     raw: Mapping[str, Any]
 
@@ -329,6 +335,7 @@ def build_settings(config: Mapping[str, Any], base_dir: Path,
         ),
         paths=dict(config.get("paths") or {}),
         ui_dropdowns=dict(config.get("ui_dropdowns") or {}),
+        resources=parse_resource_config(config.get("resources")),
         validation=validation or ConfigValidationResult(),
         raw=dict(config),
     )
