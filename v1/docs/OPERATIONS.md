@@ -85,8 +85,8 @@ Run this before the first workflow execution in a new environment or after any h
       is announced but not really answering)
 - [ ] Hardware page: select the correct HAL config, confirm "Set Active" reports the config was actually applied to the robot (a warning toast appears if it wasn't — see below)
 - [ ] Recipe Generator: generate or load a small test recipe
-- [ ] `python labos.py validate Opentrons_Only_Test` passes
-- [ ] Run `Opentrons_Only_Test.workflow.json` from the Workflow Builder with a scrap plate
+- [ ] `python labos.py validate Test_Bicocca` passes
+- [ ] Run `Test_Bicocca.workflow.json` from the Workflow Builder with a scrap plate (it uses all four instruments)
 - [ ] Press **Abort** during that run and confirm the robot actually stops, and
       that the interface does not raise "Abort incomplete"
 - [ ] Tecan: `RunMeasurement` with a short test protocol, verify an AnIML result appears on the Database page's Plates tab

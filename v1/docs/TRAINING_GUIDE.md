@@ -35,8 +35,8 @@ Run this the morning of (or the night before) the session — nothing kills a tr
 - [ ] http://localhost:5000 loads, Dashboard shows Opentrons, Tecan, Manual Station, and Mobile Robot all **online**
 - [ ] A HAL config is active on the **Hardware** page and matches the physical deck you've set up
 - [ ] Tecan iControl software is **closed** on the host machine (it locks the USB port the bridge needs)
-- [ ] Run `Opentrons_Only_Test.workflow.json` once end-to-end with a scrap plate — confirms liquid handling actually works today, not just that the software is "online"
-- [ ] If mobile-robot plate transport is part of the demo: confirm ArUco markers at each workstation are clean and unobstructed, and do one `ExecuteTask` run with `ExecutionMode: DryRun` first
+- [ ] Run `Test_Bicocca.workflow.json` once end-to-end with a scrap plate — confirms the instruments actually work today, not just that the software is "online"
+- [ ] If mobile-robot plate transport is part of the demo: confirm ArUco markers at each workstation are clean and unobstructed, and run one `ExecuteTask` with someone watching the robot first — `ExecutionMode: DryRun` does **not** simulate, the current server ignores it and the robot moves
 
 ---
 

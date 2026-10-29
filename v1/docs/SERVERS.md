@@ -404,7 +404,7 @@ returns nothing. That is why the escalation is explicit rather than relied
 upon.
 
 The empty string is deliberately still valid: it is the documented default, and
-it is what `Simple_PlateRead.workflow.json` sends. That is why this parameter is
+it is what a `Connect` step sends when it names no mode. That is why this parameter is
 *not* a SiLA2 Constrained/Set — a Set is enforced before the server sees the
 call and would reject it. The dropdown in the interface comes from the server's
 `library_catalog.json` instead.

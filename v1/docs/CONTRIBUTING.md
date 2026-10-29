@@ -107,10 +107,15 @@ Check `tests/test_integration.py` and `tests/test_commands.py` for what's curren
 
 ### Manual validation
 
-Run the validation workflows from the web interface:
-- `Opentrons_Only_Test.workflow.json` — liquid handling only
-- `Manual_Intervention_Test.workflow.json` — manual station
-- `example_no_robot.workflow.json` — Opentrons + Tecan
+Validate the shipped workflow, then run it from the web interface with a scrap
+plate (it needs all four instruments, mobile robot included):
+
+```bash
+python labos.py validate Test_Bicocca
+```
+
+To check one instrument on its own, send a single command from its card on the
+Dashboard instead.
 
 ## Style Guide
 

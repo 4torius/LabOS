@@ -162,8 +162,8 @@ If it doesn't connect on a given day (network issue, remote host down), LabOS st
 
 From the dashboard:
 1. Opentrons, Tecan, Manual Station, and Mobile Robot all show "online"
-2. Go to **Workflow Builder** → load `Opentrons_Only_Test.workflow.json` → click **Validate** — should pass with no errors
-3. Run it with a scrap plate to confirm liquid handling is functional
+2. Go to **Workflow Builder** → load `Test_Bicocca.workflow.json` → click **Validate** — should pass with no errors
+3. Run it with a scrap plate to confirm the whole chain works: mobile robot, liquid handling, plate reader and manual station
 
 From the API:
 ```powershell

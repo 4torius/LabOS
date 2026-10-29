@@ -70,9 +70,13 @@ A workflow in LabOS is a JSON file that chains instrument commands into a comple
 | `TimeoutSeconds` | no | Max execution time. **`0` means unlimited**, not "fails instantly"; omitted uses `workflow.default_timeout` |
 | `OnFailure` | no | `"stop"` (default), `"skip"`, or `"continue"` |
 
-The file also carries `SchemaVersion` (currently `"1.0"`). Files written before
-it existed still load; `python scripts/migrate_workflows.py --apply` brings them
-up to date and rewrites instrument names to their canonical form.
+The file also carries `SchemaVersion` (currently `"1.0"`). Files without it
+still load and run under the same rules. The Workflow Builder does not write it
+yet, and it saves instruments under their display names (`TecanM200Pro`,
+`GoFaGo Mobile Robot`), so a workflow saved from the web app has neither.
+`python scripts/migrate_workflows.py --apply` adds `SchemaVersion` and
+rewrites instrument names to their canonical form; run it after saving a
+workflow you intend to commit. Without `--apply` it only reports.
 
 ### Instrument names
 
@@ -126,7 +130,10 @@ order it was typed in.
 **Declare your dependencies.** With `parallel_execution: true`, a file whose
 steps declare none dispatches all of them at once — for a workflow that passes
 one plate between a mobile robot, a liquid handler and a plate reader, that is
-a collision. Every shipped workflow now states its chain explicitly.
+a collision. The Workflow Builder saves `DependsOn: []` unless you tick the
+boxes, so a workflow built there runs in file order only because parallel
+execution is off. `python scripts/migrate_workflows.py --apply --chain-linear`
+gives such a file the sequential chain explicitly.
 
 ---
 
@@ -254,11 +261,8 @@ There is currently no loop or conditional (IF/Else) mechanism in LabOS beyond li
 
 Workflows are stored in `Library/Workflows/`. The webapp reads this folder live — adding a new `.json` file makes it available immediately, no restart needed. Templates (a separate, parameterized concept) live in `Library/Templates/` and support instantiate-with-variables plus version snapshots.
 
-Shipped example workflows (check `Library/Workflows/` for the current set — files get added/removed as recipes evolve):
+Shipped workflows (check `Library/Workflows/` for the current set — files get added/removed as recipes evolve):
 
 | File | Description |
 |------|--------------|
-| `Opentrons_Only_Test.workflow.json` | Liquid handling validation, no other instrument |
-| `Manual_Intervention_Test.workflow.json` | Exercises the manual-station pause/confirm cycle |
-| `Simple_PlateRead.workflow.json` | Minimal Tecan-only example |
-| `Opentrons_Refill_Test.workflow.json` | Exercises the tip refill flow |
+| `Test_Bicocca.workflow.json` | The full chain on all four instruments: the mobile robot carries a plate to the Opentrons (`ExecuteRecipe` with `test_6.json`), then to the Tecan (`RunMeasurement` with `Script1`), with a manual load at the start and a manual pickup at the end |

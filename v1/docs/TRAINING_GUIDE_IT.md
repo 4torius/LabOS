@@ -33,8 +33,8 @@ Da eseguire la mattina stessa (o la sera prima) della sessione — niente rovina
 - [ ] http://localhost:5000 si carica, la Dashboard mostra Opentrons, Tecan, Manual Station e Mobile Robot tutti **online**
 - [ ] Nella pagina **Hardware** è attiva una config HAL coerente con il deck fisico che hai allestito
 - [ ] Il software iControl di Tecan è **chiuso** sulla macchina host (blocca la porta USB necessaria al bridge)
-- [ ] Esegui una volta `Opentrons_Only_Test.workflow.json` per intero con una piastra di scarto — conferma che il liquid handling funzioni davvero oggi, non solo che il software risulti "online"
-- [ ] Se il trasporto via robot mobile fa parte della demo: verifica che i marker ArUco su ogni postazione siano puliti e non ostruiti, e fai prima una `ExecuteTask` con `ExecutionMode: DryRun`
+- [ ] Esegui una volta `Test_Bicocca.workflow.json` per intero con una piastra di scarto — conferma che gli strumenti funzionino davvero oggi, non solo che il software risulti "online"
+- [ ] Se il trasporto via robot mobile fa parte della demo: verifica che i marker ArUco su ogni postazione siano puliti e non ostruiti, e fai prima una `ExecuteTask` con qualcuno che guarda il robot — `ExecutionMode: DryRun` **non** simula, il server attuale lo ignora e il robot si muove
 
 ---
 
