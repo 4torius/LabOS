@@ -153,6 +153,21 @@ This is a *supplement*, never an override: see the resolution rules below. It is
 what keeps the model open to instruments nobody here wrote, which is the
 direction the system is meant to grow.
 
+**What this layer is not about: reachability.** The mobile robot is declared
+here, and the reason is narrow — its catalog is a file inside a container on the
+robot PC and that server's source is not in this repository. It is *not* that
+the robot is hard to reach: when the orchestrator joins the robot PC's hotspot
+they are on one network and mDNS announcements arrive normally. Being able to
+talk to a server and being able to edit a file in its image are different
+things, and only the second one is why a declaration would have to live
+elsewhere.
+
+Which makes the robot's entry provisional on purpose. If that catalog ever
+gains a `resources` section, the server wins by rule 1 below, the config block
+is ignored, and `labos.py resources` reports that it is being ignored. That is
+the better end state, and the model is already arranged to prefer it. The layer
+earns its place permanently only for servers nobody here can modify at all.
+
 ### Layer 3 — aliases, for the one genuinely variable binding
 
 Tasks are taught by demonstration relative to each workstation's ArUco marker.
@@ -290,7 +305,36 @@ only an internal extension.
 | 3 | `GET /api/resources`; `labos.py resources`; Settings panel | ✅ |
 | 4 | `Test_Bicocca` annotated with its real dependencies | ✅ |
 | 5 | Template server + authoring guide | ✅ |
-| 6 | `holds` / `release_on` for claims held across steps | deferred |
+| 6 | `holds` for resources kept across steps | ✅ |
+
+### Why the Tecan does not declare a hold, after all
+
+`holds` exists and is tested, and the obvious place for it is the plate sitting
+in the reader between `PlateIn` and `PlateOut`. Declaring it there was tried
+against the real workflow and backed out, which is worth recording.
+
+`Test_Bicocca` uses `PlateIn` twice: at step 13 to insert the plate, and at
+step 17 to close the tray after the robot has taken the plate away. The first
+occupies the tray; the second occupies nothing. A per-command declaration
+cannot distinguish them, so a hold on `PlateIn` made step 17 keep the tray for
+the rest of the run and validation — correctly — refused a workflow that is
+right. The command is overloaded at the instrument's own API level, which is
+not something the resource model can or should paper over.
+
+Trying it also found two real bugs, which is the better argument for trying it:
+
+* `RunMeasurement` claimed `tray:tecan`. With a hold in place that is
+  double-counting — the tray is held *for* the plate being read — and it made
+  the read wait for the `PlateOut` that follows it. Claiming the instrument and
+  not the tray is the correct declaration either way.
+* The deadlock check asked only "does this step depend on the releaser?", which
+  rejected any *earlier* use of the same resource. `Test_Bicocca` empties and
+  refills the tray, so a correct workflow was refused. A step the holder itself
+  depends on runs strictly earlier and is never at risk; the rule now says so.
+
+So the tray stays protected by `DependsOn` for now, which the annotated
+`Test_Bicocca` provides, and the feature is there for an instrument whose load
+and unload commands mean one thing each.
 
 Two things the real declarations taught us, now part of the model:
 

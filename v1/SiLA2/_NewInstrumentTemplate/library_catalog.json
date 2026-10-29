@@ -28,7 +28,7 @@
   "parameter_defaults": {},
   "traceability": {},
   "resources": {
-    "_comment": "Delete this section and the orchestrator serialises every step of this instrument against every other instrument that also declares nothing — safe, but nothing of yours will ever overlap with anything. Declaring is how concurrency is earned. provides: the physical things THIS instrument owns. Give an id to anything another instrument can reach into (a deck, a tray, a carousel) so a robot can claim it by name; keep instrument:<key> as the instrument itself. commands: what each command occupies while it runs. Two steps whose claims share an id never run together. control: true marks a command that occupies NOTHING and must run while the instrument is busy — a stop, a pause, a status read. Get this wrong and your abort will queue behind the run it is meant to abort. by_parameter: use it when what a command occupies depends on an argument rather than on the command (one ExecuteTask that goes to different stations). Full guide and worked examples: docs/ADDING_NEW_INSTRUMENT.md.",
+    "_comment": "Delete this section and the orchestrator serialises every step of this instrument against every other instrument that also declares nothing — safe, but nothing of yours will ever overlap with anything. Declaring is how concurrency is earned. provides: the physical things THIS instrument owns. Give an id to anything another instrument can reach into (a deck, a tray, a carousel) so a robot can claim it by name; keep instrument:<key> as the instrument itself. commands: what each command occupies while it runs. Two steps whose claims share an id never run together. control: true marks a command that occupies NOTHING and must run while the instrument is busy — a stop, a pause, a status read. Get this wrong and your abort will queue behind the run it is meant to abort. holds: for a resource that stays occupied AFTER the command finishes, until another command releases it — a plate left in a tray. Only add one if a later step always releases it; validation refuses a workflow where nothing does. by_parameter: use it when what a command occupies depends on an argument rather than on the command (one ExecuteTask that goes to different stations). Full guide and worked examples: docs/ADDING_NEW_INSTRUMENT.md.",
     "provides": [
       "instrument:newinstrument",
       "tray:newinstrument"
@@ -40,6 +40,15 @@
         ]
       },
       "LoadPlate": {
+        "claims": [
+          "instrument:newinstrument",
+          "tray:newinstrument"
+        ],
+        "holds": {
+          "tray:newinstrument": "UnloadPlate"
+        }
+      },
+      "UnloadPlate": {
         "claims": [
           "instrument:newinstrument",
           "tray:newinstrument"

@@ -387,6 +387,34 @@ _WORKFLOW_ONLY_PARAM_KEYS = frozenset({
 })
 
 
+def _transitive_dependencies(steps: List["WorkflowStep"]) -> Dict[int, Set[int]]:
+    """step number -> every step it depends on, directly or through others.
+
+    Used to decide whether a step is ordered *after* another one, which is what
+    makes a held resource safe: a step needing it has to come after whatever
+    releases it, not merely exist in the same workflow.
+    """
+    direct = {s.step_number: set(s.depends_on) for s in steps}
+    closure: Dict[int, Set[int]] = {}
+
+    def walk(number: int, seen: Set[int]) -> Set[int]:
+        if number in closure:
+            return closure[number]
+        if number in seen:
+            return set()  # a cycle; validation reports it separately
+        seen = seen | {number}
+        out: Set[int] = set()
+        for parent in direct.get(number, ()):  # noqa: B905
+            out.add(parent)
+            out |= walk(parent, seen)
+        closure[number] = out
+        return out
+
+    for step in steps:
+        walk(step.step_number, set())
+    return closure
+
+
 def topological_waves(steps: List["WorkflowStep"]) -> List[List["WorkflowStep"]]:
     """Group steps into dependency waves.
 
@@ -865,6 +893,59 @@ class PnPWorkflowExecutor:
                     step, {"RecipeName": normalized_params.get(recipe_key, "")})
                 errors.extend(cap_errors)
 
+        # A resource held across steps can deadlock, which is the whole reason
+        # this was a later phase than step-scoped claims. Both ways it can go
+        # wrong are decidable from the workflow alone, so they are rejected
+        # here rather than discovered by a robot arm waiting forever.
+        topology_for_holds = self._topology()
+        reachable = _transitive_dependencies(workflow.steps)
+        for step in workflow.steps:
+            for resource, releaser in self._holds_of(step, topology_for_holds).items():
+                releasing = [
+                    other for other in workflow.steps
+                    if other.action == releaser
+                    and step.step_number in reachable.get(other.step_number, set())
+                ]
+                if not releasing:
+                    errors.append(ValidationError(
+                        step_number=step.step_number,
+                        field="holds",
+                        message=(
+                            f"{step.action} keeps '{resource}' until a step runs "
+                            f"{releaser}, and no later step does. The resource would "
+                            f"stay held for the rest of the run — add a {releaser} "
+                            f"step that depends on step {step.step_number}."
+                        ),
+                    ))
+                    continue
+                released_by = {other.step_number for other in releasing}
+                # Only a step that could still be waiting once the hold exists
+                # can deadlock on it. A step the holder itself depends on runs
+                # strictly earlier and is never at risk — missing that rejected
+                # valid workflows, including the one this lab actually runs,
+                # where the tray is used twice in a row.
+                before_the_hold = reachable.get(step.step_number, set())
+                for other in workflow.steps:
+                    if other.step_number == step.step_number or other.step_number in released_by:
+                        continue
+                    if other.step_number in before_the_hold:
+                        continue
+                    if resource not in self._claims_of(other, topology_for_holds):
+                        continue
+                    deps = reachable.get(other.step_number, set())
+                    if not (released_by & deps):
+                        errors.append(ValidationError(
+                            step_number=other.step_number,
+                            field="holds",
+                            message=(
+                                f"{other.action} needs '{resource}', which step "
+                                f"{step.step_number} keeps until {releaser} runs, and "
+                                f"this step does not depend on the {releaser} step — "
+                                f"it would wait for a resource nothing will free for "
+                                f"it. Add DependsOn for the {releaser} step."
+                            ),
+                        ))
+
         # A claim naming a resource nobody provides fails closed. Letting it
         # through would silently mean "no exclusion", which is the one outcome
         # the resource model exists to prevent: a safety rule that does not
@@ -1105,6 +1186,10 @@ class PnPWorkflowExecutor:
         topology = self._topology()
         ledger = ResourceLedger(max_concurrency=max_concurrency)
         self._ledger = ledger
+        #: hold holder -> (resource, the command that releases it). Validation
+        #: rejects a workflow that would leave one of these outstanding, so
+        #: anything still here at the end means the run stopped early.
+        active_holds: Dict[str, Tuple[str, str]] = {}
         completed = failed = skipped = 0
         step_results: Dict[int, CommandResult] = {}
         errors: List[str] = []
@@ -1180,6 +1265,13 @@ class PnPWorkflowExecutor:
                 if self._abort_requested:
                     outcome_of[step.step_number] = None
                     return
+                # A step whose command releases something held across steps has
+                # to free it before asking for it, or it waits for itself: the
+                # PlateOut that empties the tray also needs the tray.
+                for hold_holder, (resource, releaser) in list(active_holds.items()):
+                    if releaser == step.action:
+                        await ledger.release(hold_holder)
+                        active_holds.pop(hold_holder, None)
                 try:
                     await ledger.acquire(holder, self._claims_of(step, topology))
                 except asyncio.CancelledError:
@@ -1212,6 +1304,15 @@ class PnPWorkflowExecutor:
                 except Exception as exc:  # pragma: no cover - defensive
                     outcome_of[step.step_number] = exc
                 finally:
+                    # Hand over anything this command keeps *before* letting the
+                    # step's own claims go, so the tray is never briefly free
+                    # with a plate still in the reader.
+                    held = self._holds_of(step, topology)
+                    if held and not self._abort_requested:
+                        for resource, releaser in held.items():
+                            hold_holder = f"hold-{step.step_number}-{resource}"
+                            await ledger.transfer(holder, hold_holder, {resource})
+                            active_holds[hold_holder] = (resource, releaser)
                     await ledger.release(holder)
 
             # Tasks are created in written order, and the ledger wakes waiters
@@ -1286,6 +1387,12 @@ class PnPWorkflowExecutor:
                 errors.append(reason)
                 _notify(step, StepStatus.SKIPPED, reason)
 
+        for hold_holder, (resource, releaser) in list(active_holds.items()):
+            await ledger.release(hold_holder)
+            message = (f"{resource} was still held at the end of the run: no step ran "
+                       f"{releaser} to release it")
+            logger.warning(message)
+            errors.append(message)
         self._ledger = None
         return completed, failed, skipped, step_results, errors
 
@@ -1334,6 +1441,19 @@ class PnPWorkflowExecutor:
             return None
         late = (datetime.now() - origin).total_seconds() - step.deadline_seconds
         return late if late > 0 else None
+
+    def _holds_of(self, step: WorkflowStep, topology: ResourceTopology) -> Dict[str, str]:
+        """resource -> releasing command, for what this step keeps after it ends."""
+        if is_locally_handled(step.instrument, step.action):
+            return {}
+        server = self.registry.get_server_by_name(step.instrument)
+        if server is None:
+            return {}
+        declaration = topology.declarations.get(server.name)
+        spec = declaration.commands.get(step.action) if declaration is not None else None
+        if spec is None or not spec.holds:
+            return {}
+        return {topology._resolve_alias(r): c for r, c in spec.holds.items()}
 
     def _topology(self) -> ResourceTopology:
         """Resolve what every discovered instrument occupies.

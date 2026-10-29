@@ -51,8 +51,14 @@ servers:
   mobile:
     name: Mobile Robot
     enabled: true
-    host: 192.168.11.22    # zbox — Docker-based deployment (see SiLA2/MobileSiLA2Server/MIGRATION_AND_AUTOSTART.md)
-    port: 50053            # on a different subnet; mDNS multicast cannot reach it
+    host: 192.168.11.22    # zbox — Docker-based deployment, container `mobile-sila2`
+    port: 50053
+    # The bootstrap seed is kept regardless of whether mDNS reaches it: when the
+    # orchestrator is joined to the robot PC's hotspot this is the same L2
+    # network and the announcement arrives, but the seed costs one gRPC probe at
+    # startup and means the robot is still found if the network is arranged some
+    # other way. An earlier comment here claimed a different subnet; that
+    # described an older setup.
     remote: true           # Runs on external Linux PC, not started locally
     network:
       connection_timeout: 5
@@ -137,10 +143,20 @@ webapp:
 # the Tecan and the Manual Station need nothing here.
 #
 # This section is only for what no server can speak for, and the mobile robot
-# is exactly that case: its SiLA2 server is deployed and maintained on the
-# remote host (192.168.11.22), its code is not in this repository, and its
-# catalog cannot be edited from here. Without this layer the model would be
-# closed to every instrument we did not write ourselves.
+# is that case for one reason: its catalog is a file inside the `mobile-sila2`
+# container on the robot PC, and that server's source is not in this repository
+# or in this deployment. Note what the reason is NOT — it is not reachability.
+# Being on the same network lets the orchestrator talk to that server; it does
+# not let anyone here edit a file inside its image.
+#
+# So this entry is provisional by design. If the robot's own
+# library_catalog.json gains a `resources` section, that wins: a server is the
+# authority on itself, this block is then ignored, and `labos.py resources`
+# says so. Moving the declaration there is the better end state.
+#
+# The layer earns its place permanently for a different case: a SiLA2 server
+# shipped by an instrument vendor cannot be modified at all, and without this
+# the model would be closed to every instrument we did not write.
 #
 # The claims below mirror the tasks taught by demonstration against each
 # workstation's ArUco marker. `deck:opentrons` and `tray:tecan` are the ids

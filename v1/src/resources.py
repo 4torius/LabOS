@@ -92,6 +92,12 @@ class CommandResources:
     claims: Tuple[str, ...] = ()
     by_parameter: Mapping[str, Mapping[str, Tuple[str, ...]]] = field(default_factory=dict)
     control: bool = False
+    #: resource id -> the command that gives it back. A resource in here is
+    #: taken when this command runs and kept *after* it finishes, until a step
+    #: running the named command releases it. The plate sitting in the reader
+    #: between PlateIn and PlateOut: occupied for the duration of three steps,
+    #: held by none of them.
+    holds: Mapping[str, str] = field(default_factory=dict)
 
     def resolve(self, parameters: Optional[Mapping[str, Any]] = None) -> FrozenSet[str]:
         """Every resource this command occupies for the given parameters."""
@@ -109,6 +115,9 @@ class CommandResources:
             found.update(mapping.get(str(value), ()))
         return frozenset(found)
 
+    def held_resources(self) -> FrozenSet[str]:
+        return frozenset(self.holds)
+
     def resolve_all(self) -> FrozenSet[str]:
         """Every resource this command could claim, for any parameter value.
 
@@ -121,6 +130,7 @@ class CommandResources:
         for mapping in self.by_parameter.values():
             for ids in mapping.values():
                 found.update(ids)
+        found.update(self.holds)
         return frozenset(found)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -131,6 +141,7 @@ class CommandResources:
                 for parameter, mapping in self.by_parameter.items()
             },
             "control": self.control,
+            "holds": dict(self.holds),
         }
 
 
@@ -240,15 +251,40 @@ def parse_declaration(raw: Any, source: str = "") -> ResourceDeclaration:
             if values:
                 by_parameter[str(parameter)] = values
 
+        holds: Dict[str, str] = {}
+        raw_holds = spec.get("holds") or {}
+        if not isinstance(raw_holds, Mapping):
+            declaration.problems.append(
+                f"{label}resources.commands.{name}.holds must map a resource id "
+                "to the command that releases it")
+            raw_holds = {}
+        for resource, releaser in raw_holds.items():
+            if not isinstance(resource, str) or not RESOURCE_RE.match(resource.strip()):
+                declaration.problems.append(
+                    f"{label}resources.commands.{name}.holds has an unusable "
+                    f"resource id {resource!r}")
+                continue
+            if not isinstance(releaser, str) or not releaser.strip():
+                declaration.problems.append(
+                    f"{label}resources.commands.{name}.holds.{resource} must name "
+                    "the command that releases it")
+                continue
+            if releaser.strip() == str(name):
+                declaration.problems.append(
+                    f"{label}resources.commands.{name}.holds.{resource} is released "
+                    "by itself, which would never free it")
+                continue
+            holds[resource.strip()] = releaser.strip()
+
         control = bool(spec.get("control", False))
-        if control and (claims or by_parameter):
+        if control and (claims or by_parameter or holds):
             declaration.problems.append(
                 f"{label}resources.commands.{name} is marked control but also "
-                "claims resources; a control command occupies nothing")
-            claims, by_parameter = (), {}
+                "claims or holds resources; a control command occupies nothing")
+            claims, by_parameter, holds = (), {}, {}
 
         declaration.commands[str(name)] = CommandResources(
-            claims=claims, by_parameter=by_parameter, control=control)
+            claims=claims, by_parameter=by_parameter, control=control, holds=holds)
 
     return declaration
 
@@ -560,6 +596,35 @@ class ResourceLedger:
                     if waiter in self._waiters:
                         self._waiters.remove(waiter)
                 raise
+
+    async def transfer(self, from_holder: str, to_holder: str,
+                       resources: Iterable[str]) -> None:
+        """Move resources from one holder to another without letting go.
+
+        This is how a step-scoped claim becomes a held one. Releasing and
+        re-acquiring would open a window where the tray is free and a waiting
+        step could take it — with a plate still in the reader. The move happens
+        under the ledger lock, so there is no such window.
+
+        Resources `from_holder` does not hold are taken outright; that is the
+        case of a command that holds something it did not claim for itself.
+        """
+        wanted = frozenset(resources)
+        if not wanted:
+            return
+        async with self._lock:
+            for resource in wanted:
+                self._held[resource] = to_holder
+            kept = self._holders.get(from_holder, frozenset()) - wanted
+            if kept:
+                self._holders[from_holder] = kept
+            else:
+                self._holders.pop(from_holder, None)
+            self._holders[to_holder] = self._holders.get(to_holder, frozenset()) | wanted
+
+    def holdings(self) -> Dict[str, FrozenSet[str]]:
+        """holder -> what it holds, for the API and for release-by-prefix."""
+        return dict(self._holders)
 
     async def release(self, holder: str) -> None:
         """Give back everything `holder` took, and wake whoever is waiting."""

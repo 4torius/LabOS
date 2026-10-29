@@ -250,6 +250,42 @@ commands belong here.
 Do not mark anything that moves hardware as `control`. Declaring both `control`
 and `claims` is contradictory: the claims are dropped and discovery reports it.
 
+#### `holds` — a resource still occupied after the command ends
+
+Most claims last as long as the command. Some do not: load a plate into a tray
+and the tray is occupied *after* `LoadPlate` returns, for as long as the plate
+is in there — across several steps, held by none of them.
+
+```json
+"LoadPlate":   {"claims": ["instrument:x", "tray:x"],
+                "holds":  {"tray:x": "UnloadPlate"}},
+"UnloadPlate": {"claims": ["instrument:x", "tray:x"]}
+```
+
+The tray is taken when `LoadPlate` runs and kept until a step runs
+`UnloadPlate`. The hand-over happens without ever letting go, so there is no
+instant where the tray looks free with a plate still in it.
+
+**A command that claims a resource during a hold is double-counting.** If your
+`Measure` only reads the plate that is already in the tray, it claims the
+instrument and *not* the tray — the hold already protects it. Claiming both
+makes `Measure` wait for the `UnloadPlate` that comes after it, and validation
+will tell you so.
+
+**A hold can deadlock, so validation is strict about it.** Two shapes are
+refused before anything moves: a workflow where nothing ever runs the releasing
+command (the resource would stay held for the rest of the run), and a step that
+needs the resource without being ordered after the step that releases it (it
+would wait for something nothing will free). Both say which `DependsOn` to add.
+
+**Before you declare one, ask whether the command always means the same thing.**
+The LabOS Tecan server does *not* declare a hold on `PlateIn`, and the reason is
+instructive: in the lab's own workflow `PlateIn` is used both to insert a plate
+and, later, to close the empty tray. Per-command declarations cannot tell those
+apart, so declaring the hold made a correct workflow fail validation. If your
+command is overloaded the same way, leave the hold out and let `DependsOn`
+carry the ordering.
+
 #### `by_parameter` — when the command is not the whole story
 
 Use it when what a command occupies depends on an *argument* rather than on
@@ -304,6 +340,8 @@ Before you call it done:
 - [ ] your stop/abort/pause commands are `control: true`
 - [ ] no command that moves hardware is `control: true`
 - [ ] any `by_parameter` key matches what a real workflow sends
+- [ ] any `holds` has a command that always releases it, and the command
+      that holds it always means the same thing
 - [ ] `labos.py doctor` reports no resource problems
 
 ---
