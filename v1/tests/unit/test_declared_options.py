@@ -122,7 +122,7 @@ class TestTecanConnectionModes:
                      if e["hint"] == "tecan_connect_mode")
         assert "" in entry["values"], (
             "the empty string means 'use instrument.connection_string' and is "
-            "what Simple_PlateRead sends"
+            "what a Connect step sends when it names no mode"
         )
 
     def test_connection_string_is_not_constrained_in_the_protocol(self):
@@ -132,14 +132,16 @@ class TestTecanConnectionModes:
         assert "<Constrained>" not in block
         assert "<Set>" not in block
 
-    def test_the_shipped_workflow_still_sends_a_value_the_server_accepts(self):
-        workflow = json.loads(
-            (V1_DIR / "Library" / "Workflows" / "Simple_PlateRead.workflow.json")
-            .read_text(encoding="utf-8-sig"))
-        connect = next(s for s in workflow["Steps"] if s["Action"] == "Connect")
+    def test_the_shipped_workflows_still_send_a_value_the_server_accepts(self):
         entry = next(e for e in self.catalog["library_types"]
                      if e["hint"] == "tecan_connect_mode")
-        assert connect["Parameters"]["ConnectionString"] in entry["values"]
+        for path in (V1_DIR / "Library" / "Workflows").glob("*.json"):
+            workflow = json.loads(path.read_text(encoding="utf-8-sig"))
+            for step in workflow.get("Steps", []):
+                if step.get("Action") != "Connect":
+                    continue
+                sent = step.get("Parameters", {}).get("ConnectionString", "")
+                assert sent in entry["values"], f"{path.name} step {step.get('StepNumber')}"
 
 
 class TestConnectionMethodsAreDistinct:

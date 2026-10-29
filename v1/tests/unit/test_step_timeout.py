@@ -144,8 +144,8 @@ class TestTheOtherTwoFieldsWereNeverBroken:
 
 class TestTheManualStepParameterIsADifferentThing:
     """`RequestOperatorTask` takes a `TimeoutSeconds` *parameter*, which is how
-    long a person has to confirm. Same name, different field, and it works -
-    the shipped Opentrons_Refill_Test workflow uses it."""
+    long a person has to confirm. Same name, different field: a shipped
+    workflow that sets it must set it as a parameter."""
 
     def test_the_manual_station_declares_its_default(self):
         """It used to be a setdefault in the executor, keyed on the action name.
@@ -166,13 +166,15 @@ class TestTheManualStepParameterIsADifferentThing:
         assert sent["TimeoutSeconds"] == 1800, "the step's own value wins"
         assert sent["Priority"] == "normal"
 
-    def test_the_shipped_workflow_uses_it_as_a_parameter(self):
+    def test_the_shipped_workflows_use_it_as_a_parameter(self):
         import json
-        wf = json.loads((V1_DIR / "Library" / "Workflows"
-                         / "Opentrons_Refill_Test.workflow.json").read_text(encoding="utf-8-sig"))
-        step = next(s for s in wf["Steps"] if s["Action"] == "RequestOperatorTask")
-        assert "TimeoutSeconds" in step["Parameters"]
-        assert "TimeoutSeconds" not in step, "that would be the step-level field"
+        for path in (V1_DIR / "Library" / "Workflows").glob("*.json"):
+            wf = json.loads(path.read_text(encoding="utf-8-sig"))
+            for step in wf.get("Steps", []):
+                if step.get("Action") == "RequestOperatorTask":
+                    assert "TimeoutSeconds" not in step, (
+                        f"{path.name} step {step.get('StepNumber')}: "
+                        "that would be the step-level field")
 
 
 class TestATimedOutStepIsLegible:
