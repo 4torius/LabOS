@@ -1,1067 +1,748 @@
 {
-  "ProtocolName": "Test_96_Tips",
-  "Description": "Test per esaurimento tip rack - usa 96 tips (1 rack completo)",
+  "ProtocolName": "01_SPAAC_hydrogel_96_combinations_05",
+  "Description": "Generated from Excel. Groups: Solvent, HA-N3, GEL-N3, 4arm-20kPEG-DBCO",
   "Requirements": {
+    "Source_1": "Source_1",
+    "TargetPlate": "TargetPlate",
     "MyTips": "MyTips",
-    "MyPlate": "MyPlate",
-    "MyTrash": "MyTrash"
+    "MyTrash": "MyTrash",
+    "HeaterShaker": "HeaterShaker"
   },
   "Steps": [
     {
+      "Command": "MoveLabware",
+      "LabwareID": "TargetPlate",
+      "NewLocation": "B2",
+      "UseGripper": true
+    },
+    {
+      "Command": "Comment",
+      "Text": "=== HA-N3: HA-N3 ==="
+    },
+    {
       "Command": "PickUpTip",
       "PipetteMount": "left",
-      "Well": "A1",
       "TipRack": "MyTips"
     },
     {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "A2",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "A3",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "A4",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "A5",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "A6",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "A7",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "A8",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "A9",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "A10",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "A11",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "A12",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "B1",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "B2",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "B3",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "B4",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "B5",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "B6",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "B7",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "B8",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "B9",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "B10",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "B11",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "B12",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "C1",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "C2",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "C3",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "C4",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "C5",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "C6",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "C7",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "C8",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "C9",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "C10",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "C11",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "C12",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "D1",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "D2",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "D3",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "D4",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "D5",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "D6",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "D7",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "D8",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "D9",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "D10",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "D11",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "D12",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "E1",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "E2",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "E3",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "E4",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "E5",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "E6",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "E7",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "E8",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "E9",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "E10",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "E11",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "E12",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "F1",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "F2",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "F3",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "F4",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "F5",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "F6",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "F7",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "F8",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "F9",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "F10",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "F11",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "F12",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "G1",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "G2",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "G3",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "G4",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "G5",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "G6",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "G7",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "G8",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "G9",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "G10",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "G11",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "G12",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "H1",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "H2",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "H3",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "H4",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "H5",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "H6",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "H7",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "H8",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "H9",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "H10",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "H11",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
-      "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
-    },
-    {
-      "Command": "PickUpTip",
-      "PipetteMount": "left",
-      "Well": "H12",
-      "TipRack": "MyTips"
-    },
-    {
-      "Command": "DropTip",
+      "Command": "Distribute",
       "PipetteMount": "left",
-      "TrashLocation": "MyTrash"
+      "Volume": 10,
+      "Source": "Source_1:A2",
+      "Destinations": [
+        "TargetPlate:H12",
+        "TargetPlate:H11",
+        "TargetPlate:H10",
+        "TargetPlate:H9",
+        "TargetPlate:H8",
+        "TargetPlate:H7",
+        "TargetPlate:G12",
+        "TargetPlate:G11",
+        "TargetPlate:G10",
+        "TargetPlate:G9",
+        "TargetPlate:G8",
+        "TargetPlate:G7",
+        "TargetPlate:F12",
+        "TargetPlate:F11",
+        "TargetPlate:F10",
+        "TargetPlate:F9",
+        "TargetPlate:F8",
+        "TargetPlate:F7",
+        "TargetPlate:E12",
+        "TargetPlate:E11",
+        "TargetPlate:E10",
+        "TargetPlate:E9",
+        "TargetPlate:E8",
+        "TargetPlate:E7",
+        "TargetPlate:D12",
+        "TargetPlate:D11",
+        "TargetPlate:D10",
+        "TargetPlate:D9",
+        "TargetPlate:D8",
+        "TargetPlate:D7",
+        "TargetPlate:C12",
+        "TargetPlate:C11",
+        "TargetPlate:C10",
+        "TargetPlate:C9",
+        "TargetPlate:C8",
+        "TargetPlate:C7",
+        "TargetPlate:B12",
+        "TargetPlate:B11",
+        "TargetPlate:B10",
+        "TargetPlate:B9",
+        "TargetPlate:B8",
+        "TargetPlate:B7",
+        "TargetPlate:A12",
+        "TargetPlate:A11",
+        "TargetPlate:A10",
+        "TargetPlate:A9",
+        "TargetPlate:A8",
+        "TargetPlate:A7"
+      ],
+      "NewTip": "never",
+      "DisposalVolume": 0,
+      "Description": "Distribute 10µL HA-N3 to 48 wells",
+      "LiquidClass": "Aqueous"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "MoveLabware",
+      "LabwareID": "Source_1",
+      "NewLocation": "HeaterShaker",
+      "UseGripper": true
+    },
+    {
+      "Command": "HeaterShaker",
+      "ModuleID": "HeaterShaker",
+      "Temperature": 70,
+      "RPM": 300,
+      "Duration": 300,
+      "WaitForTemp": true,
+      "DeactivateHeater": true,
+      "CloseLatch": true,
+      "OpenLatch": true
+    },
+    {
+      "Command": "MoveLabware",
+      "LabwareID": "Source_1",
+      "NewLocation": "D1",
+      "UseGripper": true
+    },
+    {
+      "Command": "Comment",
+      "Text": "=== GEL-N3: GEL-N3 ==="
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "Distribute",
+      "PipetteMount": "left",
+      "Volume": [
+        50,
+        50,
+        50,
+        50,
+        50,
+        50,
+        50,
+        50,
+        50,
+        50,
+        50,
+        50,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        40,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        25,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        15
+      ],
+      "Source": "Source_1:B2",
+      "Destinations": [
+        "TargetPlate:H12",
+        "TargetPlate:H6",
+        "TargetPlate:H11",
+        "TargetPlate:H5",
+        "TargetPlate:H10",
+        "TargetPlate:H4",
+        "TargetPlate:H9",
+        "TargetPlate:H3",
+        "TargetPlate:H8",
+        "TargetPlate:H2",
+        "TargetPlate:H1",
+        "TargetPlate:H7",
+        "TargetPlate:G12",
+        "TargetPlate:G6",
+        "TargetPlate:G11",
+        "TargetPlate:G5",
+        "TargetPlate:G10",
+        "TargetPlate:G4",
+        "TargetPlate:G9",
+        "TargetPlate:G3",
+        "TargetPlate:G8",
+        "TargetPlate:G2",
+        "TargetPlate:G1",
+        "TargetPlate:G7",
+        "TargetPlate:F12",
+        "TargetPlate:F6",
+        "TargetPlate:F11",
+        "TargetPlate:F5",
+        "TargetPlate:F10",
+        "TargetPlate:F4",
+        "TargetPlate:F9",
+        "TargetPlate:F3",
+        "TargetPlate:F8",
+        "TargetPlate:F2",
+        "TargetPlate:F1",
+        "TargetPlate:F7",
+        "TargetPlate:E12",
+        "TargetPlate:E6",
+        "TargetPlate:E11",
+        "TargetPlate:E5",
+        "TargetPlate:E10",
+        "TargetPlate:E4",
+        "TargetPlate:E9",
+        "TargetPlate:E3",
+        "TargetPlate:E8",
+        "TargetPlate:E2",
+        "TargetPlate:E1",
+        "TargetPlate:E7",
+        "TargetPlate:D12",
+        "TargetPlate:D6",
+        "TargetPlate:D11",
+        "TargetPlate:D5",
+        "TargetPlate:D10",
+        "TargetPlate:D4",
+        "TargetPlate:D9",
+        "TargetPlate:D3",
+        "TargetPlate:D8",
+        "TargetPlate:D2",
+        "TargetPlate:D1",
+        "TargetPlate:D7",
+        "TargetPlate:C12"
+      ],
+      "NewTip": "never",
+      "DisposalVolume": 0,
+      "Description": "Distribute 15-50µL GEL-N3 to 61 wells",
+      "LiquidClass": "Aqueous"
+    },
+    {
+      "Command": "Distribute",
+      "PipetteMount": "left",
+      "Volume": [
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5
+      ],
+      "Source": "Source_1:C2",
+      "Destinations": [
+        "TargetPlate:C6",
+        "TargetPlate:C11",
+        "TargetPlate:C5",
+        "TargetPlate:C10",
+        "TargetPlate:C4",
+        "TargetPlate:C9",
+        "TargetPlate:C3",
+        "TargetPlate:C8",
+        "TargetPlate:C2",
+        "TargetPlate:C1",
+        "TargetPlate:C7",
+        "TargetPlate:B12",
+        "TargetPlate:B11",
+        "TargetPlate:B6",
+        "TargetPlate:B5",
+        "TargetPlate:B10",
+        "TargetPlate:B4",
+        "TargetPlate:B9",
+        "TargetPlate:B3",
+        "TargetPlate:B8",
+        "TargetPlate:B2",
+        "TargetPlate:B1",
+        "TargetPlate:B7",
+        "TargetPlate:A12",
+        "TargetPlate:A11",
+        "TargetPlate:A6",
+        "TargetPlate:A10",
+        "TargetPlate:A5",
+        "TargetPlate:A9",
+        "TargetPlate:A4",
+        "TargetPlate:A3",
+        "TargetPlate:A8",
+        "TargetPlate:A2",
+        "TargetPlate:A1",
+        "TargetPlate:A7"
+      ],
+      "NewTip": "never",
+      "DisposalVolume": 0,
+      "Description": "Distribute 5-15µL GEL-N3 to 35 wells",
+      "LiquidClass": "Aqueous"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "Comment",
+      "Text": "=== 4arm-20kPEG-DBCO: 4arm-20kPEG-DBCO ==="
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips"
+    },
+    {
+      "Command": "Distribute",
+      "PipetteMount": "left",
+      "Volume": [
+        18,
+        17,
+        14,
+        14,
+        11,
+        10,
+        7,
+        7,
+        4,
+        3,
+        15,
+        14,
+        12,
+        11,
+        9,
+        8,
+        6,
+        5,
+        3,
+        3,
+        11,
+        10,
+        9,
+        8,
+        7,
+        6,
+        4,
+        4,
+        2,
+        2,
+        9,
+        9,
+        8,
+        7,
+        6,
+        5,
+        4,
+        3,
+        2,
+        2,
+        8,
+        7,
+        6,
+        5,
+        5,
+        4,
+        3,
+        3,
+        2,
+        1,
+        6,
+        5,
+        5,
+        4,
+        4,
+        3,
+        2,
+        2,
+        1,
+        1,
+        4,
+        3,
+        3,
+        3,
+        3,
+        2,
+        2,
+        1,
+        1,
+        1,
+        3,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "Source": "Source_1:D2",
+      "Destinations": [
+        "TargetPlate:H12",
+        "TargetPlate:H6",
+        "TargetPlate:H11",
+        "TargetPlate:H5",
+        "TargetPlate:H10",
+        "TargetPlate:H4",
+        "TargetPlate:H9",
+        "TargetPlate:H3",
+        "TargetPlate:H8",
+        "TargetPlate:H2",
+        "TargetPlate:G12",
+        "TargetPlate:G6",
+        "TargetPlate:G11",
+        "TargetPlate:G5",
+        "TargetPlate:G10",
+        "TargetPlate:G4",
+        "TargetPlate:G9",
+        "TargetPlate:G3",
+        "TargetPlate:G8",
+        "TargetPlate:G2",
+        "TargetPlate:F12",
+        "TargetPlate:F6",
+        "TargetPlate:F11",
+        "TargetPlate:F5",
+        "TargetPlate:F10",
+        "TargetPlate:F4",
+        "TargetPlate:F9",
+        "TargetPlate:F3",
+        "TargetPlate:F8",
+        "TargetPlate:F2",
+        "TargetPlate:E12",
+        "TargetPlate:E6",
+        "TargetPlate:E11",
+        "TargetPlate:E5",
+        "TargetPlate:E10",
+        "TargetPlate:E4",
+        "TargetPlate:E9",
+        "TargetPlate:E3",
+        "TargetPlate:E8",
+        "TargetPlate:E2",
+        "TargetPlate:D12",
+        "TargetPlate:D6",
+        "TargetPlate:D11",
+        "TargetPlate:D5",
+        "TargetPlate:D10",
+        "TargetPlate:D4",
+        "TargetPlate:D9",
+        "TargetPlate:D3",
+        "TargetPlate:D8",
+        "TargetPlate:D2",
+        "TargetPlate:C12",
+        "TargetPlate:C6",
+        "TargetPlate:C11",
+        "TargetPlate:C5",
+        "TargetPlate:C10",
+        "TargetPlate:C4",
+        "TargetPlate:C9",
+        "TargetPlate:C3",
+        "TargetPlate:C8",
+        "TargetPlate:C2",
+        "TargetPlate:B12",
+        "TargetPlate:B11",
+        "TargetPlate:B6",
+        "TargetPlate:B5",
+        "TargetPlate:B10",
+        "TargetPlate:B4",
+        "TargetPlate:B9",
+        "TargetPlate:B3",
+        "TargetPlate:B8",
+        "TargetPlate:B2",
+        "TargetPlate:A12",
+        "TargetPlate:A11",
+        "TargetPlate:A6",
+        "TargetPlate:A10",
+        "TargetPlate:A5",
+        "TargetPlate:A9",
+        "TargetPlate:A4",
+        "TargetPlate:A3",
+        "TargetPlate:A8"
+      ],
+      "NewTip": "never",
+      "DisposalVolume": 0,
+      "Description": "Distribute 1-18µL 4arm-20kPEG-DBCO to 79 wells"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "MoveLabware",
+      "LabwareID": "TargetPlate",
+      "NewLocation": "HeaterShaker",
+      "UseGripper": true
+    },
+    {
+      "Command": "HeaterShaker",
+      "ModuleID": "HeaterShaker",
+      "Temperature": 50,
+      "RPM": 300,
+      "Duration": 180,
+      "WaitForTemp": true,
+      "CloseLatch": true,
+      "OpenLatch": true
+    },
+    {
+      "Command": "MoveLabware",
+      "LabwareID": "TargetPlate",
+      "NewLocation": "D2",
+      "UseGripper": true
     }
-  ]
+  ],
+  "Metadata": {
+    "Generated": "20260902_155236",
+    "Source": "excel_import_configurable",
+    "TotalWells": 96,
+    "PlateId": "corning_96_wellplate_360ul_flat",
+    "PlateRows": 8,
+    "PlateColumns": 12,
+    "PlateTotalWells": 96,
+    "Reagents": [
+      "Solvent",
+      "HA-N3",
+      "GEL-N3",
+      "4arm-20kPEG-DBCO"
+    ],
+    "Groups": [
+      {
+        "name": "Solvent",
+        "columns": [
+          "Solvent"
+        ],
+        "delay_seconds": 0
+      },
+      {
+        "name": "HA-N3",
+        "columns": [
+          "HA-N3"
+        ],
+        "delay_seconds": 0
+      },
+      {
+        "name": "GEL-N3",
+        "columns": [
+          "GEL-N3"
+        ],
+        "delay_seconds": 0
+      },
+      {
+        "name": "4arm-20kPEG-DBCO",
+        "columns": [
+          "4arm-20kPEG-DBCO"
+        ],
+        "delay_seconds": 0
+      }
+    ],
+    "ReagentMapping": {
+      "Solvent": "Source_1",
+      "HA-N3": "Source_1",
+      "GEL-N3": "Source_1",
+      "4arm-20kPEG-DBCO": "Source_1"
+    },
+    "WellAssignments": {
+      "Solvent": "Source_1:A1+B1+C1+D1",
+      "HA-N3": "Source_1:A2",
+      "GEL-N3": "Source_1:B2+C2",
+      "4arm-20kPEG-DBCO": "Source_1:D2"
+    },
+    "RequiredVolumes": {
+      "4arm-20kPEG-DBCO": {
+        "nominal_ul": 423,
+        "excess_ul": 92.3,
+        "with_excess_ul": 515.3,
+        "estimated_waste_ul": 5.0
+      },
+      "GEL-N3": {
+        "nominal_ul": 2340,
+        "excess_ul": 284.0,
+        "with_excess_ul": 2624.0,
+        "estimated_waste_ul": 20.0
+      },
+      "HA-N3": {
+        "nominal_ul": 480,
+        "excess_ul": 98.0,
+        "with_excess_ul": 578.0,
+        "estimated_waste_ul": 5.0
+      },
+      "Solvent": {
+        "nominal_ul": 6357,
+        "excess_ul": 685.7,
+        "with_excess_ul": 7042.7,
+        "estimated_waste_ul": 40.0
+      }
+    },
+    "Notes": [
+      "Solvent: 6357 uL nominal (7042.7 uL with margin - exceeds one well) -> fill in order until the volume is used up, in Source_1: A1 = 2000 uL; B1 = 2000 uL; C1 = 2000 uL; D1 = 1042.7 uL",
+      "HA-N3: 480 uL nominal -> load 578.0 uL into Source_1:A2",
+      "GEL-N3: 2340 uL nominal (2624.0 uL with margin - exceeds one well) -> fill in order until the volume is used up, in Source_1: B2 = 2000 uL; C2 = 624.0 uL",
+      "4arm-20kPEG-DBCO: 423 uL nominal -> load 515.3 uL into Source_1:D2"
+    ],
+    "HasDelays": false,
+    "ModulesUsed": {
+      "HeaterShaker": "heaterShakerModuleV1"
+    }
+  },
+  "Configuration": {
+    "groups": [
+      {
+        "name": "Solvent",
+        "columns": [
+          "Solvent"
+        ],
+        "delay_after_seconds": 0,
+        "strategy": "distribute",
+        "treatments": [
+          {
+            "kind": "HeaterShaker",
+            "target": "GEL-N3",
+            "params": {
+              "Temperature": 70,
+              "RPM": 300,
+              "Duration": 300,
+              "WaitForTemp": true,
+              "DeactivateHeater": true
+            },
+            "return_after": true
+          }
+        ]
+      },
+      {
+        "name": "HA-N3",
+        "columns": [
+          "HA-N3"
+        ],
+        "delay_after_seconds": 0,
+        "strategy": "distribute",
+        "treatments": [
+          {
+            "kind": "HeaterShaker",
+            "target": "GEL-N3",
+            "params": {
+              "Temperature": 70,
+              "RPM": 300,
+              "Duration": 300,
+              "WaitForTemp": true,
+              "DeactivateHeater": true
+            },
+            "return_after": true
+          }
+        ]
+      },
+      {
+        "name": "GEL-N3",
+        "columns": [
+          "GEL-N3"
+        ],
+        "delay_after_seconds": 0,
+        "strategy": "distribute",
+        "treatments": []
+      },
+      {
+        "name": "4arm-20kPEG-DBCO",
+        "columns": [
+          "4arm-20kPEG-DBCO"
+        ],
+        "delay_after_seconds": 0,
+        "strategy": "distribute",
+        "treatments": []
+      }
+    ],
+    "pipette": "left",
+    "pre_treatments": [],
+    "post_treatments": [
+      {
+        "kind": "HeaterShaker",
+        "target": "TargetPlate",
+        "params": {
+          "Temperature": 50,
+          "RPM": 300,
+          "Duration": 180,
+          "WaitForTemp": true
+        },
+        "return_after": true
+      }
+    ],
+    "reagent_liquid_classes": {
+      "HA-N3": "Aqueous",
+      "GEL-N3": "Aqueous"
+    },
+    "target_plate": "corning_96_wellplate_360ul_flat",
+    "plate_rows": 8,
+    "plate_columns": 12,
+    "plate_total_wells": 96,
+    "plate_row_labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F",
+      "G",
+      "H"
+    ],
+    "reservoir_type": "corning_24_wellplate_3.4ml_flat",
+    "num_reservoirs": 1
+  }
 }

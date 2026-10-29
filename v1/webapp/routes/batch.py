@@ -178,13 +178,14 @@ def create_batch_router(state, LIBRARY_DIR: Path) -> APIRouter:
             target_plate = data.get("target_plate", "corning_96_wellplate_360ul_flat")
             reservoir_type = data.get("reservoir_type", "nest_12_reservoir_15ml")
             save_to_library = data.get("save_to_library", False)
+            tip_sizes_ul = data.get("tip_sizes_ul") or None
 
             if num_sources:
-                hal_config = generate_generic_hal(num_sources=num_sources, hal_name=hal_name, target_plate=target_plate, reservoir_type=reservoir_type)
+                hal_config = generate_generic_hal(num_sources=num_sources, hal_name=hal_name, target_plate=target_plate, reservoir_type=reservoir_type, tip_sizes_ul=tip_sizes_ul)
             elif recipe:
                 hal_config = generate_hal_config_from_recipe(recipe, hal_name)
             else:
-                hal_config = generate_generic_hal(num_sources=6, hal_name=hal_name, target_plate=target_plate, reservoir_type=reservoir_type)
+                hal_config = generate_generic_hal(num_sources=6, hal_name=hal_name, target_plate=target_plate, reservoir_type=reservoir_type, tip_sizes_ul=tip_sizes_ul)
 
             saved_file = None
             if save_to_library:

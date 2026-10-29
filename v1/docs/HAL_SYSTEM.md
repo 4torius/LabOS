@@ -26,19 +26,35 @@ The active config is tracked in a plain-text marker file, `Library/HardwareConfi
 
 A recipe is a JSON file (`Library/Recipes/*.json`) with a `Steps` array of Opentrons commands, plus optional `Metadata` (produced automatically by the Recipe Generator — required volumes, waste estimates, notes).
 
+### Running one step without a recipe file
+
+The operations common enough to want on their own have their own SiLA2
+command — `MoveLabware`, `ShakeModule`, `SetModuleLatch`,
+`SetModuleTemperature` — which validate against the loaded deck and offer real
+pickers in the workflow builder. See [SERVERS.md](SERVERS.md). Anything else is
+a recipe file, however short.
+
 ### Supported Step Commands
 
 **High-level (automatic tip management)**
 | Command | Description |
 |---------|-------------|
-| `Transfer` | Single source → single destination |
-| `Distribute` | Single source → multiple destinations |
-| `Consolidate` | Multiple sources → single destination |
+| `Transfer` | Single source → single destination. Optional `"VerifyLiquid": true` — see below |
+| `Distribute` | Single source → multiple destinations. Optional `"VerifyLiquid": true` — see below |
+| `Consolidate` | Multiple sources → single destination. Optional `"VerifyLiquid": true` — see below |
+
+`VerifyLiquid` on these three toggles Opentrons' native `pipette.liquid_presence_detection` for the duration of that one call: the Flex pipette physically probes for the liquid surface with its pressure sensor before aspirating, positions itself just above it, and only then aspirates — no manual retry/offset logic and no safety-margin config needed, the hardware does the probing and enforces its own calibrated limits. If it doesn't find liquid, the run enters Flex's `awaiting-recovery` state; `robot_client.py::wait_for_run_completion()` recognizes this and stops the run immediately with a clear message (see [SERVERS.md](SERVERS.md)) rather than letting it sit waiting for touchscreen intervention.
+
+**Important limitation** (confirmed against Opentrons' own source, `instrument_context.py`): this native probe only re-arms when the pipette's tip is both empty AND "clean" (`has_clean_tip()`, true only right after `pick_up_tip()`, false from the first aspirate/dispense onward) — so within a single `Distribute`/`Consolidate` call that reloads the same tip several times, the probe fires only on the very first aspirate, never again on later reloads. `Transfer` is unaffected (a fresh tip per destination already, by construction). To get real per-reload coverage on `Distribute`, the Recipe Generator emits one `PickUpTip`/`Distribute`/`DropTip` triplet **per reload trip** instead of one for the whole reagent whenever "Verify aspiration" is checked — a fresh, clean tip every trip re-arms the probe every time. Trade-off: more tips consumed (one per trip instead of one per reagent) and a somewhat slower run.
+
+**Multi-well liquid fallback**: whenever "Verify aspiration" is on for a reagent, it automatically gets extra "backup" wells in the same reservoir — no count to type in. The number is sized the same way the existing reservoir-capacity overflow-split is (`ceil(with_excess_ul / well_capacity)`, at least 1): enough wells to cover the reagent's own required volume *again*, in case the primary well(s) turn out to be a total loss. Backups are drawn from whatever the primary/overflow well assignment didn't already claim (collision-free even when several reagents share a reservoir) and, since a reservoir's own well ordering already groups physically-adjacent wells together, consecutive free wells end up physically adjacent too. If the reservoir doesn't have enough free wells left, whatever's available is used and a note in "Notes" says so - it never fails generation. Each reload trip's `Source` becomes a candidate list whenever at least one backup was assigned; before aspirating, the generated protocol tries each candidate in order with `detect_liquid_presence()` (a boolean check, never raises) and uses the first one with liquid, remembering how far it got so later trips don't re-probe wells already found dry. Only if every candidate is dry does the run stop, via the same `require_liquid_presence()` → `awaiting-recovery` path as the single-well case above — same message, whether it's one well or an exhausted fallback list. Not available for `Consolidate` (its `Sources` already means "merge these", not "try these in order").
+
+**Exposed in the webapp**: a single "Verify aspiration" checkbox per reagent in the Recipe Generator's advanced options — backup wells (if any) are assigned automatically and listed in "Quantità richieste / note" after generating.
 
 **Low-level (explicit control)**
 | Command | Description |
 |---------|-------------|
-| `Aspirate` | Draw liquid from a well. Optional `"VerifyLiquid": true` calls the robot's liquid-presence sensor first and aborts with a clean error if no liquid is detected — **no webapp UI control for this, JSON-only** |
+| `Aspirate` | Draw liquid from a well. Optional `"VerifyLiquid": true` calls `detect_liquid_presence()` once and manually raises a Python exception if no liquid is found — a different, older mechanism from the one above (immediate hard failure vs. `awaiting-recovery` + programmatic stop), kept as-is since it's already tested and working. **No webapp UI control for this one specifically, JSON-only** — the Recipe Generator never emits a standalone `Aspirate` step, only `Transfer`/`Distribute` |
 | `Dispense` | Deliver liquid to a well |
 | `Mix` | Aspirate+dispense N times in place |
 | `BlowOut`, `TouchTip`, `AirGap` | Standard liquid-handling refinements |
@@ -53,6 +69,7 @@ A recipe is a JSON file (`Library/Recipes/*.json`) with a `Steps` array of Opent
 |---------|-------------|
 | `MoveLabware` | Move a plate within the deck via the gripper. Accepts optional `PickUpOffset`/`DropOffset` (`{"x":.., "y":.., "z":..}`, millimeters, additive on top of the labware's own calibrated default) — **JSON-only, no webapp UI control** to set these. **Default when omitted**: the code doesn't send an explicit `(0,0,0)` — it simply omits the kwarg entirely, which is functionally equivalent to zero *additional* offset. The labware's own built-in `gripperOffsets.default` (from its Opentrons labware definition) always applies regardless, on top of nothing extra. |
 | `Delay`, `Comment`, `Pause` | Control/annotation steps |
+| `TakeSnapshot` | Photograph the deck with the robot's on-board camera. Optional `Filename` and `Device` (the V4L2 node on the robot; defaults to the server's `camera.device`). The frame is base64-encoded into the run log and decoded back into `Results/Images/`, where the web interface serves it under **Results → Deck photos**. `CaptureImage` is the standalone command version — see [SERVERS.md](SERVERS.md#captureimage-the-on-board-camera) |
 | Heater-shaker / temperature module steps | Emitted automatically by the Recipe Generator's module-treatment engine when a treatment is configured — see below |
 
 ### Module Treatments (Recipe Generator feature)
@@ -110,4 +127,4 @@ The primary way to create recipes. From the **Recipe Generator** page (`/batch` 
 6. Generate — choose "Multi-Recipe + Workflow" (one recipe per phase, chained by an auto-generated workflow) or "Single Recipe with Delays" (one recipe, `Delay` steps between phases).
 7. The generator can also produce a matching generic HAL config alongside the recipe.
 
-Two features from this pipeline exist only in the generated JSON, with **no corresponding webapp control**: gripper offsets (`MoveLabware.PickUpOffset`/`DropOffset`) and `Aspirate.VerifyLiquid`. Set these by hand-editing the generated recipe if needed.
+One feature from this pipeline still exists only in the generated JSON, with **no corresponding webapp control**: gripper offsets (`MoveLabware.PickUpOffset`/`DropOffset`) — set by hand-editing the generated recipe if needed. `VerifyLiquid` on `Transfer`/`Distribute` **is** wired into step 3 above (the "Verify aspiration" checkbox, with backup-well fallback assigned automatically); only the standalone-`Aspirate` variant of `VerifyLiquid` remains JSON-only, since the Recipe Generator never emits that command.

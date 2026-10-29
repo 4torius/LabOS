@@ -1,0 +1,25 @@
+{
+  "ConfigName": "Test_TwoCustom48WellPlates_HAL",
+  "Description": "Smoke test HAL: EuroClone 48-well custom plate at D1 (exercises Fase B auto-registration, never tested on real hardware) + Corning 48-well standard plate at D2 (standard Opentrons catalog labware). No pipette, no liquid handling - labware-loading only.",
+  "Generated": "20260903_manual_smoketest",
+  "Trash": {
+    "MyTrash": { "Type": "TrashBin", "Slot": "A3" }
+  },
+  "Labware": {
+    "PlateD1_EuroCloneCustom": {
+      "LoadName": "primo_euroclone_48_wellplate_1000.plate",
+      "Slot": "D1",
+      "DisplayName": "EuroClone 48-well (custom, D1)"
+    },
+    "PlateD2_Corning48": {
+      "LoadName": "corning_48_wellplate_1.6ml_flat",
+      "Slot": "D2",
+      "DisplayName": "Corning 48-well (standard, D2)"
+    }
+  },
+  "Pipettes": {},
+  "Metadata": {
+    "source": "manual_smoketest",
+    "note": "Load-only smoke test - confirms both plates load on the real robot without error, no aspirate/dispense/gripper movement at all."
+  }
+}

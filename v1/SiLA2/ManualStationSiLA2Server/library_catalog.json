@@ -1,0 +1,21 @@
+{
+  "_comment": "The Manual Station reads no files and writes no data, so it declares no folders. It declares what a workflow step may leave out, which the orchestrator used to fill in by recognising the command's name. See v1/src/catalog.py.",
+  "display": {
+    "icon": "bi-hand-index-thumb",
+    "color": "info"
+  },
+  "library_types": [],
+  "result_types": [],
+  "parameter_defaults": {
+    "RequestOperatorTask": {
+      "TaskType": "manual_operation",
+      "Priority": "normal",
+      "SourceInstrument": "Workflow",
+      "TimeoutSeconds": 600
+    },
+    "SendNotification": {
+      "Level": "info",
+      "SourceInstrument": "Workflow"
+    }
+  }
+}

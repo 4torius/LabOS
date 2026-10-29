@@ -10,11 +10,15 @@ logging:
 bridge:
   host: "127.0.0.1"
   port: 50055
-  # Max seconds to wait for a RunMeasurement to finish. 0 = unlimited; the C#
-  # bridge itself is already unbounded internally (appsettings.json
-  # MeasurementTimeoutSeconds: 0), so this Python-side cap can safely be
-  # raised or removed for long kinetic reads without mismatching the bridge.
-  measurement_timeout_seconds: 1200
+  # No measurement_timeout_seconds here anymore: RunMeasurement is a real
+  # observable SiLA2 command that already streams genuine progress from the
+  # instrument (is_intermediate responses), and a client-side gRPC deadline
+  # on top of that killed long scans (e.g. a multi-well wavelength scan past
+  # 20 min) with "Deadline Exceeded" even while the reader was still
+  # correctly working - identical in kind to the client-side timeout bug
+  # already fixed for Opentrons' observable commands. The C# bridge itself
+  # is already unbounded internally (appsettings.json MeasurementTimeoutSeconds:
+  # 0); the Python side now matches that with no deadline at all.
 
 # Connection string passed to the C# bridge's Connect() command.
 # Supported values (handled by the C# bridge):

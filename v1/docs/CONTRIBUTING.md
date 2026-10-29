@@ -7,13 +7,72 @@ The fastest path to integrating a new instrument is the server template. See [AD
 ## Code Organization
 
 ```
+v1/labos.py          Command line — start here for anything operational
 v1/src/              Core orchestration — touch carefully, changes affect everything
 v1/SiLA2/            Instrument servers — each is self-contained, safe to modify
 v1/webapp/           FastAPI web app — page routes in webapp/routes/
 v1/Library/          User-editable assets — no Python code here
+v1/scripts/          One-off maintenance (workflow migration)
 v1/docs/             This documentation
 v1/tests/            pytest suite (unit/ + integration)
 ```
+
+### Single-implementation rules
+
+Four things have exactly one implementation, deliberately, because each used to
+have several that disagreed. Adding a second is a regression, not a shortcut:
+
+| Concept | The one implementation |
+|---|---|
+| Reading `lab_config.yaml` | `src/settings.py::get_settings()` — do not call `yaml.safe_load` on it |
+| Matching an instrument name | `src/resolver.py::resolve()` — no substring matching anywhere else |
+| Ordering workflow steps | `src/workflow.py::topological_waves()` |
+| "0 or null means unlimited" | `src/settings.py::normalize_timeout()` |
+| What is on the deck | `src/deck.py` — never a hardcoded labware or slot list |
+| Front-end helpers | `webapp/static/js/labos-*.js` — not a copy in a template |
+
+### Front-end
+
+The templates carry a lot of inline JavaScript. Anything *shared* has been
+pulled out into `webapp/static/js/`:
+
+| Module | What belongs in it |
+|---|---|
+| `labos-core.js` | escaping, `fetchJson`, formatting, toasts, the page log |
+| `labos-ws.js` | the one websocket. `LabOS.ws.on('workflow_progress', fn)` |
+| `labos-params.js` | rendering a command's parameters as a form |
+
+Two rules, both learned the hard way. **Escape anything that came from a
+server, a file name or an operator** before concatenating it into HTML —
+`LabOS.escapeHtml` for text, `LabOS.escapeAttr` inside an attribute. And **never
+offer a choice the system cannot honour**: a picker's options come from
+discovery, from `Library/`, or from the active hardware config. Hardcoded lists
+of instruments, labware and deck slots have all been removed for offering
+things that do not exist, and a test now guards each one.
+
+### Offering a parameter's values
+
+A parameter with a small fixed set of sensible values gets a dropdown by
+declaring them in the server's `library_catalog.json`:
+
+```json
+{ "hint": "tecan_connect_mode",
+  "values": ["", "usb", "dialog"],
+  "value_labels": { "usb": "usb - stored connection, then a fresh scan" },
+  "parameter_names": ["ConnectionString"] }
+```
+
+**Not** a SiLA2 `Constrained/Set`, tempting as that is. A Set is enforced by the
+framework before the server sees the call, so it rejects values the server still
+accepts — constraining `ConnectionString` to five keywords broke the empty
+string, which is the documented "use your configured default" and what a shipped
+workflow sends. Narrowing the protocol to gain a UI affordance costs more than
+it gives. Use a Set only when the value genuinely is invalid, not merely
+unlisted.
+
+There is no JS test runner here. `tests/unit/test_frontend_assets.py` checks
+what can be checked without a browser: that every module and every inline block
+is structurally sound, and that the removed affordances stay removed.
 
 The mobile robot's SiLA2 server is **not part of this repository** — its real deployment lives entirely on the remote Linux host. See [ARCHITECTURE.md](ARCHITECTURE.md#mobile-robot-current-status).
 
@@ -31,6 +90,7 @@ The mobile robot's SiLA2 server is **not part of this repository** — its real 
 ```bash
 cd v1
 python -m pytest tests/ -m "not integration" -v
+python labos.py doctor                    # config, dependencies, schema versions
 ```
 
 This runs the unit suite under `tests/unit/` (config schema, discovery/port-collision, client timeout handling, bridge launcher, etc.) plus the top-level `tests/test_*.py` files (workflow/recipe parsing, discovery, stub loading). See `tests/unit/_pkg_loader.py` if you need to import server-side `src/` packages under a private module name — both `OpentronsSiLA2Server` and `TecanM200SiLA2Server` ship a package literally named `src`, which would otherwise collide with `v1`'s own top-level `src` package.
@@ -47,10 +107,15 @@ Check `tests/test_integration.py` and `tests/test_commands.py` for what's curren
 
 ### Manual validation
 
-Run the validation workflows from the web interface:
-- `Opentrons_Only_Test.workflow.json` — liquid handling only
-- `Manual_Intervention_Test.workflow.json` — manual station
-- `example_no_robot.workflow.json` — Opentrons + Tecan
+Validate the shipped workflow, then run it from the web interface with a scrap
+plate (it needs all four instruments, mobile robot included):
+
+```bash
+python labos.py validate Test_Bicocca
+```
+
+To check one instrument on its own, send a single command from its card on the
+Dashboard instead.
 
 ## Style Guide
 
@@ -62,29 +127,41 @@ Run the validation workflows from the web interface:
 
 ## Adding New SiLA2 Commands
 
-**For servers using the `sila2` library (all current servers):**
+1. Add the `<Command>` (or `<Property>`) block to the FDL in `features/`
+2. `python labos.py codegen YourInstrumentSiLA2Server`
+3. Implement the new abstract method in your `FeatureImplementationBase`
+   subclass — the server refuses to start until you do, which is the behaviour
+   you want
+4. Restart the server. No orchestrator change; the builder shows it on the next
+   browser refresh
 
-1. Add the `<Command>` block to the FDL XML file in `features/`
-2. Regenerate stubs: `sila2-codegen features/YourInstrument.sila.xml --output-dir generated/`
-3. Add the corresponding method to your `FeatureImplementationBase` subclass in `src/`
-4. Restart the server — no orchestrator changes needed
-5. The visual designer's dropdown will show the new command after the next browser refresh
+**Two conventions to follow:**
 
-**For legacy servers using `SiLA2Common` (if any):**
+- **A command does something; a reading is a Property.** If the caller is only
+  asking what is already true, declare a `<Property>`. Properties appear in a
+  "Live readings" panel instead of as buttons an operator presses to find
+  something out, and an observable one is pushed rather than polled.
+- **Begin the description with `MOVES HARDWARE`** when the command physically
+  moves the instrument. That description is what the operator reads in the
+  command list.
 
-1. Add the `<Command>` block to the FDL XML file in `features/`
-2. Add a handler in `servicer.py`'s `_dispatch()` method
-3. Update `GetFeatures()` to return the new command metadata
-4. Restart the server
+There is no legacy `SiLA2Common` path any more — it was removed along with its
+two extra FDL parsers and the dynamic-stub execution strategy.
 
 ## Modifying the Orchestrator
 
 Changes to `v1/src/` require extra care:
 
+- `settings.py` — every component reads through it; a change affects everything
+- `resolver.py` — decides which physical machine a step addresses. Treat
+  ambiguity as an error, always
 - `lab_core.py` — restart required to pick up changes
-- `discovery.py` — changes affect all instrument registration; test with all servers running
-- `workflow.py` — changes to execution logic must be tested with fault injection
-- `api/` — FastAPI routes; test all endpoint contracts before merging
+- `discovery.py` — affects all instrument registration; test with the servers running
+- `workflow.py` — execution logic; test with fault injection. `tests/unit/`
+  covers ordering, abort and validation
+- `run_manager.py` — owns the single run slot; a leaked slot blocks every
+  later run
+- `webapp/routes/` — FastAPI routes; check the endpoint contracts before merging
 
 ## Documentation
 

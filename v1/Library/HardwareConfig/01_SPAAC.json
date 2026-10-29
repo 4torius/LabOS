@@ -27,7 +27,7 @@
     },
     "Source_1": {
       "LoadName": "corning_24_wellplate_3.4ml_flat",
-      "Slot": "C2",
+      "Slot": "D1",
       "DisplayName": "Source_1 - Reagent plate (A1=GEL-N3, A2=HA-N3, A3=4arm-20kPEG-DBCO, A4+A5=Solvent split)"
     }
   },
@@ -39,9 +39,9 @@
     "total_sources": 1,
     "slot_assignments": {
       "A1": "HeaterShaker",
-      "A3": "MyTrash",
       "B3": "MyTips",
-      "C2": "Source_1",
+      "A3": "MyTrash",
+      "D1": "Source_1",
       "D2": "TargetPlate"
     },
     "note": "All 4 reagents are loaded into wells A1-A4 of the single Source_1 24-well plate; Solvent (well A4) exceeds a single well's 3.4mL capacity so it is split across A4+A5 in the recipe. Source_1 must return to slot C2 after each HeaterShaker cycle (D2 is occupied by TargetPlate)."

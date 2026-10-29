@@ -38,7 +38,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "system": {
         "name": "LabOS",
         "version": "2.0.0",
-        "language": "en",
         "log_level": "INFO",
         "auto_start_servers": True,
     },
@@ -49,7 +48,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "service_type": "_sila._tcp.local.",
     },
     "workflow": {
-        "parallel_execution": True,
+        # Safe default. Every workflow shipped in Library/Workflows declares
+        # DependsOn: [], so with parallel execution on, a file whose steps are
+        # merely written in order would dispatch all of them at once — for a
+        # mobile robot and a liquid handler sharing a deck, that is a collision.
+        # lab_config.yaml has always set this to false; the default here
+        # disagreed, so deleting the key silently armed it.
+        "parallel_execution": False,
         # Fallback timeout (seconds) for any step that doesn't set its own
         # TimeoutSeconds. 0 or null means unlimited for ALL such steps — prefer
         # keeping this finite (it's the safety net that detects a hung/crashed

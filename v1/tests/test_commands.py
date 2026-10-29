@@ -149,8 +149,9 @@ async def test_cli_labcore(any_server_available):
     else:
         err("No recipes found")
         results.append(("CLI", "Opentrons ExecuteRecipe", False))
-    
+
     assert isinstance(results, list)
+    return results
 
 
 #                              TEST VIA WEBAPP API
@@ -278,8 +279,9 @@ async def test_webapp_api(any_server_available):
         else:
             err("No recipes found")
             results.append(("WebApp", "Opentrons ExecuteRecipe", False))
-    
+
     assert isinstance(results, list)
+    return results
 
 
 #                              MAIN
@@ -295,19 +297,28 @@ async def main():
 """)
     
     all_results = []
-    
+
+    # Standalone runner (outside pytest, no fixture injection) — replicate
+    # conftest.py's any_server_available check directly.
+    from tests.conftest import is_port_open
+    any_server = (
+        is_port_open("localhost", 50302)
+        or is_port_open("localhost", 50051)
+        or is_port_open("localhost", 50360)
+    )
+
     # Test 1: CLI via LabCore
     try:
-        cli_results = await test_cli_labcore()
+        cli_results = await test_cli_labcore(any_server)
         all_results.extend(cli_results)
     except Exception as e:
         err(f"CLI test failed: {e}")
         import traceback
         traceback.print_exc()
-    
+
     # Test 2: WebApp API
     try:
-        webapp_results = await test_webapp_api()
+        webapp_results = await test_webapp_api(any_server)
         all_results.extend(webapp_results)
     except Exception as e:
         err(f"WebApp test failed: {e}")

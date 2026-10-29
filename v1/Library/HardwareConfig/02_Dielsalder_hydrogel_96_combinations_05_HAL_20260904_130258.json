@@ -1,0 +1,70 @@
+{
+  "ConfigName": "02_Dielsalder_hydrogel_96_combinations_05_HAL",
+  "Description": "Generic HAL with 4 source slots. Reusable for multiple recipes.",
+  "Generated": "20260904_130258",
+  "Trash": {
+    "MyTrash": {
+      "Type": "TrashBin",
+      "Slot": "A3"
+    }
+  },
+  "Modules": {},
+  "Labware": {
+    "MyTips_50": {
+      "LoadName": "opentrons_flex_96_tiprack_50ul",
+      "Slot": "B3",
+      "DisplayName": "Tip rack 50µL"
+    },
+    "MyTips_1000": {
+      "LoadName": "opentrons_flex_96_tiprack_1000ul",
+      "Slot": "C3",
+      "DisplayName": "Tip rack 1000µL"
+    },
+    "TargetPlate": {
+      "LoadName": "corning_96_wellplate_360ul_flat",
+      "Slot": "D2",
+      "DisplayName": "Target plate for reactions"
+    },
+    "Source_1": {
+      "LoadName": "agilent_1_reservoir_290ml",
+      "Slot": "A2",
+      "DisplayName": "Source_1 (e.g. GEL-5MF)",
+      "Well": "A1"
+    },
+    "Source_2": {
+      "LoadName": "agilent_1_reservoir_290ml",
+      "Slot": "B2",
+      "DisplayName": "Source_2 (e.g. HA-5MF)",
+      "Well": "A1"
+    },
+    "Source_3": {
+      "LoadName": "agilent_1_reservoir_290ml",
+      "Slot": "C2",
+      "DisplayName": "Source_3 (e.g. 4arm-10kPEG-maleimide)",
+      "Well": "A1"
+    },
+    "Source_4": {
+      "LoadName": "agilent_1_reservoir_290ml",
+      "Slot": "D3",
+      "DisplayName": "Source_4 (e.g. solvent)",
+      "Well": "A1"
+    }
+  },
+  "Pipettes": {
+    "left": "flex_1channel_1000"
+  },
+  "Metadata": {
+    "source": "excel_recipe_configurable",
+    "total_sources": 4,
+    "slot_assignments": {
+      "B3": "MyTips_50",
+      "C3": "MyTips_1000",
+      "D2": "TargetPlate",
+      "A2": "Source_1",
+      "B2": "Source_2",
+      "C2": "Source_3",
+      "D3": "Source_4"
+    },
+    "note": "This HAL uses generic source names. Check recipe metadata for reagent assignments."
+  }
+}

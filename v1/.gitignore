@@ -68,19 +68,16 @@ images/*
 temp/*
 !temp/.gitkeep
 
-# Results (data generated during experiments)
-Results/CSV/*
-!Results/CSV/.gitkeep
-Results/Excel/*
-!Results/Excel/.gitkeep
-Results/XML/*
-!Results/XML/.gitkeep
-Results/AnIML/*
-!Results/AnIML/.gitkeep
-Results/opentrons/*
-!Results/opentrons/.gitkeep
-Results/runs/*
-!Results/runs/.gitkeep
+# Results (data generated during experiments). Every subfolder, not a list of
+# them: instruments declare their own result folders and create them when
+# they start, so a new instrument's data must not end up committed just
+# because nobody added its folder here.
+Results/*/*
+!Results/*/.gitkeep
+
+# Per-run command-log archive written by the Opentrons server (rotating,
+# machine-specific; the durable record is Results/labos.db + the robot itself)
+SiLA2/OpentronsSiLA2Server/run_archive/
 
 # Runtime database and tracking state (machine-specific)
 Results/labos.db

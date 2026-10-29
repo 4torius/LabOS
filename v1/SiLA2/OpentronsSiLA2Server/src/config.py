@@ -15,6 +15,7 @@ Environment Variables:
 import os
 import logging
 import socket
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 from logging.handlers import RotatingFileHandler
@@ -31,8 +32,37 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# The Opentrons HTTP API always listens on this TCP port (fixed on both Flex
+# and OT-2 — not user-configurable). mDNS `_http._tcp.local.` announcements
+# from the robot advertise its *web* port (80) instead, so a discovered IP is
+# only ever paired with THIS port, never the announced one.
+OPENTRONS_HTTP_API_PORT = 31950
+
 
 #                           mDNS DISCOVERY
+
+def robot_http_responds(ip: str, port: int = OPENTRONS_HTTP_API_PORT,
+                        timeout: float = 2.0) -> bool:
+    """Return True if an Opentrons HTTP API answers /health at ip:port.
+
+    Used both to check whether the statically-configured IP is still valid
+    and to verify an mDNS candidate before adopting it, so the server never
+    latches onto some unrelated `_http._tcp` device on the LAN.
+    """
+    if not ip:
+        return False
+    url = f"http://{ip}:{port}/health"
+    try:
+        req = urllib.request.Request(url, headers={"Opentrons-Version": "*"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (fixed http scheme)
+            if resp.status != 200:
+                return False
+            body = resp.read(4096).decode("utf-8", "ignore").lower()
+            # Opentrons /health always carries these keys; guards against a
+            # random 200 from an unrelated service.
+            return "api_version" in body or "fw_version" in body
+    except Exception:
+        return False
 
 class OpentronsmDNSListener:
     """Listener for Opentrons robot mDNS announcements."""
@@ -61,50 +91,78 @@ class OpentronsmDNSListener:
         self.add_service(zc, type_, name)
 
 
-def discover_opentrons_via_mdns(timeout: float = 5.0) -> Optional[Tuple[str, int]]:
+def discover_opentrons_via_mdns(
+    timeout: float = 5.0,
+    verify: bool = True,
+) -> Optional[Tuple[str, int]]:
     """
-    Discover Opentrons robot via mDNS/Bonjour.
-    
+    Discover the Opentrons robot on the LAN via mDNS/Bonjour.
+
+    The switch hands the robot its IP by DHCP, so that IP can change between
+    power cycles. This lets the server find the robot again wherever it
+    landed, without anyone editing config.yaml.
+
     Args:
-        timeout: Discovery timeout in seconds
-        
+        timeout: Discovery timeout in seconds.
+        verify: If True, only return a candidate whose Opentrons HTTP API
+            actually answers on OPENTRONS_HTTP_API_PORT — this filters out
+            any other `_http._tcp` device on the network (printers, NAS, the
+            robot's own web port, ...).
+
     Returns:
-        Tuple of (ip, port) if found, None otherwise
+        (ip, OPENTRONS_HTTP_API_PORT) if found, None otherwise. The port is
+        always the fixed API port, never the port from the mDNS record.
     """
     if not ZEROCONF_AVAILABLE:
         logger.debug("zeroconf not available for mDNS discovery")
         return None
-    
+
+    import time
+
+    def _rank(name: str) -> int:
+        n = name.lower()
+        if "opentrons" in n or "flex" in n:
+            return 2
+        if n.startswith("ot2") or "ot-2" in n:
+            return 1
+        return 0  # unrelated _http._tcp device — only used if it verifies
+
+    zc = None
     try:
         zc = Zeroconf()
         listener = OpentronsmDNSListener()
-        
         # Opentrons robots announce as _http._tcp.local.
         # Cast to satisfy type checker - OpentronsmDNSListener implements required methods
-        browser = ServiceBrowser(zc, "_http._tcp.local.", listener)  # type: ignore[arg-type]
-        
-        # Wait for discovery
-        import time
+        ServiceBrowser(zc, "_http._tcp.local.", listener)  # type: ignore[arg-type]
+
         start = time.time()
         while time.time() - start < timeout:
-            if listener._found:
-                # Look for Opentrons-like names
-                for name, info in listener.robots.items():
-                    name_lower = name.lower()
-                    if "opentrons" in name_lower or "flex" in name_lower or "ot" in name_lower:
-                        zc.close()
-                        return (info["ip"], info["port"])
-                # If no Opentrons-specific name, return first found
-                if listener.robots:
-                    first = list(listener.robots.values())[0]
-                    zc.close()
-                    return (first["ip"], first["port"])
-            time.sleep(0.1)
-        
-        zc.close()
+            time.sleep(0.2)
+            if not listener.robots:
+                continue
+            # Best-named candidates first; on a tie, keep discovery order.
+            candidates = sorted(
+                {info["ip"] for info in listener.robots.values() if info.get("ip")},
+                key=lambda ip: -max(
+                    _rank(name)
+                    for name, info in listener.robots.items()
+                    if info.get("ip") == ip
+                ),
+            )
+            for ip in candidates:
+                if not verify or robot_http_responds(ip, OPENTRONS_HTTP_API_PORT):
+                    logger.info(
+                        f"mDNS: Opentrons robot at {ip}:{OPENTRONS_HTTP_API_PORT}"
+                        f"{'' if verify else ' (unverified)'}"
+                    )
+                    return (ip, OPENTRONS_HTTP_API_PORT)
+        logger.debug("mDNS discovery finished without a usable Opentrons robot")
     except Exception as e:
         logger.debug(f"mDNS discovery failed: {e}")
-    
+    finally:
+        if zc is not None:
+            zc.close()
+
     return None
 
 
@@ -122,7 +180,7 @@ class ServerConfig:
     
     # Server settings
     host: str = "0.0.0.0"
-    port: int = 50052
+    port: int = 50302
     name: str = "OpentronsSiLA2Server"
     description: str = "SiLA2 Server for Opentrons Flex"
     vendor: str = "ChemicalLab"
@@ -157,6 +215,18 @@ class ServerConfig:
     dir_logs: str = "./logs"
     dir_temp: str = "./temp"
     dir_recipes: str = "../../Library/Recipes"
+    dir_library: str = "../../Library"
+    dir_results: str = "../../Results"
+
+    # ── Camera ──────────────────────────────────────────────────────────────
+    # The Flex has an on-board camera. `camera_device` is the V4L2 node the
+    # snapshot step reads *on the robot*; `camera_http_probe` first tries the
+    # robot's own camera endpoint, which takes a picture without moving
+    # anything. Scalars rather than a nested dict because this class declares a
+    # custom __init__, so dataclass field(default_factory=...) never runs.
+    camera_enabled: bool = True
+    camera_device: str = "/dev/video2"
+    camera_http_probe: bool = True
     
     # Tip tracking
     tip_tracking_enabled: bool = True
@@ -201,15 +271,33 @@ class ServerConfig:
         # Apply environment variable overrides (highest priority)
         self._apply_env_overrides()
         
-        # Try mDNS discovery if robot_ip not set via env and it's the default
-        if use_mdns and self.robot_discovered_via == "config":
-            mdns_result = discover_opentrons_via_mdns(timeout=3.0)
-            if mdns_result:
-                self.robot_ip, discovered_port = mdns_result
-                if discovered_port:
-                    self.robot_port = discovered_port
-                self.robot_discovered_via = "mdns"
-                logger.info(f"Robot IP discovered via mDNS: {self.robot_ip}:{self.robot_port}")
+        # Robot IP resolution (the switch assigns it by DHCP, so it drifts):
+        #  - env var  -> absolute, never touched here.
+        #  - config / default -> trust it ONLY while the robot still answers
+        #    there; otherwise self-heal via mDNS so a changed IP doesn't
+        #    require editing config.yaml.
+        if use_mdns and self.robot_discovered_via in ("config", "default"):
+            if robot_http_responds(self.robot_ip, self.robot_port):
+                logger.info(
+                    f"Robot reachable at configured {self.robot_ip}:{self.robot_port}"
+                )
+            else:
+                logger.warning(
+                    f"Robot not answering at configured {self.robot_ip}:{self.robot_port} "
+                    "— searching via mDNS..."
+                )
+                mdns_result = discover_opentrons_via_mdns(timeout=5.0)
+                if mdns_result:
+                    self.robot_ip, self.robot_port = mdns_result
+                    self.robot_discovered_via = "mdns"
+                    logger.info(
+                        f"Robot found via mDNS at {self.robot_ip}:{self.robot_port}"
+                    )
+                else:
+                    logger.warning(
+                        "mDNS found no Opentrons robot — keeping configured "
+                        f"{self.robot_ip}:{self.robot_port} (server will start disconnected)"
+                    )
     
     def _apply_env_overrides(self):
         """Apply environment variable overrides."""
@@ -282,6 +370,14 @@ class ServerConfig:
         self.dir_images = dirs.get("images", self.dir_images)
         self.dir_logs = dirs.get("logs", self.dir_logs)
         self.dir_recipes = dirs.get("recipes", self.dir_recipes)
+        self.dir_library = dirs.get("library", self.dir_library)
+        self.dir_results = dirs.get("results", self.dir_results)
+
+        # Camera section
+        cam = cfg.get("camera", {})
+        self.camera_enabled = cam.get("enabled", self.camera_enabled)
+        self.camera_device = cam.get("device", self.camera_device)
+        self.camera_http_probe = cam.get("http_probe", self.camera_http_probe)
         
         # Tip tracking section
         tip = cfg.get("tip_tracking", {})

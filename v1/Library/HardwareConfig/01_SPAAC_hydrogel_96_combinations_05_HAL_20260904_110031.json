@@ -1,0 +1,49 @@
+{
+  "ConfigName": "01_SPAAC_hydrogel_96_combinations_05_HAL",
+  "Description": "Generic HAL with 1 source slots. Reusable for multiple recipes.",
+  "Generated": "20260904_110031",
+  "Trash": {
+    "MyTrash": {
+      "Type": "TrashBin",
+      "Slot": "A3"
+    }
+  },
+  "Modules": {},
+  "Labware": {
+    "MyTips_50": {
+      "LoadName": "opentrons_flex_96_tiprack_50ul",
+      "Slot": "B3",
+      "DisplayName": "Tip rack 50µL"
+    },
+    "MyTips_1000": {
+      "LoadName": "opentrons_flex_96_tiprack_1000ul",
+      "Slot": "C3",
+      "DisplayName": "Tip rack 1000µL"
+    },
+    "TargetPlate": {
+      "LoadName": "corning_96_wellplate_360ul_flat",
+      "Slot": "D2",
+      "DisplayName": "Target plate for reactions"
+    },
+    "Source_1": {
+      "LoadName": "corning_24_wellplate_3.4ml_flat",
+      "Slot": "A2",
+      "DisplayName": "Source_1 (e.g. Solvent)",
+      "Well": "A1"
+    }
+  },
+  "Pipettes": {
+    "left": "flex_1channel_1000"
+  },
+  "Metadata": {
+    "source": "excel_recipe_configurable",
+    "total_sources": 1,
+    "slot_assignments": {
+      "B3": "MyTips_50",
+      "C3": "MyTips_1000",
+      "D2": "TargetPlate",
+      "A2": "Source_1"
+    },
+    "note": "This HAL uses generic source names. Check recipe metadata for reagent assignments."
+  }
+}

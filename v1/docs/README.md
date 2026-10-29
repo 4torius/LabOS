@@ -2,6 +2,8 @@
 
 LabOS is a modular, plug-and-play laboratory automation platform built on the [SiLA2](https://sila-standard.org) open standard. It coordinates heterogeneous laboratory instruments through a unified gRPC interface without any instrument-specific hardcoding in the orchestration layer.
 
+**Standing at the bench about to run something?** [GUIDA_AL_BANCO.md](GUIDA_AL_BANCO.md) is the step-by-step operating procedure, in Italian — startup, Tecan connection, recipe and hardware config, workflows, the mobile robot. There is a standalone HTML copy beside it ([GUIDA_AL_BANCO.html](GUIDA_AL_BANCO.html)) that opens in a browser with a double click, no server needed.
+
 **New to LabOS, or preparing to train someone else on it?** Start with [TRAINING_GUIDE.md](TRAINING_GUIDE.md) — it's a self-contained walkthrough of the whole system, written for operators rather than developers.
 
 ## Instruments
@@ -27,6 +29,7 @@ First time on a new computer? See [SETUP.md](SETUP.md) for the full deployment g
 
 | Document | Contents |
 |----------|----------|
+| [GUIDA_AL_BANCO.md](GUIDA_AL_BANCO.md) | Bench procedure, Italian: start the system, connect the Tecan, prepare recipe + hardware config + deck, compose and run a workflow, drive the mobile robot. Standalone HTML copy: [GUIDA_AL_BANCO.html](GUIDA_AL_BANCO.html) |
 | [TRAINING_GUIDE.md](TRAINING_GUIDE.md) | Operator-facing walkthrough: talking points, page-by-page usage, setup, basic troubleshooting (Italian: [TRAINING_GUIDE_IT.md](TRAINING_GUIDE_IT.md)) |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Four-layer system architecture, directory structure, design decisions |
 | [WORKFLOW_SYSTEM.md](WORKFLOW_SYSTEM.md) | JSON workflow format, DAG execution model, control flow, manual steps |
@@ -45,7 +48,7 @@ First time on a new computer? See [SETUP.md](SETUP.md) for the full deployment g
 
 **Plug-and-Play**: The orchestrator discovers instruments at runtime through the PnP registry. Adding a new instrument means deploying a new SiLA2 server — no orchestration code changes.
 
-**sila2 Library**: All current servers are built with the `sila2` Python library. The orchestrator tries **Strategy 0** — `SilaClient` (standard SiLA2, used by all current servers) — then falls back to **Strategy 1** — dynamic stub loading for non-sila2 servers (none currently deployed). The legacy `SiLA2Common.ExecuteCommand` strategy has been fully removed from the codebase.
+**sila2 Library**: every server is built with the `sila2` Python library, and the orchestrator talks to all of them one way: `SilaClient` fetches each server's descriptor from the server itself at runtime. Two earlier execution paths — the proprietary `SiLA2Common.ExecuteCommand`, and dynamic stub loading for hypothetical non-`sila2` servers — have been removed.
 
 **HAL**: The Hardware Abstraction Layer separates liquid-handling recipes (what to do) from deck configurations (where things physically are). The active HAL config persists across restarts; `ExecuteRecipe` always runs against whatever HAL is currently active.
 

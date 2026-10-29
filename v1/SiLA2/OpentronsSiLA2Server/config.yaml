@@ -10,8 +10,19 @@ server:
   version: "1.0.0"
 
 robot:
-  # Opentrons Flex HTTP API
-  ip: "10.16.0.137"
+  # Opentrons Flex HTTP API.
+  # `ip` here is just the first place to look. The switch assigns the robot's
+  # address by DHCP, so on startup the server checks whether the robot still
+  # answers at this IP; if not, it finds it again via mDNS and uses that
+  # (no need to edit this file when the address changes). It also re-discovers
+  # if the connection is lost while running.
+  # This is the robot's link-local address (169.254.0.0/16) on the direct
+  # wire — it never changes, unlike the switch's DHCP lease on 10.16.0.x,
+  # and is confirmed serving the HTTP API here. To pin a different address,
+  # set a DHCP reservation on the switch for the robot's MAC, or export
+  # OPENTRONS_ROBOT_IP=<ip> (that env var wins outright and disables the
+  # mDNS fallback).
+  ip: "169.254.161.83"
   port: 31950
   timeout: 30
   # Max seconds to wait for a recipe/protocol run to finish.
@@ -42,6 +53,18 @@ directories:
   library: "../../Library"
   recipes: "../../Library/Recipes"
   results: "../../Results"
+
+# On-board camera (CaptureImage command).
+camera:
+  enabled: true
+  # V4L2 node read on the robot by the TakeSnapshot protocol step. If capture
+  # produces no frame, this is the value to check: list the robot's devices
+  # with `ls /dev/video*` over SSH.
+  device: "/dev/video2"
+  # Try the robot's own HTTP camera endpoint first. It takes a picture without
+  # moving anything, so it is always preferred; the protocol fallback homes the
+  # robot and is refused unless the caller passes AllowRobotMotion.
+  http_probe: true
   protocols: "../../Protocols"
 
 tip_tracking:

@@ -218,8 +218,11 @@ class HardwareAbstractionLayer:
         Returns:
             {"LogicalName": {"resolved_info": ...}}
         """
+        if self.config is None:
+            raise RuntimeError("No hardware config loaded — call load_config() first")
+
         resolved = {}
-        
+
         for logical_name, hw_name in requirements.items():
             if hw_name in self.resolution_map:
                 resolved[logical_name] = self.resolution_map[hw_name]
@@ -384,7 +387,7 @@ class OpentronsSiLA2Client:
     - Comprehensive error handling
     """
     
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: Optional[str] = None):
         """Initialize client."""
         if config_path is None:
             # Usa sempre config.yaml nella root di OpentronsSiLA2Server, anche se lanciato da scripts/
@@ -484,7 +487,7 @@ class OpentronsSiLA2Client:
                     transport=transport
                 )
                 
-                response = await self.client.get("/health")
+                response = await self._http.get("/health")
                 
                 if response.status_code == 200:
                     data = response.json()
@@ -520,6 +523,23 @@ class OpentronsSiLA2Client:
         if not self.connected or not self.client:
             return await self.connect()
         return True
+
+    @property
+    def _http(self) -> httpx.AsyncClient:
+        """The active HTTP client, narrowed to non-Optional.
+
+        Mirrors RobotClient._http in src/robot_client.py: raises the same
+        kind of clear error instead of a None-attribute error if any call
+        site dereferences the client before connect() has run. Use this
+        (instead of self.client directly) at any call site that needs the
+        client, so type checkers can see it is never None here.
+        """
+        if self.client is None:
+            raise ConnectionError(
+                f"Not connected to Opentrons robot at {self.base_url}. "
+                "Call connect() first."
+            )
+        return self.client
         
     # ─────────────────────────────────────────────────────────────────────
     #                      HARDWARE CONFIG
@@ -649,7 +669,7 @@ class OpentronsSiLA2Client:
             
             # Upload to robot
             files = {"files": ("protocol.py", protocol_code.encode('utf-8'), "application/x-python")}
-            response = await self.client.post("/protocols", files=files)
+            response = await self._http.post("/protocols", files=files)
             
             if response.status_code not in [200, 201]:
                 print_error(f"Upload failed: {response.text}")
@@ -659,12 +679,12 @@ class OpentronsSiLA2Client:
             print_success(f"Protocol uploaded: {protocol_id[:12]}...")
             
             # Create run
-            response = await self.client.post("/runs", json={"data": {"protocolId": protocol_id}})
+            response = await self._http.post("/runs", json={"data": {"protocolId": protocol_id}})
             
             if response.status_code == 409:
                 print_warning("Zombie run detected, cleaning...")
                 await self._cleanup_runs()
-                response = await self.client.post("/runs", json={"data": {"protocolId": protocol_id}})
+                response = await self._http.post("/runs", json={"data": {"protocolId": protocol_id}})
                 
             if response.status_code not in [200, 201]:
                 print_error(f"Run creation failed: {response.text}")
@@ -675,7 +695,7 @@ class OpentronsSiLA2Client:
             print_success(f"Run created: {run_id[:12]}...")
             
             # Start run
-            response = await self.client.post(
+            response = await self._http.post(
                 f"/runs/{run_id}/actions",
                 json={"data": {"actionType": "play"}}
             )
@@ -770,7 +790,7 @@ class OpentronsSiLA2Client:
             # Upload Python directly
             with open(path, 'rb') as f:
                 files = {"files": (path.name, f, "application/x-python")}
-                response = await self.client.post("/protocols", files=files)
+                response = await self._http.post("/protocols", files=files)
                 
             if response.status_code not in [200, 201]:
                 print_error(f"Upload failed: {response.text}")
@@ -785,14 +805,14 @@ class OpentronsSiLA2Client:
                     return False, None
                     
             # Create and run
-            response = await self.client.post("/runs", json={"data": {"protocolId": protocol_id}})
+            response = await self._http.post("/runs", json={"data": {"protocolId": protocol_id}})
             if response.status_code not in [200, 201]:
                 return False, None
                 
             run_id = response.json().get("data", {}).get("id")
             self.current_run_id = run_id
             
-            response = await self.client.post(
+            response = await self._http.post(
                 f"/runs/{run_id}/actions",
                 json={"data": {"actionType": "play"}}
             )
@@ -825,7 +845,7 @@ class OpentronsSiLA2Client:
         
         try:
             while True:
-                response = await self.client.get(f"/runs/{run_id}")
+                response = await self._http.get(f"/runs/{run_id}")
                 if response.status_code != 200:
                     break
                     
@@ -861,11 +881,11 @@ class OpentronsSiLA2Client:
     async def _cleanup_runs(self):
         """Cleanup zombie runs."""
         try:
-            response = await self.client.get("/runs?pageLength=5")
+            response = await self._http.get("/runs?pageLength=5")
             if response.status_code == 200:
                 for run in response.json().get("data", []):
                     if run.get("current"):
-                        await self.client.patch(
+                        await self._http.patch(
                             f"/runs/{run['id']}", 
                             json={"data": {"current": False}}
                         )
@@ -889,22 +909,22 @@ class OpentronsSiLA2Client:
         }
         
         # Robot info
-        response = await self.client.get("/health")
+        response = await self._http.get("/health")
         if response.status_code == 200:
             status["robot"] = response.json()
             
         # Instruments
-        response = await self.client.get("/instruments")
+        response = await self._http.get("/instruments")
         if response.status_code == 200:
             status["instruments"] = response.json().get("data", [])
             
         # Modules
-        response = await self.client.get("/modules")
+        response = await self._http.get("/modules")
         if response.status_code == 200:
             status["modules"] = response.json().get("data", [])
             
         # Active run
-        response = await self.client.get("/runs?pageLength=1")
+        response = await self._http.get("/runs?pageLength=1")
         if response.status_code == 200:
             runs = response.json().get("data", [])
             for run in runs:
@@ -966,7 +986,7 @@ class OpentronsSiLA2Client:
     async def home(self):
         """Home robot."""
         print_info("Homing robot...")
-        response = await self.client.post("/robot/home", json={"target": "robot"})
+        response = await self._http.post("/robot/home", json={"target": "robot"})
         if response.status_code == 200:
             print_success("Robot homed")
         else:
@@ -980,7 +1000,7 @@ class OpentronsSiLA2Client:
             print_warning("No active run")
             return
             
-        response = await self.client.post(
+        response = await self._http.post(
             f"/runs/{self.current_run_id}/actions",
             json={"data": {"actionType": "pause"}}
         )
@@ -995,7 +1015,7 @@ class OpentronsSiLA2Client:
             print_warning("No run to resume")
             return
             
-        response = await self.client.post(
+        response = await self._http.post(
             f"/runs/{self.current_run_id}/actions",
             json={"data": {"actionType": "play"}}
         )
@@ -1010,7 +1030,7 @@ class OpentronsSiLA2Client:
             print_warning("No active run")
             return
             
-        response = await self.client.post(
+        response = await self._http.post(
             f"/runs/{self.current_run_id}/actions",
             json={"data": {"actionType": "stop"}}
         )
@@ -1019,7 +1039,7 @@ class OpentronsSiLA2Client:
             
     async def _find_active_run(self):
         """Find active run."""
-        response = await self.client.get("/runs?pageLength=5")
+        response = await self._http.get("/runs?pageLength=5")
         if response.status_code == 200:
             for run in response.json().get("data", []):
                 if run.get("current"):
@@ -1028,7 +1048,7 @@ class OpentronsSiLA2Client:
                     
     async def lights(self, on: bool):
         """Control robot lights."""
-        await self.client.post("/robot/lights", json={"on": on})
+        await self._http.post("/robot/lights", json={"on": on})
         print_success(f"Lights {'ON' if on else 'OFF'}")
         
     async def emergency_stop(self):

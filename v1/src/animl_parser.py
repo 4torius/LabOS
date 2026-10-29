@@ -79,6 +79,34 @@ def _parse_step(step_el) -> Optional[Dict[str, Any]]:
     unit_label = ''
     value_series_name = ''
 
+    # Full per-well spectrum for multi-wavelength scans (Type="Scan" wells) -
+    # a separate <Result id="spectra_..."> sibling of the SeriesSet above,
+    # written only when at least one well in the section actually scanned.
+    # The main well_positions/float_values series still gets one scalar per
+    # well either way (the scan's mean, see TecanToAnIMLConverter.cs) so
+    # every existing consumer of those two lists keeps working unchanged;
+    # this only adds the data that was previously discarded.
+    spectra_by_well: Dict[str, List[Dict[str, Any]]] = {}
+    for res_el in result_set.findall(_t('Result')):
+        if not (res_el.get('id') or '').startswith('spectra_'):
+            continue
+        for sample_ref in res_el.findall(_t('SampleReference')):
+            well_id = sample_ref.get('sampleID', '')
+            points: List[Dict[str, Any]] = []
+            for f_el in sample_ref.findall(_t('F')):
+                try:
+                    wl = int(f_el.get('wl'))
+                except (TypeError, ValueError):
+                    continue
+                try:
+                    v = float(f_el.text)
+                except (TypeError, ValueError):
+                    v = None
+                points.append({'wl': wl, 'value': v})
+            if points:
+                spectra_by_well[well_id] = points
+        break
+
     for series in series_set.findall(_t('Series')):
         dependency = series.get('dependency', '')
         sname = series.get('name', '')
@@ -126,7 +154,10 @@ def _parse_step(step_el) -> Optional[Dict[str, Any]]:
             logger.warning("Well '%s': non-positive column %d, defaulting to column 1", well, col)
             col = 1
 
-        measurements.append({'well': well, 'row': row, 'col': col, 'value': val, 'unit': unit_label})
+        entry: Dict[str, Any] = {'well': well, 'row': row, 'col': col, 'value': val, 'unit': unit_label}
+        if well in spectra_by_well:
+            entry['spectrum'] = spectra_by_well[well]
+        measurements.append(entry)
 
     valid = [v for v in float_values if v is not None]
     statistics: Dict[str, Any] = {}
@@ -167,6 +198,13 @@ def _parse_step(step_el) -> Optional[Dict[str, Any]]:
     if measurement_type == 'Fluorescence' and not wavelength_nm:
         wavelength_nm = excitation_nm  # convenience alias
 
+    # Scan steps (multi-wavelength) describe their axis via these three
+    # parameters instead of a single 'Wavelength' - not covered by the
+    # single-value lookup above, so extracted separately here.
+    wavelength_start_nm = _extract_param(parameters, ('Wavelength Start',))
+    wavelength_end_nm = _extract_param(parameters, ('Wavelength End',))
+    wavelength_step_nm = _extract_param(parameters, ('Wavelength Step Size',))
+
     return {
         'step_name': step_name,
         'technique': technique,
@@ -174,6 +212,10 @@ def _parse_step(step_el) -> Optional[Dict[str, Any]]:
         'wavelength_nm': wavelength_nm,
         'excitation_nm': excitation_nm,
         'emission_nm': emission_nm,
+        'wavelength_start_nm': wavelength_start_nm,
+        'wavelength_end_nm': wavelength_end_nm,
+        'wavelength_step_nm': wavelength_step_nm,
+        'is_scan': bool(spectra_by_well),
         'parameters': parameters,
         'measurements': measurements,
         'value_series': value_series_name,

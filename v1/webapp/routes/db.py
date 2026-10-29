@@ -9,15 +9,22 @@ tracking dict (in-memory) is used only as a fallback source for plate IDs.
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
 
-def create_db_router(db_module) -> APIRouter:
+def create_db_router(db_module, results_dir: Optional[Path] = None, state=None) -> APIRouter:
     """
     Args:
         db_module: the src.database module (already configured with a DB path).
+        results_dir: Results/ directory (Results/AnIML holds the .animl files
+            attach-measurement below can link to an existing plate). Optional
+            so existing callers/tests that don't need that endpoint keep working.
+        state: app state, for state.add_log() — same optional-logging pattern
+            used elsewhere in this app.
     """
     router = APIRouter(prefix="/api/db", tags=["database"])
     _db = db_module
@@ -25,8 +32,21 @@ def create_db_router(db_module) -> APIRouter:
     # ── Plates ────────────────────────────────────────────────────────────────
 
     @router.get("/plates")
-    async def list_plates(run_id: str = "", limit: int = 50, offset: int = 0):
-        plates = _db.get_plates(run_id=run_id or None, limit=limit, offset=offset)
+    async def list_plates(
+        run_id: str = "",
+        limit: int = 50,
+        offset: int = 0,
+        search: str = "",
+        date_from: str = "",
+        date_to: str = "",
+    ):
+        if search or date_from or date_to:
+            plates = _db.search_plates(
+                query=search, date_from=date_from, date_to=date_to,
+                limit=limit, offset=offset,
+            )
+        else:
+            plates = _db.get_plates(run_id=run_id or None, limit=limit, offset=offset)
         return {"plates": plates, "count": len(plates)}
 
     @router.get("/plates/{plate_id}")
@@ -37,8 +57,8 @@ def create_db_router(db_module) -> APIRouter:
         return plate
 
     @router.get("/plates/{plate_id}/heatmap")
-    async def get_plate_heatmap(plate_id: str, measurement_type: str = ""):
-        return _db.get_well_heatmap(plate_id, measurement_type or None)
+    async def get_plate_heatmap(plate_id: str, measurement_type: str = "", measurement_id: Optional[int] = None):
+        return _db.get_well_heatmap(plate_id, measurement_type or None, measurement_id)
 
     @router.put("/plates/{plate_id}/status")
     async def update_plate_status(plate_id: str, request: Request):
@@ -63,6 +83,33 @@ def create_db_router(db_module) -> APIRouter:
         if not ok:
             raise HTTPException(status_code=404, detail=f"Plate '{plate_id}' not found")
         return {"plate_id": plate_id, "deleted": True}
+
+    @router.post("/plates/{plate_id}/attach-measurement")
+    async def attach_measurement(plate_id: str, request: Request):
+        """Link an AnIML file that already exists in Results/AnIML (e.g. a
+        measurement run outside this webapp, or an earlier run never tied to
+        this plate) instead of triggering a new live 'Run measurement' -
+        the "Attach existing result" path in the plate's "Add an analysis"
+        dialog."""
+        if results_dir is None:
+            raise HTTPException(status_code=501, detail="results_dir not configured")
+        data = await request.json()
+        animl_filename = (data.get("animl_filename") or "").strip()
+        if not animl_filename:
+            raise HTTPException(status_code=400, detail="animl_filename field required")
+        protocol_name = (data.get("protocol_name") or "").strip()
+
+        from src.plate_tracking import attach_existing_measurement
+        try:
+            attach_existing_measurement(
+                plate_id, animl_filename, results_dir,
+                protocol_name=protocol_name, state=state,
+            )
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"plate_id": plate_id, "attached": animl_filename}
 
     # ── Protocols ─────────────────────────────────────────────────────────────
 
@@ -168,13 +215,34 @@ def create_db_router(db_module) -> APIRouter:
     @router.get("/export/run/{run_id}.json")
     async def export_run_json(run_id: str):
         """
-        Full structured JSON for AI consumption: run metadata, plates, wells
-        (with reagent catalog entries), per-well measurements, protocols used.
+        Automation-record JSON: run metadata, per-instrument measurement log,
+        and which plate(s) were touched by reference only (no wells/reagents/
+        measurements — that's export_plate_json's job, see below).
         """
         data = _db.export_run_json(run_id)
         if data is None:
             raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
-        return data
+        return Response(
+            content=json.dumps(data, indent=2, default=str),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{run_id}.json"'},
+        )
+
+    @router.get("/export/plate/{plate_id}.json")
+    async def export_plate_json(plate_id: str):
+        """
+        Complete chemical-record JSON for a plate, AI-ready: wells, reagent
+        catalog entries, well_measurements, and every linked raw AnIML result
+        with its measurement data already parsed inline (animl_data).
+        """
+        data = _db.export_plate_json(plate_id)
+        if data is None:
+            raise HTTPException(status_code=404, detail=f"Plate '{plate_id}' not found")
+        return Response(
+            content=json.dumps(data, indent=2, default=str),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{plate_id}.json"'},
+        )
 
     @router.get("/export/ai-context.json")
     async def export_ai_context(status: str = "completed", run_ids: str = ""):

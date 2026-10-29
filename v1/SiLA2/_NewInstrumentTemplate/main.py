@@ -3,21 +3,21 @@
 New Instrument SiLA2 Server — Template (sila2 standard library)
 ================================================================
 
-SETUP (5 steps):
-1. Rename this folder:  _NewInstrumentTemplate → YourInstrumentSiLA2Server
-2. Edit features/NewInstrument.sila.xml: rename Identifier/DisplayName, add your commands
-3. Re-run codegen (replaces generated/newinstrument/):
-       cd SiLA2/YourInstrumentSiLA2Server
-       sila2-codegen new-package --package-name newinstrument \
-           --output-directory /tmp/gen --no-generate-main \
-           features/NewInstrument.sila.xml
-       cp -r /tmp/gen/newinstrument/generated/newinstrument/ generated/newinstrument/
-4. Rename and edit src/servicer.py → src/newinstrument_impl.py
-   Implement every abstract method from generated/newinstrument/newinstrument_base.py
-5. Edit library_catalog.json: declare the file types your instrument uses
+Do not copy this folder by hand. From v1/:
 
-The orchestrator discovers this server automatically via mDNS.
-No changes to lab_config.yaml or discovery.py are needed.
+    python labos.py new-server YourInstrument --results YourData
+
+scaffolds, renames, generates the bindings and registers the server. Then:
+1. Add your commands to the feature definition in features/ and run
+   `python labos.py codegen YourInstrumentSiLA2Server`.
+2. Implement every abstract method in the src/ implementation module.
+3. Say what else the orchestrator should know in library_catalog.json:
+   files it reads, Results/ folders it writes (created when this server
+   starts), parameters a workflow may omit, how it looks in the interface.
+4. Try it: `python labos.py instruments`, then `python labos.py call ...`.
+
+The orchestrator discovers this server automatically via mDNS, and nothing in
+the orchestrator or the web interface has to change.
 
 Usage:
     python main.py                    # default config.yaml, insecure
@@ -74,6 +74,16 @@ def _get_persistent_uuid(server_dir: str) -> UUID:
 
 
 def main() -> int:
+    # A redirected stdout on Windows is cp1252. A print of anything outside it
+    # raises inside the command that printed, and the command fails - the
+    # Manual Station's SendNotification did exactly that.
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
     parser = argparse.ArgumentParser(description="New Instrument SiLA2 Server")
     parser.add_argument("--config", "-c", default="config.yaml")
     parser.add_argument("--port", "-p", type=int, default=None)
@@ -100,7 +110,9 @@ def main() -> int:
     # ── Build SiLA2 server ─────────────────────────────────────────────────────
     sila_server = SilaServer(
         server_name=sila2_cfg.get("server_name", "New Instrument"),   # TODO: rename
-        server_type=sila2_cfg.get("server_type", "instrument"),
+        # SiLA2 requires CamelCase here ("BarcodeScanner"); "instrument" made
+        # every server scaffolded from this template refuse to start.
+        server_type=sila2_cfg.get("server_type", "Instrument"),
         server_description=sila2_cfg.get("description", ""),
         server_version="1.0",
         server_vendor_url=sila2_cfg.get("vendor_url", "https://bicocca.lab"),

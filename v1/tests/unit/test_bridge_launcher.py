@@ -131,3 +131,74 @@ class TestProbe:
         launcher = BridgeLauncher(host="127.0.0.1", port=1)
         # No bridge listening on port 1 — probe must return False, not raise.
         assert launcher._probe() is False
+
+
+class TestOrphanedBridge:
+    """A bridge left over from a previous run must be replaced, never adopted.
+
+    Adopting it — which is what start() used to do on finding the port already
+    listening — broke three things silently. `self._proc` stayed None, so the
+    health monitor skipped it forever; its stdout was never pumped, so its logs
+    went nowhere; and restarting the Tecan server no longer restarted the
+    bridge, which made the documented remedy for every bridge-level fault a
+    no-op.
+
+    Observed on the bench: the Python server was restarted at 17:18 and the
+    bridge it "started" was still the process from 12:48, carrying the failed
+    USB enumeration it picked up while iControl held the instrument. Connect
+    kept failing with the reader switched on, cabled, and reachable from
+    iControl.
+    """
+
+    def test_our_own_live_bridge_is_reused(self):
+        launcher = BridgeLauncher()
+        launcher._proc = _fake_process(alive=True)
+        with patch.object(launcher, "_probe", return_value=True),              patch.object(launcher, "_terminate_orphan") as terminate:
+            assert launcher.start() is True
+            terminate.assert_not_called()
+
+    def test_a_bridge_we_do_not_own_is_terminated_and_replaced(self):
+        launcher = BridgeLauncher()
+        launcher._proc = None                       # nothing of ours is running
+        probes = iter([True, False])                # occupied, then free
+
+        with patch.object(launcher, "_probe", side_effect=lambda: next(probes, False)),              patch.object(launcher, "_terminate_orphan", return_value=True) as terminate,              patch("subprocess.Popen", side_effect=OSError("stop here")):
+            launcher.start()
+            terminate.assert_called_once()
+
+    def test_start_refuses_rather_than_adopting_when_the_orphan_survives(self):
+        """Adopting it would leave the bridge unmonitored and unrestartable —
+        worse than reporting that startup failed."""
+        launcher = BridgeLauncher()
+        launcher._proc = None
+        with patch.object(launcher, "_probe", return_value=True),              patch.object(launcher, "_terminate_orphan", return_value=False),              patch("subprocess.Popen") as popen:
+            assert launcher.start() is False
+            popen.assert_not_called()
+
+    def test_a_dead_process_of_ours_does_not_count_as_running(self):
+        launcher = BridgeLauncher()
+        launcher._proc = _fake_process(alive=False)
+        assert launcher.running is False
+
+    def test_terminate_orphan_reports_success_when_the_port_frees(self):
+        launcher = BridgeLauncher()
+        probes = iter([False])                      # already gone after the kill
+        with patch.object(launcher, "_pid_on_port", return_value=9999),              patch.object(launcher, "_probe", side_effect=lambda: next(probes, False)),              patch("subprocess.run") as run,              patch("os.kill") as kill:
+            assert launcher._terminate_orphan(timeout=1) is True
+            assert run.called or kill.called
+
+    def test_terminate_orphan_reports_failure_when_the_port_stays_held(self):
+        launcher = BridgeLauncher()
+        with patch.object(launcher, "_pid_on_port", return_value=9999),              patch.object(launcher, "_probe", return_value=True),              patch("subprocess.run"),              patch("os.kill"),              patch("time.sleep"):
+            assert launcher._terminate_orphan(timeout=0.5) is False
+
+    def test_no_owner_and_a_free_port_is_success(self):
+        """The probe can race a shutdown that was already under way."""
+        launcher = BridgeLauncher()
+        with patch.object(launcher, "_pid_on_port", return_value=None),              patch.object(launcher, "_probe", return_value=False):
+            assert launcher._terminate_orphan() is True
+
+    def test_pid_lookup_never_raises(self):
+        launcher = BridgeLauncher()
+        with patch("subprocess.run", side_effect=OSError("no netstat here")):
+            assert launcher._pid_on_port() is None

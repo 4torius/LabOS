@@ -56,7 +56,6 @@ class PlateReaderImpl(PlateReaderServiceBase):
         self._bridge = TecanBridgeClient(
             host=bridge_cfg.get("host", "127.0.0.1"),
             port=bridge_cfg.get("port", 50055),
-            measurement_timeout=bridge_cfg.get("measurement_timeout_seconds", 1200.0),
         )
         instrument_cfg = config.get("instrument", {})
         # Default: "usb" → C# bridge translates to porttype=USB, type=READER, LastConnection
@@ -125,11 +124,48 @@ class PlateReaderImpl(PlateReaderServiceBase):
 
     # ── commands ───────────────────────────────────────────────────────────
 
+    #: What the bridge's failure actually means, in the order it is usually
+    #: true. The C# message only says "check power and cable", which is the one
+    #: thing an operator has invariably already checked by the time they read
+    #: it — and is almost never the cause.
+    #: What the bridge's failure actually means. The C# message says only
+    #: "check power and cable", which is the one thing an operator has
+    #: invariably already checked, and is almost never the cause.
+    _CONNECT_HELP = (
+        "The Tecan SDK enumerated no USB reader.\n"
+        "\n"
+        "Two things about how this connects explain most failures:\n"
+        "  * The SDK enumerates USB devices when the BRIDGE process starts, "
+        "not when you press Connect. A bridge that started while iControl held "
+        "the instrument, or before it finished powering up, can never see it "
+        "however many times you retry. That state needs a fresh bridge "
+        "process, not another attempt.\n"
+        "  * It connects using a stored last connection. Moving the reader to "
+        "a different USB port invalidates that: the instrument is present and "
+        "iControl still connects to it, but this does not.\n"
+        "\n"
+        "What to try, in order:\n"
+        "  1. Connect again with ConnectionString = 'dialog'. That forces the "
+        "SDK's instrument-selection window, which enumerates afresh; picking "
+        "the reader re-records the last connection, and plain 'usb' works "
+        "again. This is the fix when the reader has been moved to another "
+        "USB port.\n"
+        "  2. Close iControl and Magellan, then restart the Tecan server so "
+        "the bridge starts fresh and re-enumerates.\n"
+        "  3. Check the instrument is on, cabled, and not on a USB port "
+        "Windows has suspended.\n"
+        "\n"
+        "The SiLA2 server itself is fine - it answered this call. What failed "
+        "is the bridge's connection to the instrument."
+    )
+
     def Connect(self, ConnectionString: str, *, metadata: MetadataDict) -> Connect_Responses:
         cs = ConnectionString if ConnectionString else self._default_connection_string
         ok, msg = self._bridge.connect(cs)
         if not ok:
-            raise ConnectionFailed(msg)
+            logger.error("Connect failed (%s): %s", cs, msg)
+            raise ConnectionFailed(f"{msg}\n\n{self._CONNECT_HELP}")
+        logger.info("Connected to the instrument (connection string: %s)", cs)
         return Connect_Responses()
 
     def Disconnect(self, *, metadata: MetadataDict) -> Disconnect_Responses:

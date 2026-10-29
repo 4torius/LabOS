@@ -211,9 +211,9 @@ COMMAND_SCHEMA = {
     #                    LIQUID HANDLING - HIGH LEVEL
     # ═══════════════════════════════════════════════════════════════════════
     # LiquidClass auto-applies: Rate, BlowOut, TouchTip, AirGap, MixAfter based on liquid type
-    "Transfer": {"required": ["PipetteMount", "Volume", "Source"], "optional": ["Dest", "Destination", "NewTip", "BlowOut", "BlowOutLocation", "TouchTip", "MixBefore", "MixAfter", "AirGap", "LiquidClass", "DispenseRate", "AspirateRate", "TrashLocation"]},
-    "Distribute": {"required": ["PipetteMount", "Volume", "Source", "Destinations"], "optional": ["NewTip", "LiquidClass", "DispenseRate", "TrashLocation"]},
-    "Consolidate": {"required": ["PipetteMount", "Volume", "Sources"], "optional": ["Dest", "Destination", "NewTip", "LiquidClass", "DispenseRate", "TrashLocation"]},
+    "Transfer": {"required": ["PipetteMount", "Volume", "Source"], "optional": ["Dest", "Destination", "NewTip", "BlowOut", "BlowOutLocation", "TouchTip", "MixBefore", "MixAfter", "AirGap", "LiquidClass", "DispenseRate", "AspirateRate", "TrashLocation", "VerifyLiquid"]},
+    "Distribute": {"required": ["PipetteMount", "Volume", "Source", "Destinations"], "optional": ["NewTip", "LiquidClass", "DispenseRate", "TrashLocation", "VerifyLiquid"]},
+    "Consolidate": {"required": ["PipetteMount", "Volume", "Sources"], "optional": ["Dest", "Destination", "NewTip", "LiquidClass", "DispenseRate", "TrashLocation", "VerifyLiquid"]},
     
     # Native Opentrons Liquid Class commands (API 2.24+)
     # Uses get_liquid_class() and transfer_with_liquid_class() for optimal accuracy
@@ -324,7 +324,7 @@ COMMAND_SCHEMA = {
     "WaitForResume": {"required": [], "optional": ["Message"]},
     "SetRailLights": {"required": [], "optional": ["On"]},
     "SetStatusBar": {"required": [], "optional": ["Status", "Color"]},
-    "TakeSnapshot": {"required": [], "optional": ["Filename"]},
+    "TakeSnapshot": {"required": [], "optional": ["Filename", "Device"]},
     
     # ═══════════════════════════════════════════════════════════════════════
     #                    ADVANCED / CUSTOM
@@ -405,6 +405,12 @@ def run(ctx: protocol_api.ProtocolContext):
         ctx.comment(f"Loaded custom liquid class: {name}")
 
     # 1. LOAD MODULES
+    #
+    # The latch is opened here on purpose: it is what lets a plate be put on
+    # the module, by hand or by a later MoveLabware, and recipes rely on it.
+    # Anything that then needs it shut closes it (HeaterShakerCloseLatch, or
+    # HeaterShakerSetShake below, for which a closed latch is a precondition
+    # the robot enforces).
     if "Modules" in settings:
         for i, c in settings["Modules"].items():
             m = ctx.load_module(c["Type"], c["Slot"])
@@ -491,6 +497,12 @@ def run(ctx: protocol_api.ProtocolContext):
         if mount_or_id in objects["Pipettes"]: return objects["Pipettes"][mount_or_id]
         return objects["Pipettes"].get("left") or objects["Pipettes"].get("right")
 
+    # Remembers, per liquid-fallback candidate list (Transfer/Distribute
+    # "Source" as a list + VerifyLiquid - see below), which index was last
+    # found to have liquid - so a later trip for the SAME reagent resumes the
+    # search there instead of re-probing wells already found dry.
+    _fallback_progress: Dict[tuple, int] = {}
+
     # EXECUTE STEPS
     for step in settings.get("Steps", []):
         # Handle legacy comment-only steps
@@ -556,11 +568,19 @@ def run(ctx: protocol_api.ProtocolContext):
             if "MixBefore" in step: a["mix_before"] = tuple(step["MixBefore"])
             
             if "MixAfter" in step: a["mix_after"] = tuple(step["MixAfter"])
-            elif lc_params.get("mix_after"): 
-                # Convert mix_after from [cycles, volume_fraction] to (cycles, actual_volume)
+            elif lc_params.get("mix_after"):
+                # Convert mix_after from [cycles, volume_fraction] to (cycles, actual_volume).
+                # Volume can be a per-destination LIST (varying amounts across a
+                # combinatorial series) instead of one number - distribute() itself
+                # accepts that fine, but `list * float` raises TypeError, which is
+                # exactly what crashed a real run here. mix_after is one global
+                # (reps, volume) tuple for the whole call regardless (Opentrons has
+                # no per-destination mix_after), so use the largest dispense in the
+                # list - enough mixing volume for every well, never too little.
                 mix_cfg = lc_params["mix_after"]
                 if isinstance(mix_cfg, list) and len(mix_cfg) == 2:
-                    a["mix_after"] = (mix_cfg[0], step["Volume"] * mix_cfg[1])
+                    ref_volume = max(step["Volume"]) if isinstance(step["Volume"], list) else step["Volume"]
+                    a["mix_after"] = (mix_cfg[0], ref_volume * mix_cfg[1])
             
             if "AirGap" in step: a["air_gap"] = step["AirGap"]
             elif lc_params.get("air_gap"): a["air_gap"] = lc_params["air_gap"]
@@ -568,13 +588,87 @@ def run(ctx: protocol_api.ProtocolContext):
             if "DispenseRate" in step: a["rate"] = step["DispenseRate"]
             elif lc_params.get("dispense_rate"): a["rate"] = lc_params["dispense_rate"]
             
-            if cmd=="Transfer": 
-                a["source"]=get_loc(step["Source"]); a["dest"]=get_loc(step.get("Dest") or step.get("Destination"))
-            elif cmd=="Distribute": 
-                a["source"]=get_loc(step["Source"]); a["dest"]=[get_loc(d) for d in step["Destinations"]]
-            elif cmd=="Consolidate": 
-                a["source"]=[get_loc(s) for s in step["Sources"]]; a["dest"]=get_loc(step.get("Dest") or step.get("Destination"))
+            # VerifyLiquid on Transfer/Distribute/Consolidate toggles Opentrons'
+            # native liquid_presence_detection for the duration of this single
+            # call: the Flex pipette then physically probes for the liquid
+            # surface before an aspiration and raises/pauses (awaiting-recovery,
+            # handled in robot_client.py's wait_for_run_completion) if it isn't
+            # found - no manual retry/offset logic needed, the hardware does
+            # the probing. IMPORTANT caveat (confirmed against Opentrons' own
+            # source - instrument_context.py's aspirate()): this native probe
+            # only re-arms when the tip is both empty AND "clean"
+            # (get_has_clean_tip(), True only right after pick_up_tip() and
+            # False from the first aspirate/dispense onward) - so within a
+            # SINGLE Distribute/Consolidate call that reloads the same tip
+            # several times, it only fires on the very first aspirate, never
+            # on later reloads. Per-reload coverage instead comes from
+            # excel_recipe_parser.py emitting one PickUpTip/Distribute/DropTip
+            # step PER TRIP when "Verify aspiration" is on (a fresh, clean tip
+            # every reload) - this branch doesn't need to know that, it just
+            # runs whatever single call the JSON gives it. Transfer already
+            # gets a fresh tip per well from the generator regardless, so it
+            # was never affected by this caveat.
+            # Different mechanism from the standalone Aspirate command's
+            # VerifyLiquid below (manual detect_liquid_presence() + raise) -
+            # that one stays untouched.
+            if step.get("VerifyLiquid"):
+                p.liquid_presence_detection = True
+
+            # Runtime multi-well fallback: when "Source" is a LIST (only
+            # emitted by the generator for Transfer/Distribute when "Verify
+            # aspiration" + backup wells are both configured for a reagent -
+            # Consolidate's plural "Sources" already means "merge these", not
+            # "try these in order", so it's excluded here), try each candidate
+            # in order with detect_liquid_presence() (bool, never raises) and
+            # aspirate from the first one that actually has liquid. Remember
+            # the index across trips for the SAME candidate list (same
+            # reagent) so a later trip resumes the search instead of
+            # re-probing wells already found dry. If none of the remaining
+            # candidates have liquid, stop the run through the same native
+            # mechanism/message as the single-well case above
+            # (require_liquid_presence -> awaiting-recovery) instead of
+            # silently running the pipette dry.
+            if cmd in ("Transfer", "Distribute") and isinstance(step.get("Source"), list) and step.get("VerifyLiquid"):
+                candidates = step["Source"]
+                key = tuple(candidates)
+                start_idx = _fallback_progress.get(key, 0)
+                chosen = None
+                for i in range(start_idx, len(candidates)):
+                    if p.detect_liquid_presence(get_loc(candidates[i])):
+                        chosen = candidates[i]
+                        _fallback_progress[key] = i
+                        break
+                if chosen is None:
+                    p.require_liquid_presence(well=get_loc(candidates[-1]))
+                    chosen = candidates[-1]  # unreachable in practice - require_liquid_presence raises
+                source_loc = get_loc(chosen)
+                # `chosen` was just confirmed to have liquid by the manual
+                # detect_liquid_presence() loop above. Leaving
+                # liquid_presence_detection=True here would make the upcoming
+                # distribute()/transfer() call's own native probe re-check the
+                # EXACT SAME well again on its first aspirate (it re-arms on
+                # any clean tip) - a second ~7-14s probe with zero added safety,
+                # confirmed via real run timestamps (two tryLiquidProbe/
+                # liquidProbe pairs back to back on the same well, same trip).
+                # Disable it for this call only; the single-well case below
+                # (no candidate list) still relies on the native probe as its
+                # only safety net and is untouched.
+                p.liquid_presence_detection = False
+            elif cmd == "Consolidate":
+                source_loc = [get_loc(s) for s in step["Sources"]]
+            else:
+                source_loc = get_loc(step["Source"])
+
+            if cmd == "Transfer":
+                a["source"] = source_loc; a["dest"] = get_loc(step.get("Dest") or step.get("Destination"))
+            elif cmd == "Distribute":
+                a["source"] = source_loc; a["dest"] = [get_loc(d) for d in step["Destinations"]]
+            elif cmd == "Consolidate":
+                a["source"] = source_loc; a["dest"] = get_loc(step.get("Dest") or step.get("Destination"))
+
             getattr(p, cmd.lower())(**a)
+            if step.get("VerifyLiquid"):
+                p.liquid_presence_detection = False
 
         # ═══════════════════════════════════════════════════════════════════
         #     NATIVE OPENTRONS LIQUID CLASS COMMANDS (API 2.24+)
@@ -810,6 +904,11 @@ def run(ctx: protocol_api.ProtocolContext):
 
         elif cmd == "HeaterShakerSetShake":
             hs = objects["Modules"][step["ModuleID"]]
+            # A closed latch is a precondition of shaking, not a side effect:
+            # the API raises CannotPerformModuleAction otherwise. Closing it
+            # clamps whatever is on the module, which is what you want before
+            # spinning it.
+            hs.close_labware_latch()
             hs.set_and_wait_for_shake_speed(step["RPM"])
 
         elif cmd == "HeaterShakerDeactivateShaker":
@@ -1087,10 +1186,18 @@ def run(ctx: protocol_api.ProtocolContext):
             ctx.set_rail_lights(on)
 
         elif cmd == "TakeSnapshot":
+            # Grab one frame from the robot's camera and smuggle it out through
+            # the run log: the protocol runs on the robot, so a file it writes
+            # there is not reachable from the orchestrator. IMG_START/IMG_END
+            # bracket the base64 payload; robot_client.extract_images_from_log()
+            # decodes it back into a real .jpg on this side.
             f = step.get("Filename", "snapshot.jpg"); p = f"/var/lib/jupyter/{f}"
-            subprocess.run(["gst-launch-1.0", "v4l2src", "device=/dev/video2", "num-buffers=1", "!", "jpegenc", "!", "filesink", f"location={p}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            dev = step.get("Device", "/dev/video2")
+            subprocess.run(["gst-launch-1.0", "v4l2src", f"device={dev}", "num-buffers=1", "!", "jpegenc", "!", "filesink", f"location={p}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if os.path.exists(p):
                 with open(p, "rb") as fh: ctx.comment(f"IMG_START:{f}"); ctx.comment(base64.b64encode(fh.read()).decode('utf-8')); ctx.comment("IMG_END")
+            else:
+                ctx.comment(f"TakeSnapshot: no frame captured from {dev}")
 
         # ═══════════════════════════════════════════════════════════════════
         #               DYNAMIC PIPETTING COMMANDS (API 2.27+)
@@ -1637,17 +1744,21 @@ class RecipeValidator:
                 self._add_error(idx, step_id, cmd, "ModuleID",
                                f"Unknown module: {mod_id}. Available: {self._module_ids}")
         
-        # Check labware references
+        # Check labware references. "Source" can be a LIST of candidate wells
+        # (Transfer/Distribute liquid-fallback, only meaningful with
+        # VerifyLiquid - see protocol_generator's execution branch) - validate
+        # every candidate individually instead of skipping the whole field.
         for field in ["Labware", "LabwareID", "TipRack", "Source", "Dest", "Destination"]:
             if field in step:
-                ref = step[field]
-                if isinstance(ref, str) and ":" in ref:
-                    ref = ref.split(":")[0]
-                if isinstance(ref, str) and ref not in self._labware_ids and self._labware_ids:
-                    # Could be a special reference like "default"
-                    if ref not in ["default", "MyTrash"]:
-                        self._add_warning(idx, step_id, cmd, field,
-                                         f"Labware '{ref}' not defined in Labware section")
+                refs = step[field] if isinstance(step[field], list) else [step[field]]
+                for ref in refs:
+                    if isinstance(ref, str) and ":" in ref:
+                        ref = ref.split(":")[0]
+                    if isinstance(ref, str) and ref not in self._labware_ids and self._labware_ids:
+                        # Could be a special reference like "default"
+                        if ref not in ["default", "MyTrash"]:
+                            self._add_warning(idx, step_id, cmd, field,
+                                             f"Labware '{ref}' not defined in Labware section")
         
         # Check liquid references
         if "LiquidID" in step:
@@ -1674,7 +1785,7 @@ class ProtocolSimulator:
     def _check_opentrons(self) -> bool:
         """Check if opentrons package is available."""
         try:
-            import opentrons.simulate
+            import opentrons.simulate  # pyright: ignore[reportMissingImports]  # optional dep, not installed in dev venvs
             return True
         except ImportError:
             logger.warning("opentrons package not installed. Simulation disabled.")

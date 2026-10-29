@@ -27,7 +27,7 @@
                             <i class="bi bi-folder"></i> Library/Recipes/excel
                         </label>
                         <div class="input-group">
-                            <select class="form-select" id="libraryExcelFile">
+                            <select class="form-select" id="libraryExcelFile" onchange="if (this.value) parseExcelFile();">
                                 <option value="">-- Select file --</option>
                             </select>
                             <button class="btn btn-outline-secondary" type="button" onclick="refreshLibraryFiles()">
@@ -41,7 +41,7 @@
                         <label class="form-label small fw-bold">
                             <i class="bi bi-upload"></i> Or upload from disk
                         </label>
-                        <input type="file" class="form-control form-control-sm" id="excelFile" accept=".xlsx,.xls">
+                        <input type="file" class="form-control form-control-sm" id="excelFile" accept=".xlsx,.xls" onchange="if (this.files && this.files[0]) { document.getElementById('libraryExcelFile').value = ''; parseExcelFile(); }">
                     </div>
                     
                     <!-- Format hint -->
@@ -391,7 +391,11 @@ async function parseExcelFile() {
             return;
         }
         
-        // Store parsed data
+        // Store parsed data. Reset any leftover per-sheet config from a
+        // previously parsed file - otherwise switching to a file with fewer
+        // sheets leaves stale phase/reagent config sitting under indices the
+        // new file no longer uses, alongside the wrong currentFileBaseName.
+        groupConfigs = {};
         parsedSheets = result.sheets || [];
 
         // Remember the source filename, sanitized, to use as recipe name when
@@ -488,8 +492,8 @@ function renderConfigPanel() {
                             <div class="card card-body bg-secondary py-2">
                                 <div class="small text-muted mb-2">
                                     Specify liquid type to optimize aspiration/dispensing.
-                                    I campi extra (air gap, mix, blow out) si aggiungono allo stesso comando Distribute/Transfer
-                                    - per un controllo ancora più fine (es. step Aspirate/Dispense separati) modifica il JSON a mano.
+                                    The extra fields (air gap, mix, blow out) are added to the same Distribute/Transfer command
+                                    - for even finer control (e.g. separate Aspirate/Dispense steps) edit the JSON by hand.
                                 </div>
                                 <div id="liquidClassList-${sheetIdx}">
                                     ${reagents.map(r => `
@@ -503,8 +507,8 @@ function renderConfigPanel() {
                                             <label class="small text-muted mb-0">Air gap</label>
                                             <input type="number" class="form-control form-control-sm" style="width: 65px;" min="0" placeholder="µL"
                                                    onchange="updateReagentAdvanced(${sheetIdx}, '${r}', 'air_gap', this.value, 'number')">
-                                            <label class="small text-muted mb-0">Mix dopo</label>
-                                            <input type="number" class="form-control form-control-sm" style="width: 55px;" min="0" placeholder="cicli"
+                                            <label class="small text-muted mb-0">Mix after</label>
+                                            <input type="number" class="form-control form-control-sm" style="width: 55px;" min="0" placeholder="cycles"
                                                    onchange="updateReagentAdvanced(${sheetIdx}, '${r}', 'mix_after_cycles', this.value, 'number')">
                                             <input type="number" class="form-control form-control-sm" style="width: 65px;" min="0" placeholder="µL"
                                                    onchange="updateReagentAdvanced(${sheetIdx}, '${r}', 'mix_after_volume', this.value, 'number')">
@@ -512,6 +516,11 @@ function renderConfigPanel() {
                                                 <input class="form-check-input" type="checkbox"
                                                        onchange="updateReagentAdvanced(${sheetIdx}, '${r}', 'blow_out', this.checked, 'bool')">
                                                 <label class="form-check-label small">Blow out</label>
+                                            </div>
+                                            <div class="form-check form-check-inline mb-0">
+                                                <input class="form-check-input" type="checkbox"
+                                                       onchange="updateReagentAdvanced(${sheetIdx}, '${r}', 'verify_liquid', this.checked, 'bool')">
+                                                <label class="form-check-label small" title="The robot physically probes the well before aspirating and stops the run if it doesn't find liquid. Automatically reserves adjacent backup wells (sized to the reagent's own required volume) in the same reservoir, and switches to them if the primary well(s) run dry mid-run - see 'Quantità richieste / note' after generating to know where to load the backup liquid.">Verify aspiration</label>
                                             </div>
                                         </div>
                                     `).join('')}
@@ -542,20 +551,65 @@ function renderConfigPanel() {
                     <!-- Reservoir selection -->
                     <div class="row mt-2">
                         <div class="col-7">
-                            <label class="form-label small">Tipo di reservoir:</label>
+                            <label class="form-label small">Reservoir type:</label>
                             <select class="form-select form-select-sm" id="reservoirType-${sheetIdx}">
                                 ${buildReservoirOptions()}
                             </select>
                         </div>
                         <div class="col-5">
-                            <label class="form-label small">Numero di reservoir:</label>
+                            <label class="form-label small">Number of reservoirs:</label>
                             <input type="number" class="form-control form-control-sm" id="numReservoirs-${sheetIdx}"
-                                   min="1" max="${reagents.length}" placeholder="${reagents.length} (uno a testa)">
+                                   min="1" max="${reagents.length}" placeholder="${reagents.length} (one each)">
                         </div>
                     </div>
                     <div class="small text-muted mt-1">
-                        <i class="bi bi-info-circle"></i> Lascia vuoto per un reservoir dedicato a ogni reagente.
-                        Riduci il numero per far condividere più reagenti sullo stesso reservoir fisico (pozzetti riempiti in ordine: A1, A2, ...).
+                        <i class="bi bi-info-circle"></i> Leave blank for a dedicated reservoir per reagent.
+                        Lower the number to have multiple reagents share the same physical reservoir (wells filled in order: A1, A2, ...).
+                    </div>
+
+                    <!-- Working volume override -->
+                    <div class="row mt-2">
+                        <div class="col-7">
+                            <label class="form-label small">Working volume override (µL):</label>
+                            <input type="number" class="form-control form-control-sm" id="workingVolume-${sheetIdx}"
+                                   min="0" step="any" placeholder="leave blank = use labware default">
+                        </div>
+                    </div>
+                    <div class="small text-muted mt-1">
+                        <i class="bi bi-info-circle"></i> Only for THIS generation - overrides the reservoir's own <code>workingVolume</code>
+                        (if the labware file sets one) or its physical max (if not). Must stay below the labware's real max capacity -
+                        the generator refuses to build a plan with a working volume at or above the physical brim.
+                        To change the default for every future recipe using this reservoir instead, edit the labware's own definition file.
+                    </div>
+
+                    <!-- Tip sizes -->
+                    <div class="row mt-2">
+                        <div class="col-12">
+                            <label class="form-label small">Tip sizes available on deck:</label>
+                            <div class="d-flex gap-3 flex-wrap" id="tipSizes-${sheetIdx}">
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input tip-size-check" type="checkbox" value="20" id="tipSize20-${sheetIdx}">
+                                    <label class="form-check-label small" for="tipSize20-${sheetIdx}">20µL</label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input tip-size-check" type="checkbox" value="50" id="tipSize50-${sheetIdx}">
+                                    <label class="form-check-label small" for="tipSize50-${sheetIdx}">50µL</label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input tip-size-check" type="checkbox" value="200" id="tipSize200-${sheetIdx}">
+                                    <label class="form-check-label small" for="tipSize200-${sheetIdx}">200µL</label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input tip-size-check" type="checkbox" value="1000" id="tipSize1000-${sheetIdx}" checked>
+                                    <label class="form-check-label small" for="tipSize1000-${sheetIdx}">1000µL</label>
+                                </div>
+                            </div>
+                            <div class="small text-muted mt-1">
+                                <i class="bi bi-info-circle"></i> Each well gets the smallest checked size that can pipette it precisely.
+                                A well no checked size covers is skipped with a note instead of using an unsuitable tip.
+                                At most 2 sizes fit on the deck at once (only 2 tip slots in this layout) - leave just 1000µL checked (default) for today's single-tip behavior.
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -676,7 +730,7 @@ function addTreatment(sheetIdx, scope, groupIdx, presetKey) {
             params: { ...preset.params },
             return_after: preset.return_after
         };
-        // "Mantieni caldo" needs a matching cleanup step later, or the source
+        // "Keep warm" needs a matching cleanup step later, or the source
         // stays on the heater-shaker (and heated) for the rest of the run.
         if (preset.cleanup_params) {
             getTreatmentList(sheetIdx, 'post', -1).push({
@@ -736,8 +790,8 @@ function renderTreatmentCard(sheetIdx, scope, groupIdx, tIdx, treatment) {
         `<option value="${key}" ${key === treatment.kind ? 'selected' : ''}>${m.label}</option>`
     ).join('');
 
-    const targetOptions = [`<option value="TargetPlate" ${treatment.target === 'TargetPlate' ? 'selected' : ''}>Piastra di destinazione</option>`]
-        .concat(reagents.map(r => `<option value="${r}" ${treatment.target === r ? 'selected' : ''}>${r} (sorgente)</option>`))
+    const targetOptions = [`<option value="TargetPlate" ${treatment.target === 'TargetPlate' ? 'selected' : ''}>Target plate</option>`]
+        .concat(reagents.map(r => `<option value="${r}" ${treatment.target === r ? 'selected' : ''}>${r} (source)</option>`))
         .join('');
 
     const fieldsHtml = fields.map(f => {
@@ -781,7 +835,7 @@ function renderTreatmentCard(sheetIdx, scope, groupIdx, tIdx, treatment) {
                 <div class="form-check mt-1">
                     <input class="form-check-input" type="checkbox" ${treatment.return_after !== false ? 'checked' : ''}
                            onchange="updateTreatmentReturn(${sheetIdx}, '${scope}', ${groupIdx}, ${tIdx}, this.checked)">
-                    <label class="form-check-label small">Riporta la piastra/sorgente al proprio slot dopo questo step</label>
+                    <label class="form-check-label small">Return the plate/source to its own slot after this step</label>
                 </div>
             </div>
         </div>
@@ -801,13 +855,13 @@ function renderTreatmentsSection(sheetIdx, scope, groupIdx, title) {
     html += `
         <div class="btn-group btn-group-sm mb-3">
             <button class="btn btn-outline-info" onclick="addTreatment(${sheetIdx}, '${scope}', ${groupIdx})">
-                <i class="bi bi-plus"></i> Aggiungi step
+                <i class="bi bi-plus"></i> Add step
             </button>
             <button class="btn btn-outline-warning" onclick="addTreatment(${sheetIdx}, '${scope}', ${groupIdx}, 'heat_shake')">
-                🔥 Scalda e agita
+                🔥 Heat and shake
             </button>
             <button class="btn btn-outline-warning" onclick="addTreatment(${sheetIdx}, '${scope}', ${groupIdx}, 'keep_warm')">
-                🌡️ Mantieni caldo
+                🌡️ Keep warm
             </button>
         </div>
     `;
@@ -870,15 +924,15 @@ function renderReagentBatchConfig(sheetIdx, groupIdx, reagent) {
     let html = `
         <div class="d-flex align-items-center gap-2 mb-1">
             <span class="badge bg-info" style="min-width: 80px;">${reagent}</span>
-            <label class="small text-muted mb-0">Batch da</label>
+            <label class="small text-muted mb-0">Batch of</label>
             <input type="number" class="form-control form-control-sm" style="width: 70px;" min="1"
-                   value="${batchSize}" placeholder="tutti insieme"
+                   value="${batchSize}" placeholder="all at once"
                    onchange="updateReagentBatchSize(${sheetIdx}, ${groupIdx}, '${reagent}', this.value)">
-            <span class="small text-muted">pozzetti</span>
+            <span class="small text-muted">wells</span>
         </div>`;
 
     if (isMultiMode) {
-        return html + `<div class="small text-muted fst-italic mb-2 ms-3">Il trattamento tra batch richiede "Single Recipe with Delays".</div>`;
+        return html + `<div class="small text-muted fst-italic mb-2 ms-3">Treatment between batches requires "Single Recipe with Delays".</div>`;
     }
 
     if (cfg && cfg.batch_size && cfg.treatment) {
@@ -890,8 +944,8 @@ function renderReagentBatchConfig(sheetIdx, groupIdx, reagent) {
         const kindOptions = Object.entries(STEP_CATALOG.modules).map(([key, m]) =>
             `<option value="${key}" ${key === cfg.treatment.kind ? 'selected' : ''}>${m.label}</option>`
         ).join('');
-        const targetOptions = [`<option value="TargetPlate" ${cfg.treatment.target === 'TargetPlate' ? 'selected' : ''}>Piastra di destinazione</option>`]
-            .concat(reagents.map(r => `<option value="${r}" ${cfg.treatment.target === r ? 'selected' : ''}>${r} (sorgente)</option>`))
+        const targetOptions = [`<option value="TargetPlate" ${cfg.treatment.target === 'TargetPlate' ? 'selected' : ''}>Target plate</option>`]
+            .concat(reagents.map(r => `<option value="${r}" ${cfg.treatment.target === r ? 'selected' : ''}>${r} (source)</option>`))
             .join('');
         const fieldsHtml = fields.map(f => {
             const val = (cfg.treatment.params || {})[f.name];
@@ -916,7 +970,7 @@ function renderReagentBatchConfig(sheetIdx, groupIdx, reagent) {
         html += `
             <div class="card bg-dark border-warning mb-2 ms-3">
                 <div class="card-body py-2">
-                    <div class="small text-muted mb-1">Tra un batch e l'altro:</div>
+                    <div class="small text-muted mb-1">Between batches:</div>
                     <div class="d-flex gap-2 flex-wrap mb-1">
                         <select class="form-select form-select-sm" style="width: auto;"
                                 onchange="updateReagentBatchTreatmentKind(${sheetIdx}, ${groupIdx}, '${reagent}', this.value)">
@@ -947,7 +1001,7 @@ function renderGroups(sheetIdx) {
 
     let html = '';
 
-    html += renderTreatmentsSection(sheetIdx, 'pre', -1, '⏱️ Prima della prima fase');
+    html += renderTreatmentsSection(sheetIdx, 'pre', -1, '⏱️ Before the first phase');
 
     config.groups.forEach((group, groupIdx) => {
         html += `
@@ -980,7 +1034,7 @@ function renderGroups(sheetIdx) {
                         <div class="mb-2">
                             <a class="small text-muted text-decoration-none" data-bs-toggle="collapse"
                                href="#batchContainer-${sheetIdx}-${groupIdx}" role="button">
-                                <i class="bi bi-collection"></i> Dividi in batch (opzionale) <i class="bi bi-chevron-down"></i>
+                                <i class="bi bi-collection"></i> Split into batches (optional) <i class="bi bi-chevron-down"></i>
                             </a>
                             <div class="collapse mt-1" id="batchContainer-${sheetIdx}-${groupIdx}">
                                 ${group.columns.map(r => renderReagentBatchConfig(sheetIdx, groupIdx, r)).join('')}
@@ -1021,10 +1075,10 @@ function renderGroups(sheetIdx) {
                 </div>
             </div>
         `;
-        html += renderTreatmentsSection(sheetIdx, 'group', groupIdx, `⏱️ Dopo "${group.name}"`);
+        html += renderTreatmentsSection(sheetIdx, 'group', groupIdx, `⏱️ After "${group.name}"`);
     });
 
-    html += renderTreatmentsSection(sheetIdx, 'post', -1, "⏱️ Dopo l'ultima fase");
+    html += renderTreatmentsSection(sheetIdx, 'post', -1, "⏱️ After the last phase");
 
     container.innerHTML = html || '<div class="text-muted small">No phases. Click "Add Phase" to start.</div>';
 }
@@ -1188,6 +1242,25 @@ async function generateRecipes() {
         config.reservoir_type = document.getElementById(`reservoirType-${i}`)?.value || Object.keys(RESERVOIR_TYPES)[0] || 'nest_12_reservoir_15ml';
         const numReservoirsRaw = document.getElementById(`numReservoirs-${i}`)?.value;
         config.num_reservoirs = numReservoirsRaw ? parseInt(numReservoirsRaw) : null;
+
+        // Tip sizes checked for this sheet - only sent when it differs from
+        // the single-1000µL default, so a recipe generated without ever
+        // touching these checkboxes keeps today's exact backend behavior
+        // (no tip_sizes_ul key at all, not a redundant [1000]).
+        const checkedTipSizes = Array.from(document.querySelectorAll(`#tipSizes-${i} .tip-size-check:checked`))
+            .map(el => parseInt(el.value));
+        if (checkedTipSizes.length > 0 && !(checkedTipSizes.length === 1 && checkedTipSizes[0] === 1000)) {
+            config.tip_sizes_ul = checkedTipSizes;
+        } else {
+            delete config.tip_sizes_ul;
+        }
+
+        const workingVolumeRaw = document.getElementById(`workingVolume-${i}`)?.value;
+        if (workingVolumeRaw) {
+            config.reservoir_working_volume_ul = parseFloat(workingVolumeRaw);
+        } else {
+            delete config.reservoir_working_volume_ul;
+        }
         
         // Count total reagents for this sheet (= number of sources needed)
         const totalReagents = config.groups.reduce((sum, g) => sum + g.columns.length, 0);
@@ -1239,7 +1312,7 @@ async function generateRecipes() {
     // got its own recipe-aware HAL above.
     if (generateHAL && generatedRecipes.length > 0 && !singleRecipeAndSheet) {
         try {
-            await generateGenericHAL(maxSources, targetPlate, groupConfigs[0]?.reservoir_type, saveHAL);
+            await generateGenericHAL(maxSources, targetPlate, groupConfigs[0]?.reservoir_type, saveHAL, groupConfigs[0]?.tip_sizes_ul);
         } catch (e) {
             errors.push(`HAL generation: ${e.message}`);
         }
@@ -1343,7 +1416,7 @@ async function generateSingleRecipe(sheet, config, sheetIdx, saveRecipes, genera
 // used for multi-sheet/multi-recipe batches, where no single recipe's module
 // layout applies to all of them). Named after the source file, not "Generic_HAL",
 // so multiple generations stay distinguishable in the library.
-async function generateGenericHAL(numSources, targetPlate, reservoirType, saveToLibrary) {
+async function generateGenericHAL(numSources, targetPlate, reservoirType, saveToLibrary, tipSizesUl) {
     const halName = `${currentFileBaseName || 'Recipe'}_HAL`;
     const resp = await fetch('/api/batch/generate-hal', {
         method: 'POST',
@@ -1353,7 +1426,8 @@ async function generateGenericHAL(numSources, targetPlate, reservoirType, saveTo
             num_sources: numSources,
             target_plate: targetPlate,
             reservoir_type: reservoirType,
-            save_to_library: saveToLibrary
+            save_to_library: saveToLibrary,
+            tip_sizes_ul: tipSizesUl || undefined
         })
     });
 

@@ -96,127 +96,93 @@ Each SiLA2 server declares its capabilities in a `.sila.xml` file stored in `SiL
 
 ---
 
-## Execution Strategies
+## How a Command Is Executed
 
-The orchestrator (`src/client.py`) selects the communication strategy automatically, trying them in order:
+One path, for every server.
 
-### Strategy 0 — `sila2` Library `SilaClient` (Preferred)
-
-All current LabOS servers are built with the **`sila2` Python library** (v0.14). The library generates and registers protobuf descriptors automatically via `sila2-codegen`, and publishes them over the standard `SiLAService` feature. The orchestrator's `SilaClient` fetches these descriptors at runtime and invokes commands without any compile-time stub coupling:
+`src/client.py` uses the `sila2` library's `SilaClient`, which fetches the
+server's protobuf descriptor **from the server itself** at connection time. The
+orchestrator therefore never imports instrument-specific stubs, never needs
+regenerating when a server's FDL changes, and works with any SiLA2-compliant
+server — not only ones written for LabOS.
 
 ```python
 from sila2.client import SilaClient
 
 client = SilaClient("localhost", 50302, insecure=True)
-# Feature and command names come from the live descriptor:
-result = client.WorkflowAPI.ExecuteRecipe(RecipeName="my_recipe.json")
-# HAL config is not a per-call parameter — set it once via LoadHardwareConfig,
-# it persists across restarts. See ARCHITECTURE.md / HAL_SYSTEM.md.
+print(client.WorkflowAPI.Status.get())                      # property: read
+client.WorkflowAPI.ExecuteRecipe(RecipeName="my_recipe.json")  # command: act
+client.close()
 ```
 
-**Why this is preferred over SiLA2Common**: it uses the standard SiLA2 protocol (no custom extension), descriptors are typed and versioned, and any SiLA2-compliant client (not just LabOS) can interact with the server.
+One `SilaClient` is kept per `host:port` process-wide
+(`get_shared_sila_client()`) and invalidated only on a transport-level
+`grpc.RpcError`. That is not an optimisation: the library registers proto
+descriptors in a process-global pool, so a second client for the same server
+re-compiles the same proto and conflicts with the descriptor already registered.
 
-### Strategy 1 — Dynamic Stub Loading (Custom / Non-sila2 Servers)
+### What used to be here
 
-For custom servers that cannot use the `sila2` library, statically generated `_pb2` / `_pb2_grpc` stubs placed in `src/pnp_stubs/` are loaded at runtime. Add the stubs for any non-sila2 server there and the orchestrator picks them up automatically with no code changes.
+Two other execution paths existed and are gone:
 
-> **Note:** The `SiLA2Common_pb2` stubs in `pnp_stubs/` are retained only for server health checks (`GetStatus`). The `SiLA2Common.ExecuteCommand` execution path has been removed — it required implementing a proprietary LabOS extension that no third-party server supports.
+- **`SiLA2Common.ExecuteCommand`** — a proprietary LabOS extension that no
+  third-party server implements.
+- **Dynamic stub loading** ("Strategy 1") — statically generated `_pb2` stubs in
+  `src/pnp_stubs/`, loaded at runtime for hypothetical non-`sila2` servers. No
+  such server was ever deployed. Carrying it meant a genuine transport failure
+  looked like "try the other protocol" rather than an error, and the launcher
+  regenerated the stubs on every startup.
+
+If a raw-gRPC instrument ever does appear, give it a purpose-built adapter
+rather than reviving a generic mechanism for a single case. The far easier
+option is to wrap it in a `sila2` server, which is what the template in
+`SiLA2/_NewInstrumentTemplate/` is for — see
+[ADDING_NEW_INSTRUMENT.md](ADDING_NEW_INSTRUMENT.md).
+
+### Timeouts
+
+`0` and `null` both mean **unlimited**, everywhere. An Opentrons protocol can
+legitimately run for days, and a client-side deadline on such a command reports
+a false failure while the instrument is still working correctly.
+`src/settings.py::normalize_timeout()` is the single implementation of that
+rule; `None` is the sentinel every layer below understands.
+
+Observable commands are never given a client-side deadline by default: they
+already report real progress from the instrument, and the authoritative bound
+is the server's own (`robot.run_timeout` for Opentrons).
 
 ---
 
-## Generating Stubs for Custom Servers (Strategy 1)
+## Commands and Properties
 
-Use this path when you have a non-sila2 server with its own `.proto` file.
+A **command** does something. A **property** is a value the server publishes.
+Get this the right way round: a `GetStatus` *command* makes a client "run an
+operation" to find out what is already true, and shows up in the interface as a
+button an operator has to press. A `Status` property is a reading — displayed
+in a panel, and, when declared `<Observable>Yes</Observable>`, pushed to
+subscribers instead of polled.
 
-### Prerequisites
-
-```bash
-pip install grpcio-tools
+```xml
+<Property>
+    <Identifier>Status</Identifier>
+    <DisplayName>Status</DisplayName>
+    <Description>Current state as JSON.</Description>
+    <Observable>Yes</Observable>
+    <DataType><Basic>String</Basic></DataType>
+</Property>
 ```
 
-### Step 1 — Write your proto file
+Read one over REST at
+`/api/devices/{id}/property/{feature}/{property}`, from the CLI with
+`python labos.py read opentrons Status`, or directly with
+`client.WorkflowAPI.Status.get()`.
 
-```protobuf
-// SiLA2/MyCustomServer/MyCustomService.proto
-syntax = "proto3";
-package mycustom;
-
-service MyCustomService {
-  rpc DoSomething (DoSomethingRequest) returns (DoSomethingResponse);
-}
-
-message DoSomethingRequest {
-  string param1 = 1;
-  int32  param2 = 2;
-}
-
-message DoSomethingResponse {
-  string result = 1;
-}
-```
-
-### Step 2 — Generate the stubs
-
-```bash
-cd v1
-python -m grpc_tools.protoc \
-  -I SiLA2/MyCustomServer \
-  --python_out=src/pnp_stubs \
-  --grpc_python_out=src/pnp_stubs \
-  SiLA2/MyCustomServer/MyCustomService.proto
-```
-
-This produces `src/pnp_stubs/MyCustomService_pb2.py` and `src/pnp_stubs/MyCustomService_pb2_grpc.py`.
-
-### Step 3 — Fix the import in the generated `_grpc` file
-
-The generated `_grpc` file uses an absolute import that breaks inside the package. Open `src/pnp_stubs/MyCustomService_pb2_grpc.py` and change:
-
-```python
-# Generated (broken inside a package):
-import MyCustomService_pb2 as MyCustomService__pb2
-```
-to:
-```python
-from . import MyCustomService_pb2 as MyCustomService__pb2
-```
-
-### Step 4 — Register in `regen_stubs.py`
-
-Add an entry so future `python regen_stubs.py` re-generates it automatically:
-
-```python
-# In v1/regen_stubs.py — PROTOS list
-{
-    "file": BASE_DIR / "SiLA2" / "MyCustomServer" / "MyCustomService.proto",
-    "include": BASE_DIR / "SiLA2" / "MyCustomServer",
-},
-```
-
-### Step 5 — Export from `pnp_stubs/__init__.py`
-
-```python
-# In v1/src/pnp_stubs/__init__.py
-from . import MyCustomService_pb2
-from . import MyCustomService_pb2_grpc
-
-__all__ = [
-    ...
-    'MyCustomService_pb2',
-    'MyCustomService_pb2_grpc',
-]
-```
-
-That's all — the orchestrator will automatically try to load `MyCustomService_pb2_grpc` when it discovers a server whose name matches `MyCustomService` (case-insensitive, with flexible prefix/suffix matching). No changes to `client.py` or `discovery.py` needed.
-
-### Regenerating existing stubs
-
-```bash
-cd v1
-python regen_stubs.py
-```
-
-This regenerates all registered protos (`SiLA2Common`, `TecanLegacyBridge`, and any custom entries you added).
+The Opentrons server's rework is the worked example: four `Get*` commands
+became properties, three remote file listings were deleted outright (the web
+interface reads `Library/` from disk far more cheaply, and can do it while the
+robot is off), and the capabilities that were implemented but unreachable —
+gripper, heater-shaker, camera — became commands. See
+[SERVERS.md](SERVERS.md#opentrons-sila2-server).
 
 ---
 
@@ -280,16 +246,22 @@ sila2-codegen features/YourInstrument.sila.xml --output-dir generated/
 
 ---
 
-## Regenerating Protobuf Stubs
+## Regenerating Bindings
 
-After editing a `.sila.xml` FDL file, regenerate the stubs:
+After any FDL change:
 
 ```bash
-cd SiLA2/YourInstrumentSiLA2Server
-sila2-codegen features/YourInstrument.sila.xml --output-dir generated/
+python labos.py codegen OpentronsSiLA2Server
 ```
 
-This regenerates the `generated/yourinstrument/` directory. Do not edit generated files manually.
+That runs `sila2-codegen` into a temp directory and copies the inner package
+into `generated/<feature>/`, which is the part you want — the generator also
+writes a server skeleton nobody uses. Doing it by hand is where people get it
+wrong.
+
+Every command you added is now an abstract method on the generated base class,
+and the server refuses to start until your implementation provides it. That is
+deliberate: a missing method is caught at startup, not on the first call.
 
 ---
 

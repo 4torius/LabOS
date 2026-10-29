@@ -12,7 +12,7 @@ import logging
 import os
 import sys
 import threading
-from typing import Iterator, Optional, Tuple
+from typing import Iterator, Tuple
 
 import grpc
 
@@ -33,17 +33,12 @@ class TecanBridgeClient:
         self,
         host: str = "127.0.0.1",
         port: int = 50055,
-        measurement_timeout: Optional[float] = 1200.0,
     ) -> None:
         self._host = host
         self._port = port
         self._channel = grpc.insecure_channel(f"{host}:{port}")
         self._stub = pb2_grpc.PlateReaderServiceStub(self._channel)
         self._lock = threading.Lock()
-        # 0/negative -> None (unlimited), matching the "0 = unlimited" convention
-        # used elsewhere. None is grpc-python's own native "no deadline" value,
-        # so no further translation is needed at the call site below.
-        self._measurement_timeout = None if measurement_timeout is not None and measurement_timeout <= 0 else measurement_timeout
         self._check_available()
 
     def _check_available(self) -> None:
@@ -157,7 +152,17 @@ class TecanBridgeClient:
             plate_type=plate_type,
         )
         try:
-            for resp in self._stub.RunMeasurement(req, timeout=self._measurement_timeout):
+            # No client-side deadline: a real measurement (esp. a multi-well
+            # wavelength scan) can legitimately run far longer than any fixed
+            # bound, and this is a genuinely observable command - the bridge
+            # already streams real progress via is_intermediate responses, so
+            # that stream (not a clock on this end) is what decides success
+            # or failure. A timeout here previously killed long-running scans
+            # with a client-side "Deadline Exceeded" even while the
+            # instrument was still correctly reading the plate - identical in
+            # kind to the client-side timeout bug already fixed for
+            # Opentrons' observable commands (see lab_core.py).
+            for resp in self._stub.RunMeasurement(req, timeout=None):
                 if resp.is_intermediate:
                     yield {"intermediate": True, "progress": resp.progress, "status": resp.status_message}
                 else:

@@ -50,24 +50,37 @@ Each instrument is wrapped by a dedicated SiLA2 server built with the **`sila2` 
 
 | Server | Feature | Commands | Port |
 |--------|---------|----------|------|
-| `OpentronsSiLA2Server` | `WorkflowAPI` | 17 (ExecuteRecipe, PauseRun/ResumeRun/AbortRun, LoadHardwareConfig, RefillTipRack, GetStatus, …) | 50302 |
+| `OpentronsSiLA2Server` | `WorkflowAPI` v1.1 | 17 commands + 7 properties (ExecuteRecipe, MoveLabware, heater-shaker control, CaptureImage, …) | 50302 |
 | `TecanM200SiLA2Server` | `PlateReaderService` | 8 (RunMeasurement, Connect/Disconnect, PlateIn/PlateOut, SetTemperature, …) | 50051 (bridge internal: 50055) |
 | `ManualStationSiLA2Server` | `ManualStation` | 6 (RequestOperatorTask, ConfirmTaskComplete, SendNotification, …) | 50500 |
 
 Full per-command reference: [SERVERS.md](SERVERS.md).
 
-### `LabOSLibraryProvider` — self-declaring library types
+### `LabOSLibraryProvider` — what a server declares besides its commands
 
-Every server also implements a small shared feature, `LabOSLibraryProvider`, exposing one property (`LibraryCatalog`) that returns a JSON description of which `Library/` subfolders and file types that server cares about (e.g. Opentrons declares `recipe`, `hal_config`, `liquid_class`; Tecan declares `analysis`). The orchestrator reads this at discovery time to populate UI dropdowns automatically. **Adding a new instrument never requires touching orchestrator code** — see [ADDING_NEW_INSTRUMENT.md](ADDING_NEW_INSTRUMENT.md).
+Every server also implements a small shared feature, `LabOSLibraryProvider`, exposing one property (`LibraryCatalog`) that returns the server's `library_catalog.json`. It carries everything the orchestrator needs that an FDL cannot say:
 
-### Execution strategies (`src/client.py`)
+| Section | Used for | Example |
+|---|---|---|
+| `library_types` | parameter pickers over `Library/` folders, fixed values, JSON keys, or a property the server holds | Opentrons: recipes, HAL configs, liquid classes, deck labware; Tecan: `.mdfx` protocols, plate types |
+| `result_types` | `Results/` folders the instrument writes; created at server start and at discovery; one tab each on the Results page | Tecan: `XML`, `Excel`, `AnIML`, `CSV`; Opentrons: `Images` |
+| `parameter_defaults` | parameters a workflow may omit, filled at dispatch | Manual Station: `Priority`, `TaskType`, `TimeoutSeconds`; Tecan: `PlateID`, `PlateType` |
+| `traceability` | which command prepares a plate and which measures one | Opentrons `ExecuteRecipe` prepares; Tecan `RunMeasurement` measures |
+| `display` | icon and colour in the dashboard and the builder toolbox | |
 
-| Strategy | Protocol | Used by |
-|----------|----------|---------|
-| **0** | `sila2` library `SilaClient` — fetches the feature descriptor from the live server at runtime, no compile-time stub coupling | All current servers |
-| **1** | Dynamic gRPC stub loading (`_pb2.py` files in `src/pnp_stubs/`) | Custom / non-sila2 servers only (none currently deployed) |
+`src/catalog.py` is the one reader, and treats the catalog as untrusted input: a malformed entry costs that entry, folders outside `Library/` and `Results/` are refused, and icon/colour must match a fixed shape because pages render them. **Adding a new instrument never requires touching orchestrator code**, and `tests/unit/test_catalog.py::TestNoInstrumentNamesInTheCore` fails if a branch on an instrument's name comes back into the dispatch path — see [ADDING_NEW_INSTRUMENT.md](ADDING_NEW_INSTRUMENT.md).
 
-The legacy `SiLA2Common.ExecuteCommand` execution path has been **fully removed** from the codebase. The only remaining `SiLA2Common` reference is an optional legacy `GetStatus` health-check probe, not an execution path.
+### Execution (`src/client.py`)
+
+One path: the `sila2` library's `SilaClient`, which fetches the feature
+descriptor from the live server at runtime, so the orchestrator never imports
+instrument-specific stubs.
+
+There used to be a second, "dynamic stub loading" path for hypothetical
+non-`sila2` servers. No such server was ever deployed, and carrying it meant a
+transport failure looked like "try the other protocol" instead of an error. It
+is gone, along with the `SiLA2Common` servicer and its two extra FDL parsers.
+If a raw-gRPC instrument ever appears, it gets a purpose-built adapter.
 
 A process-wide cache (`get_shared_sila_client()`) keeps one `SilaClient` per `host:port`, invalidated only on a transport-level `grpc.RpcError` — this avoids repeated protobuf descriptor-pool churn.
 
@@ -87,9 +100,51 @@ The registry uses a SiLA2-native two-phase strategy:
 
 **Phase 2 — Runtime (continuous):** mDNS/DNS-SD (`_sila2._tcp.local.`) discovers every SiLA2-compliant server on the local network segment automatically, merging/correcting bootstrap entries as live announcements arrive.
 
-In both phases, server self-description via `SiLAService` (`ServerName`, `ImplementedFeatures`, `GetFeatureDefinition`) plus `LabOSLibraryProvider.LibraryCatalog` is the source of truth for features, commands, and file-type dropdowns — nothing is hardcoded per instrument.
+In both phases, server self-description via `SiLAService` (`ServerName`, `ImplementedFeatures`, `GetFeatureDefinition`) plus `LabOSLibraryProvider.LibraryCatalog` is the source of truth for features, commands, pickers, result folders, parameter defaults and plate roles — nothing is hardcoded per instrument. When the set of instruments changes (a server started after the web app, one switched off), the web app pushes `instruments_changed` and the open pages re-read it.
 
 **Stable instrument IDs**: a server announcing on a `lab_config.yaml`-configured port only claims that config's instrument ID if its announcing host matches the configured host (or the host of whatever is already registered under that ID). This specifically guards against a stale/foreign server left running on a different machine after a redeploy silently taking over another instrument's identity in the UI — a real bug from an earlier version, now fixed (`lab_core.py::_server_to_instrument`).
+
+### Settings (`settings.py`)
+
+`lab_config.yaml` is parsed **once**, into frozen dataclasses, by
+`get_settings()`. Nine modules used to parse it independently, each with its own
+defaults; `LabCore._command_timeout()` re-read the whole file on every command.
+Saving the config from the Settings page calls `reload_settings()`, so an edit
+takes effect without a restart.
+
+`normalize_timeout()` is the single implementation of the "0 or null means
+unlimited" rule — see the timeout convention below.
+
+### Instrument identity (`resolver.py`)
+
+One matcher, layered strictest first: exact id, exact announced name, then
+ignoring case and punctuation (`OpentronsFlex` == `Opentrons Flex`), then unique
+containment. **Ambiguity is an error**: a name matching two instruments returns
+nothing and names the collision, rather than taking whichever the dictionary
+yielded first.
+
+Used by LabCore, discovery, workflow validation and the device-command route.
+Capability lookup (`instruments_with_command("RefillTipRack")`) covers the cases
+where the right question is "whoever can do X", not "the instrument named Y".
+
+### Deck state (`deck.py`)
+
+What is on the deck right now, per the active hardware config: the labware it
+declares, the slots it leaves free, the modules bolted to it. This is what the
+labware and destination pickers offer. Read-only — the Opentrons server owns
+*writing* the config, because it is the process that knows a move happened.
+
+### Property watching (`property_watch.py`)
+
+Subscribes to every observable property of every discovered instrument and
+reports each change once. Properties that cannot be subscribed to are read on a
+slow timer. The dashboard used to poll: four instruments times six properties
+every few seconds, to learn that nothing had happened.
+
+Two things it has to get right — the sila2 library delivers values on its own
+executor thread, so every callback is marshalled back onto the asyncio loop
+before touching anything shared; and a subscription dies *silently* when its
+server restarts, so dead ones are noticed and re-established.
 
 ### LabCore (`lab_core.py`)
 
@@ -97,14 +152,59 @@ In both phases, server self-description via `SiLAService` (`ServerName`, `Implem
 
 ### Workflow Executor (`workflow.py`)
 
-`PnPWorkflowExecutor` processes JSON workflow files as DAGs (nodes = steps, edges = `DependsOn`):
+`PnPWorkflowExecutor` processes JSON workflow files as DAGs (nodes = steps,
+edges = `DependsOn`):
 
 1. **Parse** — load JSON into `WorkflowStep` objects
-2. **Validate** — instrument/command existence against the live registry, required parameters, recipe-capacity checks
-3. **Execute** — repeatedly collects the "wave" of steps whose dependencies are all satisfied and dispatches them concurrently via `asyncio.gather` (`_execute_parallel`), or runs steps one at a time (`_execute_sequential`)
-4. **Report** — a `WorkflowResult` with per-step outcomes and a summary
+2. **Validate** — instruments, commands, parameter names, dependency cycles,
+   duplicate step numbers, recipe capacity. All of it before anything moves
+3. **Order** — `topological_waves()` sorts steps into dependency waves. One
+   ordering, shared by both execution modes; `parallel` decides only whether a
+   wave is dispatched concurrently
+4. **Execute** — each step through a handler (instrument, delay, manual,
+   refill), with retry, error categorisation and human intervention
+5. **Report** — a `WorkflowResult` with per-step outcomes; every skipped step
+   carries the reason it was skipped
 
-See [WORKFLOW_SYSTEM.md](WORKFLOW_SYSTEM.md) for the full workflow model — note that only linear DAG dependencies are supported, there is no loop/conditional control-flow mechanism.
+**Abort reaches the hardware.** The executor tracks which steps are mid-flight,
+sends each of their instruments that instrument's own stop command (looked up
+in its FDL), and only then cancels the local wait.
+
+See [WORKFLOW_SYSTEM.md](WORKFLOW_SYSTEM.md) for the full model — note that only
+DAG dependencies are supported, there is no loop or conditional construct.
+
+### Run Manager (`run_manager.py`)
+
+A run is a supervised background task. Starting one returns its `run_id`
+immediately; the run outlives the request that created it, its state is
+queryable from REST at any point, and a crash lands in the run's state instead
+of vanishing as an unretrieved exception. One run at a time, deliberately —
+the instruments are physical and share a deck — and a refusal names the run
+holding the slot.
+
+---
+
+## Layer 3.5: Persistence
+
+One SQLite file, `Results/labos.db` (`src/database.py`, WAL mode, foreign keys on), holding two clearly-separated groups of tables:
+
+- **Chemical record** — `plates`, `wells`, `reagent_catalog`, `protocols`, `protocol_channels`, `instrument_measurements`, `well_measurements`. What's physically in each well and what was measured there. `CHEMICAL_TABLES` at the top of `database.py` lists them.
+- **Automation / execution log** — `run_results` (one row per run) and
+  `run_steps` (one row per step *attempt*, written as the step starts and again
+  as it finishes). `AUTOMATION_TABLES` lists them. Before `run_steps`, a run
+  recorded only a start and an end, so a run that crashed midway left no trace
+  of where it got to, and a retry overwrote the attempt that failed.
+
+Not two files — one file, two conventions, so a plate's chemical content and its automation trail can still be joined by `run_id` when useful, without mixing concerns in the schema.
+
+`src/plate_tracking.py` is the business logic that turns "a SiLA2 command just succeeded" into database rows, shared identically between the workflow-execution path (`webapp/routes/workflows.py::_execute_step`) and manual Dashboard commands (`webapp/routes/instruments.py::execute_device_command`) — a plate gets created and linked the same way regardless of how the command was launched:
+
+Which commands these apply to is declared by each server (`traceability` in its catalog), not decided by the instrument's name:
+
+- **`track_plate_preparation()`** — every successful command declared `prepares_plate` (on this lab, Opentrons `ExecuteRecipe`) always creates a new `plates` row (`plate_id` auto-generated as `PLT-{timestamp}-{recipe-name-slug}`, there is currently no way to name it yourself) plus one `wells` row per (well, reagent) pair extracted from the recipe JSON, with volumes and — when a reagent's stock concentration is registered in `reagent_catalog` — a computed `concentration_mm`.
+- **`track_plate_measurement()`** — every successful command declared `measures_plate` (on this lab, Tecan `RunMeasurement`) resolves the effective `plate_id` (explicit `PlateID` param → `current_plate_id` from workflow context → recovered from the AnIML filename as a last resort), guarantees a `plates` row exists via `ensure_plate_for_measurement()` even with no prior pipetting record (e.g. a manual measurement — the plate gets a note explaining why it has no well content), and writes `instrument_measurements` + `well_measurements` eagerly (not deferred to end-of-run).
+- **Auto-linking only happens within a single workflow execution** (`workflow_context["current_plate_id"]`, in-memory, per-run) — a manual command from the Dashboard, or a workflow run on a different day, does not inherit a previous plate_id automatically. The Database page's "Add analysis" button (on a plate's detail view) closes that gap for the common case: it pre-fills `PlateID` and launches a Tecan `RunMeasurement` from there, so linking a same-plate follow-up analysis (e.g. a fluorescence read one day, luminescence the next) is one click instead of copy-pasting the plate_id by hand.
+- A plate measured with more than one technique (e.g. fluorescence and absorbance on the same plate) keeps every technique as distinct `well_measurements`/`instrument_measurements` rows — the Database page's well-grid and per-well tables never average or overwrite across techniques; a "Tecnica" dropdown appears whenever a plate has more than one.
 
 ---
 
@@ -117,9 +217,8 @@ The web interface is a FastAPI app served on **port 5000** by default (`python l
 - **Recipe Generator** (`/batch`, alias `/recipes`) — Excel-to-recipe/HAL/workflow converter
 - **Hardware** (`/hardware`) — HAL configuration switcher
 - **Operator** (`/operator`) — pending manual tasks, Emergency Stop, tip refill
-- **Plates** (`/plates`) and **Run History** (`/runs`) — SQLite-backed experiment records, searchable, with AI-context export
+- **Database** (`/database`) — SQLite-backed experiment record, two tabs: **Plates** (chemical record — plate/well/reagent content, linked measurements) and **Runs & Log** (automation record — workflow execution history, per-step outcomes, AI-context export). `/plates` and `/runs` redirect here for old bookmarks. See [Layer 3.5: Persistence](#layer-35-persistence) below
 - **Results** (`/results`) — raw output file browser (CSV/Excel/AnIML/XML)
-- **History** (`/history`) — ephemeral in-memory session log (lost on restart — **not** the same as Run History)
 - **Settings** (`/settings`) — `lab_config.yaml` editor
 
 A single WebSocket endpoint (`/ws`) broadcasts all real-time events (workflow progress, device status, manual-intervention requests) to every connected client; a global floating status bar with Pause/Resume/Abort (defined once in `base.html`) appears on every page whenever a workflow is running.
@@ -177,12 +276,24 @@ v1/
 ├── lab_config.yaml          # Centralized configuration (servers, discovery, workflow, webapp)
 ├── requirements.txt         # Python dependencies
 │
+├── labos.py                 # Command line: status, instruments, validate, run,
+│                            #   read, new-server, codegen, doctor
+├── scripts/
+│   └── migrate_workflows.py # Rewrite saved workflows to canonical ids
+│
 ├── src/                     # Core orchestration code
+│   ├── settings.py          # THE reader of lab_config.yaml (typed, cached)
+│   ├── resolver.py          # THE instrument-name matcher
+│   ├── deck.py              # What is on the deck, per the active HAL
+│   ├── property_watch.py    # Subscribed property values, not polled
 │   ├── lab_core.py          # LabCore singleton, discovery→instrument mapping
 │   ├── discovery.py         # PnP discovery engine (bootstrap + mDNS)
-│   ├── workflow.py          # DAG workflow executor
-│   ├── client.py            # SiLA2 client (Strategy 0/1), shared client cache
-│   ├── config_schema.py     # DEFAULT_CONFIG + deep-merge for lab_config.yaml
+│   ├── workflow.py          # DAG executor: waves, handlers, real abort
+│   ├── run_manager.py       # Runs as supervised background jobs
+│   ├── client.py            # SiLA2 client, shared SilaClient cache
+│   ├── database.py          # SQLite: chemical record + execution log
+│   ├── plate_tracking.py    # SiLA2 result → database rows
+│   ├── config_schema.py     # DEFAULT_CONFIG + validation for lab_config.yaml
 │   └── excel_recipe_parser.py  # Excel → recipe/HAL/workflow generation engine
 │
 ├── SiLA2/                   # Instrument servers
@@ -194,7 +305,9 @@ v1/
 │
 ├── webapp/                  # FastAPI web application
 │   ├── app.py                # App shell, page routes, WebSocket, config editor
-│   └── routes/                # batch, workflows, instruments, operator, hardware, db, plates
+│   ├── routes/               # batch, workflows, instruments, operator, hardware, db
+│   └── static/js/            # labos-core (helpers), labos-ws (one socket),
+│                             #   labos-params (parameter forms)
 │
 ├── Library/                 # User-editable assets
 │   ├── Workflows/            # JSON workflow definitions
@@ -204,6 +317,8 @@ v1/
 │   └── Analysis/             # Tecan .mdfx protocol files
 │
 ├── Results/                  # Experiment outputs (auto-generated)
+│   ├── labos.db              # The record: plates, wells, measurements, runs
+│   └── Images/               # Deck photos from the robot's camera
 ├── tests/                    # pytest suite (unit/ + integration)
 └── docs/                     # This documentation
 ```

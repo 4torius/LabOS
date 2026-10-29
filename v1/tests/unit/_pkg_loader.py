@@ -22,6 +22,8 @@ def load_package(module_name: str, src_dir: Path):
     spec = importlib.util.spec_from_file_location(
         module_name, src_dir / "__init__.py", submodule_search_locations=[str(src_dir)]
     )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load package spec for {module_name} from {src_dir}")
     pkg = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = pkg
     spec.loader.exec_module(pkg)

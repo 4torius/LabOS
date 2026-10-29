@@ -4,107 +4,11 @@ from __future__ import annotations
 from typing import NamedTuple
 
 
-class Initialize_Responses(NamedTuple):
-
-    InitializeResult: str
-    """
-    Status message with robot serial number.
-    """
-
-
 class EmergencyStop_Responses(NamedTuple):
 
     StopResult: str
     """
-    Confirmation of emergency stop.
-    """
-
-
-class GetStatus_Responses(NamedTuple):
-
-    StatusResult: str
-    """
-    Robot status as JSON.
-    """
-
-
-class ListHardwareConfigs_Responses(NamedTuple):
-
-    ConfigList: str
-    """
-    JSON array of available configurations.
-    """
-
-
-class LoadHardwareConfig_Responses(NamedTuple):
-
-    LoadResult: str
-    """
-    Loaded configuration details.
-    """
-
-
-class GetCurrentConfig_Responses(NamedTuple):
-
-    CurrentConfig: str
-    """
-    Currently loaded configuration as JSON.
-    """
-
-
-class ListRecipes_Responses(NamedTuple):
-
-    RecipeList: str
-    """
-    JSON array of recipe names.
-    """
-
-
-class PauseRun_Responses(NamedTuple):
-
-    PauseResult: str
-    """
-    Confirmation of pause.
-    """
-
-
-class ResumeRun_Responses(NamedTuple):
-
-    ResumeResult: str
-    """
-    Confirmation of resume.
-    """
-
-
-class AbortRun_Responses(NamedTuple):
-
-    AbortResult: str
-    """
-    Confirmation of abort.
-    """
-
-
-class ListTipRacks_Responses(NamedTuple):
-
-    TipRackList: str
-    """
-    JSON array of tip rack info with usage counts.
-    """
-
-
-class RefillTipRack_Responses(NamedTuple):
-
-    RefillResult: str
-    """
-    Confirmation and new tip count.
-    """
-
-
-class ResetTipTracking_Responses(NamedTuple):
-
-    ResetResult: str
-    """
-    Confirmation of reset.
+    What was actually stopped, dropped and homed.
     """
 
 
@@ -112,23 +16,79 @@ class SetLights_Responses(NamedTuple):
 
     LightsResult: str
     """
-    Current light state.
+    Resulting light state.
     """
 
 
-class GetRobotInfo_Responses(NamedTuple):
+class LoadHardwareConfig_Responses(NamedTuple):
 
-    RobotInfo: str
+    LoadResult: str
     """
-    Robot details as JSON.
+    Status message.
     """
 
 
-class GetModulesStatus_Responses(NamedTuple):
+class ValidateRecipe_Responses(NamedTuple):
 
-    ModulesStatus: str
+    ValidationResult: str
     """
-    Modules status as JSON array.
+    JSON: {valid, errors, warnings}.
+    """
+
+
+class PauseRun_Responses(NamedTuple):
+
+    PauseResult: str
+    """
+    Status message.
+    """
+
+
+class ResumeRun_Responses(NamedTuple):
+
+    ResumeResult: str
+    """
+    Status message.
+    """
+
+
+class AbortRun_Responses(NamedTuple):
+
+    AbortResult: str
+    """
+    Status message; warns explicitly if the tip drop failed.
+    """
+
+
+class SetModuleLatch_Responses(NamedTuple):
+
+    LatchResult: str
+    """
+    Status message.
+    """
+
+
+class RefillTipRack_Responses(NamedTuple):
+
+    RefillResult: str
+    """
+    Status message.
+    """
+
+
+class ResetTipTracking_Responses(NamedTuple):
+
+    ResetResult: str
+    """
+    Status message.
+    """
+
+
+class SetCameraEnabled_Responses(NamedTuple):
+
+    CameraResult: str
+    """
+    The resulting camera state, same shape as CameraStatus.
     """
 
 
@@ -136,7 +96,7 @@ class Home_Responses(NamedTuple):
 
     HomeResult: str
     """
-    Status after homing.
+    Status message.
     """
 
 
@@ -144,5 +104,37 @@ class ExecuteRecipe_Responses(NamedTuple):
 
     RunId: str
     """
-    ID of the started run for tracking.
+    The robot's own run id, for looking the run up later.
+    """
+
+
+class MoveLabware_Responses(NamedTuple):
+
+    MoveResult: str
+    """
+    Status message.
+    """
+
+
+class SetModuleTemperature_Responses(NamedTuple):
+
+    TemperatureResult: str
+    """
+    Status message.
+    """
+
+
+class ShakeModule_Responses(NamedTuple):
+
+    ShakeResult: str
+    """
+    Status message.
+    """
+
+
+class CaptureImage_Responses(NamedTuple):
+
+    CaptureResult: str
+    """
+    JSON: {saved, path, url, method, detail}.
     """

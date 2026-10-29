@@ -9,8 +9,12 @@ import asyncio
 import json
 import sys
 import os
+from typing import Optional, TYPE_CHECKING
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+if TYPE_CHECKING:
+    from src import OpentronsSiLA2Server
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -58,7 +62,7 @@ class ServerTestClient:
     """Interactive test client for OpentronsSiLA2Server."""
     
     def __init__(self):
-        self.server = None
+        self.server: Optional["OpentronsSiLA2Server"] = None
         self.connected = False
         
     async def connect(self) -> bool:
@@ -83,7 +87,10 @@ class ServerTestClient:
     async def test_hardware_config(self):
         """Test hardware configuration management."""
         print_header("HARDWARE CONFIG MANAGEMENT")
-        
+
+        if self.server is None:
+            raise RuntimeError("Server not initialized — call connect() first")
+
         # List configs
         configs = self.server.list_hardware_configs()
         print_info(f"Available configs: {configs}")
@@ -105,7 +112,10 @@ class ServerTestClient:
     async def test_tip_tracker(self):
         """Test tip tracking functionality."""
         print_header("TIP TRACKER")
-        
+
+        if self.server is None:
+            raise RuntimeError("Server not initialized — call connect() first")
+
         if not self.server.tip_tracker:
             print_warning("Tip tracking disabled")
             return
@@ -124,7 +134,10 @@ class ServerTestClient:
     async def test_json_validation(self):
         """Test JSON recipe validation."""
         print_header("JSON VALIDATION")
-        
+
+        if self.server is None:
+            raise RuntimeError("Server not initialized — call connect() first")
+
         # Valid recipe
         valid_recipe = {
             "ProtocolName": "Test",
@@ -150,7 +163,10 @@ class ServerTestClient:
     async def test_robot_connection(self):
         """Test robot connection."""
         print_header("ROBOT CONNECTION")
-        
+
+        if self.server is None:
+            raise RuntimeError("Server not initialized — call connect() first")
+
         # Initialize
         result = await self.server.cmd_initialize()
         print_info(f"Initialize result: {result}")

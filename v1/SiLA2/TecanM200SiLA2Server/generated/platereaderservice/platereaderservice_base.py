@@ -23,11 +23,7 @@ from .platereaderservice_types import (
 
 if TYPE_CHECKING:
 
-    from typing import TypeVar
-
-    from sila2.server import SilaServer
-
-    Server = TypeVar("Server", bound=SilaServer)
+    from ...server import Server
 
 
 class PlateReaderServiceBase(FeatureImplementationBase, ABC):
@@ -213,7 +209,32 @@ class PlateReaderServiceBase(FeatureImplementationBase, ABC):
         Connect to the Tecan plate reader. Pass empty string for default USB connection.
 
 
-        :param ConnectionString: Connection string (e.g. "usb", "sim", "last"). Empty string uses USB default.
+        :param ConnectionString:
+        How the bridge should find the instrument.
+
+        The SDK enumerates USB devices when the bridge process starts, and
+        connects using a stored "last connection". If the reader has been moved
+        to a different USB port since that was recorded, the stored one matches
+        nothing - the instrument is present and iControl connects to it, but
+        this does not.
+
+          usb      (default) the stored connection, then a fresh scan if it
+                   matched nothing. Both silent, so it is safe unattended, and
+                   it recovers a moved reader on its own
+          ask      as usb, and if the reader is still not found, the SDK's
+                   instrument-selection window. Needs somebody at the machine:
+                   the call waits until the window is answered
+          dialog   the selection window straight away
+          last     the stored connection only, no fallback
+          sim      the Tecan simulator, for working without hardware
+          any      USB or simulator - may connect to a simulator
+
+        Nothing that opens a window is in a default chain: a modal dialog on
+        the lab PC does not fail, it waits, and a workflow running overnight
+        waits with it.
+
+        Leave empty for the configured default (instrument.connection_string).
+
 
         :param metadata: The SiLA Client Metadata attached to the call
 

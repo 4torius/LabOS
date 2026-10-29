@@ -28,10 +28,21 @@ from typing import Dict, List, Optional
 BASE_DIR = Path(__file__).parent.absolute()
 os.chdir(BASE_DIR)
 
+# When stdout/stderr are not a real Windows console (redirected to a file,
+# piped, run from a service or a CI job), Python falls back to the system ANSI
+# codepage (cp1252) and the banner's box-drawing characters raise
+# UnicodeEncodeError before anything starts. Same guard webapp/app.py uses.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 # Add to path
 sys.path.insert(0, str(BASE_DIR))
 
-from src.config_schema import load_lab_config
+from src.settings import get_settings
 
 # Resolve venv Python: prefer LabOS-root venv, fallback to current interpreter
 _venv_python = BASE_DIR.parent / ".venv" / "Scripts" / "python.exe"
@@ -63,15 +74,13 @@ def warn(msg): print(f"  {C.YELLOW}⚠{C.RESET} {msg}")
 
 #                              CONFIG
 
-def load_config() -> dict:
+def load_settings():
     """Load and validate configuration from lab_config.yaml."""
-    config_path = BASE_DIR / "lab_config.yaml"
-    
     try:
-        config, validation = load_lab_config(config_path, apply_defaults=True, strict=True)
-        for warning in validation.warnings:
+        settings = get_settings(BASE_DIR, strict=True)
+        for warning in settings.validation.warnings:
             warn(f"Config warning: {warning}")
-        return config
+        return settings
     except ValueError as e:
         err(f"Invalid configuration: {e}")
         raise SystemExit(2)
@@ -79,7 +88,7 @@ def load_config() -> dict:
         err(f"Error loading configuration: {e}")
         raise SystemExit(2)
 
-CONFIG = load_config()
+SETTINGS = load_settings()
 
 #                              BANNER
 
@@ -192,13 +201,30 @@ def stop_processes(stop_servers: bool = True, stop_webapp: bool = True):
     print()
 
 def get_servers_config() -> Dict:
-    """Get server configurations from lab_config.yaml."""
-    return CONFIG.get('servers', {
-        'tecan': {'name': 'Tecan M200 Pro', 'port': 50300, 'enabled': True},
-        'opentrons': {'name': 'Opentrons Flex', 'port': 50302, 'enabled': True},
-        'mobile': {'name': 'Mobile Robot', 'port': 50201, 'enabled': True},
-        'manual_station': {'name': 'Manual Station', 'port': 50500, 'enabled': True},
-    })
+    """Enabled servers from lab_config.yaml, keyed by config key.
+
+    Returned as plain dicts because the rest of the launcher (and its status
+    output) predates typed settings; the values come from the same validated
+    snapshot every other component uses, so there are no fallback ports to
+    drift out of sync any more — the old hardcoded fallbacks here still
+    referenced 50300 and 50201, neither of which any server has used in months.
+    """
+    return {
+        key: {
+            "name": spec.name,
+            "port": spec.port,
+            "host": spec.host,
+            "enabled": spec.enabled,
+            "remote": spec.remote,
+            "directory": spec.directory,
+            "command_windows": list(spec.command_windows),
+            "command_unix": list(spec.command_unix),
+            "startup_timeout": spec.startup_timeout,
+            "check_file": spec.check_file,
+        }
+        for key, spec in SETTINGS.servers.items()
+    }
+
 
 def print_status():
     """Print status of all components."""
@@ -233,22 +259,6 @@ def print_status():
     print()
 
 #                              STUBS
-
-def ensure_stubs():
-    """Regenerate gRPC stubs if grpc_tools is available."""
-    try:
-        import grpc_tools  # noqa: F401
-        from regen_stubs import regenerate
-        info("Regenerating gRPC stubs...")
-        ok_result = regenerate()
-        if ok_result:
-            ok("gRPC stubs up to date")
-        else:
-            warn("Some stubs failed to generate — see above")
-    except ImportError:
-        warn("grpc_tools not installed, skipping stub generation")
-    except Exception as e:
-        warn(f"Stub generation skipped: {e}")
 
 #                              LAUNCHERS
 
@@ -518,9 +528,6 @@ Examples:
                         help='Stop all running processes')
     
     args = parser.parse_args()
-
-    if not args.status and not args.stop:
-        ensure_stubs()
 
     # Handle command line arguments
     if args.all:

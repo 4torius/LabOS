@@ -1,4 +1,4 @@
-﻿"""Instrument, device, and file API routes."""
+"""Instrument, device, and file API routes."""
 import json
 import logging
 from datetime import datetime
@@ -13,38 +13,18 @@ logger = logging.getLogger(__name__)
 
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from src.config_schema import load_lab_config as _load_lab_config_schema
-
-
-def _load_lab_config(base_dir: Path) -> dict:
-    config_path = base_dir / "lab_config.yaml"
-    try:
-        config, _ = _load_lab_config_schema(config_path, apply_defaults=False, strict=False)
-        return config
-    except Exception as exc:
-        logger.warning(f"Unable to load lab_config.yaml: {exc}")
-    return {}
+from src.settings import get_settings
+from src import plate_tracking
 
 
 def _resolve_library_path(base_dir: Path, config_key: str, default_relative: str) -> Path:
-    config = _load_lab_config(base_dir)
-    configured = ((config.get("paths") or {}).get(config_key) or default_relative)
-    path = Path(configured)
-    if path.is_absolute():
-        return path
-    return base_dir / path
+    """Absolute path for a `paths:` entry in lab_config.yaml."""
+    return get_settings(base_dir).path(config_key, default_relative)
 
 
 def _load_server_endpoint(base_dir: Path, server_key: str, default_host: str, default_port: int) -> tuple[str, int]:
-    try:
-        config = _load_lab_config(base_dir)
-        server_cfg = (config.get("servers") or {}).get(server_key, {})
-        host = server_cfg.get("host", default_host)
-        port = int(server_cfg.get("port", default_port))
-        return host, port
-    except Exception as exc:
-        logger.warning(f"Unable to load endpoint for {server_key}: {exc}")
-    return default_host, default_port
+    """(host, port) for a configured server, or the supplied defaults."""
+    return get_settings(base_dir).endpoint(server_key, default_host, default_port)
 
 
 def create_instruments_router(
@@ -76,19 +56,19 @@ def create_instruments_router(
         except Exception as e:
             state.add_log("warning", f"LabCore discovery failed: {e}", "discovery")
 
+        # Discovery found nothing: fall back to the configured bootstrap seeds so
+        # the dashboard at least shows which instruments are expected, marked
+        # "unknown" rather than pretending they are online.
         try:
-            config = _load_lab_config(BASE_DIR)
-            servers = config.get("servers", {})
-            state.devices = {}
-            for key, srv in servers.items():
-                if srv.get("enabled", True):
-                    from webapp.models import DeviceState
-                    device_id = key.lower().replace("-", "_")
-                    state.devices[device_id] = DeviceState(
-                        id=device_id, name=srv.get("name", key),
-                        type=srv.get("type", "instrument"), status="unknown",
-                        host=srv.get("host", "localhost"), port=srv.get("port", 50051)
-                    )
+            from webapp.models import DeviceState
+            state.devices = {
+                spec.key: DeviceState(
+                    id=spec.key, name=spec.name,
+                    type=str(spec.extra.get("type", "instrument")), status="unknown",
+                    host=spec.host, port=spec.port,
+                )
+                for spec in get_settings(BASE_DIR).enabled_servers().values()
+            }
             state.add_log("info", f"Loaded {len(state.devices)} devices from config", "config")
         except Exception as e:
             state.add_log("error", f"Failed to load devices: {e}", "config")
@@ -168,16 +148,14 @@ def create_instruments_router(
         except Exception as e:
             state.add_log("warning", f"PnP discovery failed: {e}", "system")
 
-        config_path = BASE_DIR / "webapp" / "static" / "config" / "instruments.json"
-        try:
-            with open(config_path) as f:
-                config = json.load(f)
-            for key, inst in config.get("instruments", {}).items():
-                for cmd in inst.get("commands", []):
-                    cmd["important"] = True
-            return {"source": "config_file", "instruments": config.get("instruments", {})}
-        except Exception as e:
-            return {"source": "error", "error": str(e), "instruments": {}}
+        # No third fallback. A static webapp/static/config/instruments.json used
+        # to be served here when discovery failed — it advertised an "incubator"
+        # that does not exist and mobile-robot commands that were never
+        # implemented, so the Workflow Builder offered steps that could only
+        # fail at execution. An empty catalog is the honest answer: it makes the
+        # builder show "no instruments" instead of inventing some.
+        return {"source": "unavailable", "instruments": {},
+                "error": "No instrument could be discovered. Check that the SiLA2 servers are running."}
 
     # Execute command on device
 
@@ -186,7 +164,6 @@ def create_instruments_router(
         data = await request.json()
         command = data.get("command")
         params = data.get("parameters", {})
-        normalized_id = device_id.lower().replace("-", "_")
 
         try:
             core = lab_core
@@ -195,9 +172,10 @@ def create_instruments_router(
                 core = get_lab_core(BASE_DIR)
 
             await core.discover()
-            instrument = core.get_instrument(normalized_id) or core.get_instrument(device_id)
-            if not instrument:
-                return {"status": "error", "error": f"Device '{device_id}' not found"}
+            match = core.resolve_instrument(device_id)
+            if not match:
+                return {"status": "error", "error": match.error}
+            instrument = match.target
 
             actual_id = instrument.id
             if actual_id in state.devices:
@@ -224,8 +202,30 @@ def create_instruments_router(
                     "timestamp": datetime.now().isoformat(),
                 })
 
-                if command == "RefreshTasks":
-                    await ws_manager.broadcast({"type": "mobile_tasks_updated"})
+                if result.options_changed:
+                    # A list a picker offers was re-read after this command
+                    # (the mobile robot's tasks after RefreshTasks, say).
+                    await ws_manager.broadcast({"type": "options_changed",
+                                                "hints": result.options_changed})
+
+                # Plate ID assignment + DB population (Database page: Plates tab).
+                # Same shared logic the workflow-execution path uses, so a
+                # measurement or recipe run by hand (no workflow running) is
+                # tracked identically instead of only reaching the ephemeral
+                # command history. Whether a command does either is declared
+                # by its server.
+                try:
+                    role = core.role_of(actual_id, command)
+                    plate_tracking.track_plate_measurement(
+                        actual_id, command, params, result, role=role,
+                        run_id=None, current_plate_id=None, base_dir=BASE_DIR, state=state,
+                    )
+                    plate_tracking.track_plate_preparation(
+                        actual_id, command, params, result, role=role,
+                        run_id=None, base_dir=BASE_DIR, state=state,
+                    )
+                except Exception as exc:
+                    logger.warning(f"Plate tracking failed for manual command {command}: {exc}")
 
                 state.add_command(
                     device=actual_id, command=command, params=params,
@@ -400,23 +400,12 @@ def create_instruments_router(
                     classes[f.stem] = {'displayName': f.stem, 'description': ''}
         return {"files": files, "classes": classes}
 
-    @router.get("/api/tecan/protocols")
-    async def get_tecan_protocols():
-        protocols = [f.name for f in (LIBRARY_DIR / "Analysis").glob("*.mdfx")] if (LIBRARY_DIR / "Analysis").exists() else []
-        return {"protocols": protocols}
-
-    # Mobile + dynamic options
-
-    @router.get("/api/mobile/tasks")
-    async def get_mobile_tasks():
-        try:
-            if lab_core:
-                tasks = await lab_core.fetch_dynamic_options("mobile_task")
-                return {"tasks": tasks, "count": len(tasks)}
-            return {"tasks": [], "count": 0, "error": "LabCore not initialized"}
-        except Exception as e:
-            logger.error(f"Failed to get mobile tasks: {e}")
-            return {"tasks": [], "count": 0, "error": str(e)}
+    # /api/tecan/protocols, /api/tecan/plate-types and /api/mobile/tasks used
+    # to be here: one instrument's lists, each fetched by name by the pages.
+    # The servers now declare them (the plate types as json_keys_file, the
+    # mobile robot's tasks as a source_property), so they arrive with the
+    # parameter as `options`, and /api/dynamic-options/{ui_hint} serves any
+    # property-backed list without knowing whose it is.
 
     @router.get("/api/dynamic-options/{ui_hint}")
     async def get_dynamic_options(ui_hint: str):
@@ -448,14 +437,12 @@ def create_instruments_router(
 
         try:
             await core.discover()
-            opentrons = next(
-                (i for i in core.list_instruments() if "opentrons" in i.id.lower() or "opentrons" in i.name.lower()),
-                None,
-            )
-            if opentrons is None:
-                return {"success": False, "error": "Opentrons instrument not found"}
+            # Whoever exposes RefillTipRack, not whoever is called "opentrons".
+            target = next(iter(core.instruments_with_command("RefillTipRack")), None)
+            if target is None:
+                return {"success": False, "error": "No online instrument exposes RefillTipRack"}
 
-            result = await core.execute_command(opentrons.id, "RefillTipRack", {"RackSlot": rack_type})
+            result = await core.execute_command(target.id, "RefillTipRack", {"RackSlot": rack_type})
             if not result.success:
                 state.add_log("error", f"RefillTipRack error: {result.error}", "operator")
                 return {"success": False, "error": result.error}

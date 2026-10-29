@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,7 +42,8 @@ except ImportError:
     _DB_AVAILABLE = False
 
 from webapp.models import DeviceState, AppState
-from src.config_schema import DEFAULT_CONFIG, load_lab_config, validate_lab_config, _deep_merge
+from src.config_schema import load_lab_config, validate_lab_config, _deep_merge
+from src.settings import get_settings, reload_settings
 
 logger = logging.getLogger(__name__)
 
@@ -60,30 +61,6 @@ TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 (STATIC_DIR / "css").mkdir(exist_ok=True)
 (STATIC_DIR / "js").mkdir(exist_ok=True)
-
-def load_webapp_config() -> dict:
-    # Single source of truth for these defaults is config_schema.DEFAULT_CONFIG —
-    # a local copy here previously drifted out of sync (e.g. discovery_timeout).
-    defaults = {
-        **DEFAULT_CONFIG["webapp"]["timeouts"],
-        "nodered_url": DEFAULT_CONFIG["webapp"]["nodered_url"],
-    }
-    try:
-        config_path = BASE_DIR / "lab_config.yaml"
-        config, validation = load_lab_config(config_path, apply_defaults=True, strict=False)
-        for warning in validation.warnings:
-            logger.warning(f"Config warning: {warning}")
-        if not validation.ok:
-            logger.error(f"Configuration errors: {'; '.join(validation.errors)}")
-        webapp_cfg = config.get("webapp", {})
-        timeouts = webapp_cfg.get("timeouts", {})
-        return {**defaults, **timeouts, "nodered_url": webapp_cfg.get("nodered_url", defaults["nodered_url"])}
-    except Exception as e:
-        logger.warning(f"Failed to load webapp config: {e}")
-    return defaults
-
-
-WEBAPP_CONFIG = load_webapp_config()
 
 # ==============================================================================
 # WebSocket manager
@@ -115,6 +92,30 @@ class ConnectionManager:
 # Application factory
 # ==============================================================================
 
+def _static_version(static_dir: Path) -> str:
+    """A token that changes when any static file does.
+
+    Every page links the shared scripts by a bare path, so a browser that has
+    seen them once keeps its copy. That is how a template calling a function
+    added to labos-params.js an hour earlier met a cached file that did not
+    have it: the call threw, renderProperties() never re-ran, and the workflow
+    builder went on showing the previous command's parameters while its own
+    dropdown said something else. Nothing on the page looked broken.
+
+    The newest modification time under static/, as a compact string: computed
+    once at startup, so a changed script is fetched and an unchanged one still
+    comes from cache.
+    """
+    newest = 0.0
+    try:
+        for path in static_dir.rglob("*"):
+            if path.is_file():
+                newest = max(newest, path.stat().st_mtime)
+    except OSError:
+        pass
+    return str(int(newest))
+
+
 def create_app() -> "FastAPI":
     if not FASTAPI_AVAILABLE:
         raise ImportError("FastAPI not installed")
@@ -136,7 +137,9 @@ def create_app() -> "FastAPI":
         if not lab_core:
             return
         try:
-            instruments = await lab_core.discover(timeout=float(WEBAPP_CONFIG.get("discovery_timeout", 3.0)))
+            instruments = await lab_core.discover(
+                timeout=get_settings(BASE_DIR).webapp.timeouts.discovery_timeout
+            )
             for inst in instruments:
                 state.devices[inst.id] = DeviceState(
                     id=inst.id, name=inst.name, type=inst.type,
@@ -145,6 +148,41 @@ def create_app() -> "FastAPI":
             state.add_log("info", f"PnP Discovery: found {len(instruments)} instruments")
         except Exception as e:
             state.add_log("warning", f"Startup discovery failed: {e}")
+
+    # Property values pushed by the instruments, rather than polled for. The
+    # watcher owns the subscriptions; the webapp just forwards what it reports.
+    property_watcher = None
+
+    def _on_property_change(entry):
+        state.devices  # noqa: B018 - keep the closure's intent obvious
+        return ws_manager.broadcast({"type": "property_update", **entry.to_dict()})
+
+    # Tell open pages when the set of instruments changes - a server switched
+    # on, switched off, or one nobody had seen before - so a new instrument
+    # appears in the dashboard and the workflow builder without a reload.
+    # Discovery reports on every cache refresh; only a real change is sent.
+    _instrument_signature: dict = {"value": None}
+
+    def _on_discovery_update(instruments):
+        signature = sorted((i.id, i.status, len(i.commands)) for i in instruments)
+        if signature == _instrument_signature["value"]:
+            return
+        first = _instrument_signature["value"] is None
+        _instrument_signature["value"] = signature
+        for inst in instruments:
+            state.devices[inst.id] = DeviceState(
+                id=inst.id, name=inst.name, type=inst.type,
+                status=inst.status, host=inst.host, port=inst.port)
+        if first:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(ws_manager.broadcast({
+            "type": "instruments_changed",
+            "instruments": [{"id": i.id, "name": i.name, "status": i.status} for i in instruments],
+        }))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -159,7 +197,17 @@ def create_app() -> "FastAPI":
         discovery_task = asyncio.create_task(_run_startup_discovery())
         _background_tasks.add(discovery_task)
         discovery_task.add_done_callback(_background_tasks.discard)
-        yield
+
+        nonlocal property_watcher
+        if lab_core:
+            from src.property_watch import PropertyWatcher
+            property_watcher = PropertyWatcher(lab_core, _on_property_change)
+            await property_watcher.start()
+        try:
+            yield
+        finally:
+            if property_watcher is not None:
+                await property_watcher.stop()
 
     app = FastAPI(title="LabOS WebApp", description="Integrated Lab Automation Platform", version="2.0.0", lifespan=lifespan)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
@@ -192,7 +240,10 @@ def create_app() -> "FastAPI":
             })
             state.add_log("warning", f"Intervention required for step {request.step_number}: {request.error.message}", "workflow")
             try:
-                return await asyncio.wait_for(future, timeout=float(WEBAPP_CONFIG["intervention_timeout"]))
+                return await asyncio.wait_for(
+                    future,
+                    timeout=get_settings(BASE_DIR).webapp.timeouts.intervention_timeout,
+                )
             except asyncio.TimeoutError:
                 state.add_log("error", "Intervention timed out, aborting", "workflow")
                 return InterventionAction.ABORT  # type: ignore[union-attr]
@@ -200,8 +251,11 @@ def create_app() -> "FastAPI":
                 pending_interventions.pop(intervention_id, None)
 
         lab_core.set_intervention_callback(webapp_intervention_handler)
+        lab_core.set_callbacks(on_discovery_update=_on_discovery_update)
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    # Available to every template without each route passing it along.
+    templates.env.globals["static_version"] = _static_version(STATIC_DIR)
     # Work around Jinja2 cache key issues when globals include unhashable objects.
     templates.env.cache = None
     if STATIC_DIR.exists():
@@ -227,52 +281,169 @@ def create_app() -> "FastAPI":
     async def workflows_page(request: Request):
         return templates.TemplateResponse(request, "workflows.html", {
             "request": request, "title": "Workflows",
-            "nodered_url": WEBAPP_CONFIG.get("nodered_url", "http://localhost:1880")
+            "nodered_url": get_settings(BASE_DIR).webapp.nodered_url
         })
+
+    # ── Results: whatever folders the instruments declare ────────────────────
+    #
+    # This page used to know four folder names - CSV, Excel, AnIML, XML - which
+    # are the Tecan bridge's, plus a separate deck-photos route for the
+    # Opentrons camera. An instrument writing anywhere else produced data the
+    # web interface could not show. Each server now declares its result folders
+    # (src/catalog.py); the page lists those, and any other folder that exists.
+
+    _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp"}
+
+    def _photos_last(folders: list) -> list:
+        """Measurement data first; a folder that only holds pictures goes last."""
+        def only_images(entry):
+            exts = {e.lower() if e.startswith(".") else "." + e.lower()
+                    for e in entry.get("file_extensions") or []}
+            return bool(exts) and exts <= _IMAGE_SUFFIXES
+        return sorted(folders, key=only_images)
+
+    async def _result_folders() -> list:
+        return _photos_last(await _all_result_folders())
+
+    async def _all_result_folders() -> list:
+        results_dir = get_settings(BASE_DIR).results_dir
+        if lab_core:
+            try:
+                await lab_core.discover()
+                return lab_core.list_result_folders()
+            except Exception as exc:
+                logger.warning(f"Could not read declared result folders: {exc}")
+        # No LabCore: the folders that exist are still worth showing.
+        return [{"name": d.name, "display_name": d.name, "description": "",
+                 "file_extensions": [], "declared_by": [], "declared": False,
+                 "exists": True}
+                for d in sorted(results_dir.iterdir())
+                if d.is_dir() and d.name not in ("runs", "__pycache__") and not d.name.startswith(".")
+                ] if results_dir.is_dir() else []
+
+    def _result_url(folder: str, name: str) -> str:
+        from urllib.parse import quote
+        return f"/api/results/{quote(folder)}/{quote(name)}"
+
+    def _files_in(folder: str) -> list:
+        directory = get_settings(BASE_DIR).results_dir / folder
+        if not directory.is_dir():
+            return []
+        files = []
+        for f in directory.iterdir():
+            if not f.is_file() or f.name.startswith("."):
+                continue
+            suffix = f.suffix.lower()
+            stat = f.stat()
+            files.append({
+                "name": f.name,
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "kind": ("image" if suffix in _IMAGE_SUFFIXES
+                         else "animl" if suffix == ".animl" else "file"),
+                "url": _result_url(folder, f.name),
+            })
+        return sorted(files, key=lambda item: item["modified"], reverse=True)
+
+    async def _result_file(folder: str, filename: str) -> Path:
+        """A file inside a known result folder, or an HTTP error."""
+        known = {entry["name"] for entry in await _result_folders()}
+        if folder not in known:
+            raise HTTPException(404, f"No result folder '{folder}'")
+        results_dir = get_settings(BASE_DIR).results_dir.resolve()
+        file_path = (results_dir / folder / filename).resolve()
+        try:
+            file_path.relative_to(results_dir / folder)
+        except ValueError:
+            raise HTTPException(403, "Access denied")
+        if not file_path.is_file():
+            raise HTTPException(404, "File not found")
+        return file_path
 
     @app.get("/results", response_class=HTMLResponse)
     async def results_page(request: Request):
-        results = []
-        for fmt in ["CSV", "Excel", "AnIML", "XML"]:
-            fmt_dir = RESULTS_DIR / fmt
-            if fmt_dir.exists():
-                for f in fmt_dir.glob("*"):
-                    if f.is_file():
-                        results.append({
-                            "name": f.name, "format": fmt,
-                            "size": f.stat().st_size,
-                            "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat()
-                        })
-        return templates.TemplateResponse(request, "results.html", {"request": request, "title": "Results", "results": results})
+        folders = await _result_folders()
+        for entry in folders:
+            entry["files"] = _files_in(entry["name"])
+        return templates.TemplateResponse(request, "results.html", {
+            "request": request, "title": "Results", "folders": folders})
 
-    @app.get("/api/results/{fmt}/{filename}")
-    async def download_result(fmt: str, filename: str):
-        if fmt not in ["CSV", "Excel", "AnIML", "XML"]:
-            raise HTTPException(400, "Invalid format")
-        file_path = RESULTS_DIR / fmt / filename
-        if not file_path.exists():
-            raise HTTPException(404, "File not found")
-        try:
-            file_path.resolve().relative_to(RESULTS_DIR.resolve())
-        except ValueError:
-            raise HTTPException(403, "Access denied")
-        return FileResponse(path=str(file_path), filename=filename, media_type="application/octet-stream")
+    @app.get("/api/results/folders")
+    async def list_result_folders():
+        """The Results folders, who declared each, and the files in them."""
+        folders = await _result_folders()
+        for entry in folders:
+            entry["files"] = _files_in(entry["name"])
+        return {"folders": folders}
 
-    @app.get("/api/results/{fmt}/{filename}/view")
-    async def view_result(fmt: str, filename: str):
-        if fmt not in ["CSV", "Excel", "AnIML", "XML"]:
-            raise HTTPException(400, "Invalid format")
-        file_path = RESULTS_DIR / fmt / filename
-        if not file_path.exists():
-            raise HTTPException(404, "File not found")
+    @app.get("/api/results/{folder:path}/{filename}/view")
+    async def view_result(folder: str, filename: str):
+        file_path = await _result_file(folder, filename)
         try:
-            file_path.resolve().relative_to(RESULTS_DIR.resolve())
-        except ValueError:
-            raise HTTPException(403, "Access denied")
-        try:
-            return {"filename": filename, "format": fmt, "content": file_path.read_text(encoding="utf-8-sig"), "size": file_path.stat().st_size}
+            return {"filename": filename, "folder": folder, "format": folder,
+                    "content": file_path.read_text(encoding="utf-8-sig"), "size": file_path.stat().st_size}
         except UnicodeDecodeError:
-            return {"filename": filename, "format": fmt, "content": "(Binary file - download to view)", "size": file_path.stat().st_size, "binary": True}
+            return {"filename": filename, "folder": folder, "format": folder,
+                    "content": "(Binary file - download to view)",
+                    "size": file_path.stat().st_size, "binary": True}
+
+    @app.get("/api/results/{folder:path}/{filename}/animl")
+    async def parse_animl_in_folder(folder: str, filename: str):
+        """Structured measurement data from an AnIML file in any result folder."""
+        file_path = await _result_file(folder, filename)
+        try:
+            from src.animl_parser import parse_animl
+            return parse_animl(file_path)
+        except Exception as e:
+            raise HTTPException(500, f"Parse error: {e}")
+
+    @app.get("/api/properties")
+    async def get_property_snapshot(instrument_id: str = ""):
+        """Every instrument property value currently known.
+
+        A page loading mid-session reads this instead of waiting for the next
+        change, and instead of firing one HTTP request per property.
+        """
+        if property_watcher is None:
+            return {"properties": [], "watching": False}
+        return {
+            "properties": property_watcher.snapshot(instrument_id or None),
+            "watching": True,
+        }
+
+    @app.get("/api/images")
+    async def list_deck_images():
+        """Images captured from the robot's on-board camera.
+
+        CaptureImage writes here. Before, captured frames landed in the
+        Opentrons server's own ./images directory, which no route served —
+        taken and then invisible.
+        """
+        images_dir = RESULTS_DIR / "Images"
+        if not images_dir.exists():
+            return {"images": []}
+        files = sorted(
+            ({"name": f.name,
+              "url": f"/api/images/{f.name}",
+              "size": f.stat().st_size,
+              "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat()}
+             for f in images_dir.iterdir()
+             if f.is_file() and f.suffix.lower() in (".jpg", ".jpeg", ".png")),
+            key=lambda i: i["modified"], reverse=True,
+        )
+        return {"images": files}
+
+    @app.get("/api/images/{filename}")
+    async def get_deck_image(filename: str):
+        file_path = RESULTS_DIR / "Images" / filename
+        if not file_path.exists():
+            raise HTTPException(404, "Image not found")
+        try:
+            file_path.resolve().relative_to((RESULTS_DIR / "Images").resolve())
+        except ValueError:
+            raise HTTPException(403, "Access denied")
+        media = "image/png" if file_path.suffix.lower() == ".png" else "image/jpeg"
+        return FileResponse(path=str(file_path), media_type=media)
 
     @app.get("/api/files/animl_results")
     async def list_animl_result_files():
@@ -303,6 +474,13 @@ def create_app() -> "FastAPI":
         except Exception as e:
             raise HTTPException(500, f"Parse error: {e}")
 
+    # Last of the /api/results routes: `{folder:path}` would otherwise swallow
+    # the /view, /animl and /parse routes above it.
+    @app.get("/api/results/{folder:path}/{filename}")
+    async def download_result(folder: str, filename: str):
+        file_path = await _result_file(folder, filename)
+        return FileResponse(path=str(file_path), filename=filename, media_type="application/octet-stream")
+
     @app.get("/hardware", response_class=HTMLResponse)
     async def hardware_page(request: Request):
         return templates.TemplateResponse(request, "hardware.html", {"request": request, "title": "Hardware"})
@@ -320,17 +498,20 @@ def create_app() -> "FastAPI":
     async def recipe_generator_page(request: Request):
         return templates.TemplateResponse(request, "recipe_generator.html", {"request": request, "title": "Recipe Generator"})
 
-    @app.get("/plates", response_class=HTMLResponse)
-    async def plates_page(request: Request):
-        return templates.TemplateResponse(request, "plates.html", {"request": request, "title": "Plates"})
+    # "Database" page: unified Plates (chemical record) + Runs & Log
+    # (automation/execution log) view with tabs. /plates and /runs are kept
+    # as redirects so any saved links/bookmarks still work.
+    @app.get("/database", response_class=HTMLResponse)
+    async def database_page(request: Request):
+        return templates.TemplateResponse(request, "database.html", {"request": request, "title": "Database"})
 
-    @app.get("/history", response_class=HTMLResponse)
-    async def history_page(request: Request):
-        return templates.TemplateResponse(request, "history.html", {"request": request, "title": "History"})
+    @app.get("/plates")
+    async def plates_page_redirect():
+        return RedirectResponse(url="/database#plates")
 
-    @app.get("/runs", response_class=HTMLResponse)
-    async def runs_page(request: Request):
-        return templates.TemplateResponse(request, "runs.html", {"request": request, "title": "Run History"})
+    @app.get("/runs")
+    async def runs_page_redirect():
+        return RedirectResponse(url="/database#runs")
 
     # --------------------------------------------------------------------------
     # Settings API
@@ -386,6 +567,9 @@ def create_app() -> "FastAPI":
                 with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
                     yaml.dump(existing, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
                 os.replace(tmp_path, config_path)
+                # Invalidate the cached snapshot so the new values take effect
+                # without a restart.
+                reload_settings(BASE_DIR)
             except Exception:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
@@ -433,27 +617,12 @@ def create_app() -> "FastAPI":
             pass
         return result
 
-    # --------------------------------------------------------------------------
-    # Logs and history
-    # --------------------------------------------------------------------------
-
-    @app.get("/api/logs")
-    async def get_logs(limit: int = 100):
-        return state.logs[-limit:]
-
-    @app.get("/api/history")
-    async def get_command_history(limit: int = 100):
-        return state.command_history[-limit:][::-1]
-
-    @app.delete("/api/history")
-    async def clear_history():
-        state.command_history = []
-        return {"status": "ok"}
-
-    @app.delete("/api/logs")
-    async def clear_logs():
-        state.logs = []
-        return {"status": "ok"}
+    # Note: the dedicated History page/API (/history, /api/logs, /api/history)
+    # was removed - it was a pure viewer over ephemeral in-memory AppState
+    # logs/command_history with no other consumer. state.add_log()/
+    # add_command() themselves are kept (used ~79 places for their side
+    # effect: in-memory ring buffer + WebSocket broadcast for live dashboard
+    # updates), only the browsing UI/API surface is gone.
 
     # --------------------------------------------------------------------------
     # Routers (extracted modules)
@@ -471,12 +640,12 @@ def create_app() -> "FastAPI":
     app.include_router(create_workflows_router(
         state, ws_manager, lab_core,
         pending_operator_actions, pending_operator_actions_lock, pending_interventions,
-        BASE_DIR, LIBRARY_DIR, WEBAPP_CONFIG
+        BASE_DIR, LIBRARY_DIR
     ))
-    app.include_router(create_operator_router(state, ws_manager, lab_core, pending_operator_actions, pending_operator_actions_lock, BASE_DIR, WEBAPP_CONFIG))
+    app.include_router(create_operator_router(state, ws_manager, lab_core, pending_operator_actions, pending_operator_actions_lock, BASE_DIR))
     app.include_router(create_hardware_router(BASE_DIR, LIBRARY_DIR, lab_core))
     if _DB_AVAILABLE:
-        app.include_router(create_db_router(_db))
+        app.include_router(create_db_router(_db, RESULTS_DIR, state))
 
     # --------------------------------------------------------------------------
     # WebSocket

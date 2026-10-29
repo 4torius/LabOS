@@ -6,16 +6,25 @@ import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
+if TYPE_CHECKING:
+    # Only for type hints (e.g. `-> "InterventionAction"` below) — the real
+    # import stays lazy/inline at each call site to avoid pulling in
+    # src.lab_core (and its SiLA2/discovery deps) at module-import time.
+    from src.lab_core import InterventionAction
+
 try:
     from src import database as _db
-    _DB_AVAILABLE = True
 except ImportError:
     _db = None
-    _DB_AVAILABLE = False
+
+from src import plate_tracking
+from src.run_manager import RunBusy, RunManager
+from src.settings import get_settings, normalize_timeout
+from src.workflow import is_locally_handled
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +61,14 @@ def _resolve_variables(data, variables: dict):
 
 
 def _save_run_archive(BASE_DIR: Path, workflow_name: str, result, step_results: list, run_id: Optional[str] = None):
-    """Persist experiment run metadata to Results/runs/."""
+    """Persist experiment run metadata to the SQLite run archive (run_results).
+
+    Previously also wrote a redundant flat-file backup to Results/runs/*.json —
+    removed: confirmed write-only dead weight (nothing in the repo ever read
+    those files back; the SQLite-backed /api/db/runs is the real, UI-facing
+    archive used by Run History).
+    """
     try:
-        runs_dir = BASE_DIR / "Results" / "runs"
-        runs_dir.mkdir(parents=True, exist_ok=True)
         if run_id is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             safe_name = re.sub(r'[^\w\-]', '_', workflow_name)
@@ -72,10 +85,7 @@ def _save_run_archive(BASE_DIR: Path, workflow_name: str, result, step_results: 
             "errors": result.errors,
             "step_results": step_results,
         }
-        (runs_dir / f"{run_id}.json").write_text(
-            json.dumps(run_data, indent=2, default=str), encoding='utf-8'
-        )
-        if _DB_AVAILABLE:
+        if _db is not None:
             _db.save_run(run_data)
         logger.info(f"Run archived: {run_id}")
         return run_id
@@ -93,12 +103,70 @@ def create_workflows_router(
     pending_interventions: dict,
     BASE_DIR: Path,
     LIBRARY_DIR: Path,
-    WEBAPP_CONFIG: dict,
 ) -> APIRouter:
     router = APIRouter(tags=["workflows"])
     active_executor = None
-    # Prevents concurrent workflow execution (parallel_execution:false is the default).
-    _executor_lock = asyncio.Lock()
+    # Owns background runs and the single-run slot. The instruments are
+    # physical and share a deck, so one run at a time is deliberate; a refusal
+    # names the run holding the slot instead of a bare "busy".
+    runs = RunManager(db=_db)
+
+    # Last known workflow status, kept in sync with every workflow_* broadcast
+    # below (see _track_workflow_status). Workflow progress is otherwise a
+    # pure push model (websocket only) - a client that opens/refreshes a page
+    # AFTER a workflow already started never receives its workflow_start
+    # event and has no way to know one is running until the NEXT broadcast
+    # happens to update whatever local "is a workflow active" flag that page
+    # keeps (confirmed on the Operator page: its own top status card stayed
+    # on "No active workflow" while the base.html bottom bar - which has no
+    # such flag, just renders whatever the last message said - showed the
+    # real live step). GET /api/workflows/live-status below lets a freshly
+    # loaded page ask for the current snapshot instead of only waiting for
+    # the next push.
+    _current_workflow_status: dict = {"active": False}
+
+    def _track_workflow_status(msg: dict) -> None:
+        mtype = msg.get("type", "")
+        if mtype == "workflow_start":
+            _current_workflow_status.clear()
+            _current_workflow_status.update({
+                "active": True, "workflow_name": msg.get("workflow_name"),
+                "step": 0, "total": msg.get("total_steps", 0),
+                "instrument": None, "action": "Starting...", "status": None,
+                "paused": False, "started_at": datetime.now().isoformat(),
+            })
+        elif mtype == "workflow_progress":
+            _current_workflow_status.update({
+                "active": True, "workflow_name": msg.get("workflow_name"),
+                "step": msg.get("step", 0), "total": msg.get("total", 0),
+                "instrument": msg.get("instrument"), "action": msg.get("action"),
+                "status": msg.get("status"), "message": msg.get("message"),
+                "paused": msg.get("status") == "waiting_intervention",
+            })
+        elif mtype == "workflow_paused":
+            _current_workflow_status["paused"] = True
+            _current_workflow_status["message"] = msg.get("message")
+        elif mtype == "workflow_resumed":
+            _current_workflow_status["paused"] = False
+        elif mtype in ("workflow_complete", "workflow_failed", "batch_complete"):
+            _current_workflow_status.clear()
+            _current_workflow_status["active"] = False
+
+    async def _broadcast_workflow(msg: dict) -> None:
+        """ws_manager.broadcast() plus keeping _current_workflow_status in
+        sync - use this (not ws_manager.broadcast directly) for every
+        workflow_*/batch_complete message so a late-joining client's
+        GET /api/workflows/live-status can never disagree with what was
+        actually last broadcast."""
+        _track_workflow_status(msg)
+        await ws_manager.broadcast(msg)
+
+    @router.get("/api/workflows/live-status")
+    async def get_live_workflow_status():
+        """Current workflow snapshot, for a page to sync on load instead of
+        only ever learning about an already-running workflow from the next
+        websocket push (see _current_workflow_status above)."""
+        return dict(_current_workflow_status)
 
     # CRUD
 
@@ -179,6 +247,15 @@ def create_workflows_router(
         if not future.done():
             future.set_result(action_map[action_str])
 
+        # Take it out of the operator queue now rather than waiting for the
+        # waiter's own cleanup, so the buttons disappear on the next refresh
+        # instead of inviting a second click.
+        async with pending_operator_actions_lock:
+            pending_operator_actions[:] = [
+                a for a in pending_operator_actions
+                if a.get("id") != intervention_id
+            ]
+
         state.add_log("info", f"Intervention {intervention_id} resolved: {action_str}", "workflow")
         await ws_manager.broadcast({
             "type": "intervention_resolved",
@@ -195,48 +272,161 @@ def create_workflows_router(
 
     @router.post("/api/workflows/pause")
     async def pause_workflow():
-        if active_executor:
-            active_executor.request_pause()
-            state.add_log("info", "Workflow pause requested", "workflow")
-            await ws_manager.broadcast({"type": "workflow_paused", "message": "Workflow paused by operator"})
-            return {"status": "paused", "message": "Pause requested"}
-        return {"status": "idle", "message": "No active workflow"}
+        """Pause the active run. Kept as an alias of /api/runs/{id}/pause."""
+        result = runs.pause()
+        if result is None:
+            return {"status": "idle", "message": "No active workflow"}
+        state.add_log("info", "Workflow pause requested", "workflow")
+        await _broadcast_workflow({"type": "workflow_paused", "run_id": result.run_id,
+                                   "message": "Workflow paused by operator"})
+        return {"status": "paused", "message": "Pause requested", "run_id": result.run_id}
 
     @router.post("/api/workflows/resume")
     async def resume_workflow():
-        if active_executor:
-            active_executor.request_resume()
-            state.add_log("info", "Workflow resumed by operator", "workflow")
-            await ws_manager.broadcast({"type": "workflow_resumed", "message": "Workflow resumed by operator"})
-            return {"status": "resumed", "message": "Workflow resumed"}
-        return {"status": "idle", "message": "No active workflow"}
+        result = runs.resume()
+        if result is None:
+            return {"status": "idle", "message": "No active workflow"}
+        state.add_log("info", "Workflow resumed by operator", "workflow")
+        await _broadcast_workflow({"type": "workflow_resumed", "run_id": result.run_id,
+                                   "message": "Workflow resumed by operator"})
+        return {"status": "resumed", "message": "Workflow resumed", "run_id": result.run_id}
 
     @router.post("/api/workflows/abort")
     async def abort_workflow():
-        if active_executor:
-            active_executor.request_abort()
-            state.add_log("warning", "Workflow aborted by operator", "workflow")
-            await ws_manager.broadcast({"type": "workflow_failed", "workflow_name": "active", "error": "Aborted by operator"})
-            return {"status": "aborted", "message": "Abort requested"}
-        return {"status": "idle", "message": "No active workflow"}
+        """Abort the active run and report what each instrument actually did.
+
+        The response says what happened, not merely that a stop was requested:
+        an instrument that did not confirm the stop is the single most
+        important thing to put in front of the operator immediately.
+        """
+        active = runs.active()
+        if active is None:
+            return {"status": "idle", "message": "No active workflow"}
+
+        result = await runs.abort(active.run_id)
+        report = result.get("report", [])
+        unresolved = result.get("requires_attention", False)
+
+        state.add_log("warning", f"Workflow aborted by operator: {'; '.join(report)}", "workflow")
+        await _broadcast_workflow({
+            "type": "workflow_failed",
+            "workflow_name": active.workflow_name,
+            "run_id": active.run_id,
+            "error": "Aborted by operator",
+            "abort_report": report,
+            "requires_attention": unresolved,
+        })
+        return {
+            "status": "aborted",
+            "message": "Abort requested",
+            "run_id": active.run_id,
+            "report": report,
+            "requires_attention": unresolved,
+            "warning": ("Some instruments did not confirm the stop — verify them physically"
+                        if unresolved else None),
+        }
 
     # Execute workflow
 
     @router.post("/api/workflows/execute")
     async def execute_workflow(request: Request):
-        """Execute a workflow via PnPWorkflowExecutor (dependency graph + retry + intervention)."""
-        nonlocal active_executor
-        if _executor_lock.locked():
-            return {"status": "busy", "error": "Another workflow is already running"}
-        await _executor_lock.acquire()
-        try:
-            return await _run_workflow(request)
-        finally:
-            _executor_lock.release()
+        """Start a workflow and return its run id immediately.
 
-    async def _run_workflow(request: Request):
-        nonlocal active_executor
+        This used to hold the executor lock *and this HTTP connection* for the
+        whole run — hours, for a workflow that incubates a plate — and only
+        return the run id at the very end, so a closed tab or a proxy read
+        timeout lost the reply entirely. The run is now a background job:
+        poll GET /api/runs/{run_id} or listen on the WebSocket.
+        """
         data = await request.json()
+        workflow_name = data.get("WorkflowName", "Unknown")
+        try:
+            run_state = await runs.start(
+                workflow_name,
+                lambda run_id: _run_workflow(data, run_id),
+                total_steps=len(data.get("Steps", [])),
+            )
+        except RunBusy as busy:
+            return {
+                "status": "busy",
+                "error": str(busy),
+                "active_run": busy.active.to_dict(),
+            }
+        # `status` carries the run's own state ("running"), the same field and
+        # the same vocabulary GET /api/runs/{id} uses, so a caller does not have
+        # to learn a second one. `started` says the request was accepted; the
+        # thing to hold on to is `run_id`.
+        return {"started": True, **run_state.to_dict()}
+
+    @router.post("/api/runs")
+    async def start_run(request: Request):
+        """Alias of /api/workflows/execute under the resource-shaped path."""
+        return await execute_workflow(request)
+
+    @router.get("/api/runs")
+    async def list_runs_in_memory():
+        return {"runs": [r.to_dict() for r in runs.list_runs()],
+                "active": (runs.active().run_id if runs.active() else None)}
+
+    @router.get("/api/runs/{run_id}")
+    async def get_run_state(run_id: str):
+        state_obj = runs.get(run_id)
+        if state_obj is not None:
+            return state_obj.to_dict()
+        # Not in memory (an older run, or after a restart): the database is the
+        # durable record.
+        if _db is not None:
+            record = _db.get_run(run_id)
+            if record:
+                return {"run_id": run_id, "status": record.get("status"),
+                        "workflow_name": record.get("workflow_name"),
+                        "active": False, "from_database": True, **record}
+        raise HTTPException(404, f"Run {run_id} not found")
+
+    @router.get("/api/runs/{run_id}/steps")
+    async def get_run_step_timeline(run_id: str):
+        """Every recorded step attempt, in order — the run's real timeline.
+
+        Available while the run is still going: steps are written as they
+        start and finish, not replayed at the end.
+        """
+        if _db is None:
+            return {"run_id": run_id, "steps": []}
+        return {"run_id": run_id, "steps": _db.get_run_steps(run_id)}
+
+    @router.post("/api/runs/{run_id}/pause")
+    async def pause_run(run_id: str):
+        result = runs.pause(run_id)
+        if result is None:
+            return {"status": "idle", "message": "No such active run"}
+        await _broadcast_workflow({"type": "workflow_paused", "run_id": run_id,
+                                   "message": "Workflow paused by operator"})
+        return result.to_dict()
+
+    @router.post("/api/runs/{run_id}/resume")
+    async def resume_run(run_id: str):
+        result = runs.resume(run_id)
+        if result is None:
+            return {"status": "idle", "message": "No such active run"}
+        await _broadcast_workflow({"type": "workflow_resumed", "run_id": run_id,
+                                   "message": "Workflow resumed by operator"})
+        return result.to_dict()
+
+    @router.post("/api/runs/{run_id}/abort")
+    async def abort_run(run_id: str):
+        result = await runs.abort(run_id)
+        state.add_log("warning", f"Run {run_id} aborted: {'; '.join(result.get('report', []))}",
+                      "workflow")
+        await _broadcast_workflow({
+            "type": "workflow_failed", "run_id": run_id,
+            "workflow_name": "active", "error": "Aborted by operator",
+            "abort_report": result.get("report", []),
+            "requires_attention": result.get("requires_attention", False),
+        })
+        return result
+
+    async def _run_workflow(data: dict, _run_id: str):
+        nonlocal active_executor
         workflow_name = data.get("WorkflowName", "Unknown")
         # Optional variables dict provided by frontend (Settimana 8: dialog variabili)
         user_variables = data.get("variables", {})
@@ -248,7 +438,7 @@ def create_workflows_router(
             data = {**data, "Steps": resolved_steps}
 
         state.add_log("info", f"Starting workflow: {workflow_name}", "workflow")
-        await ws_manager.broadcast({
+        await _broadcast_workflow({
             "type": "workflow_start",
             "workflow_name": workflow_name,
             "total_steps": len(data.get("Steps", []))
@@ -278,44 +468,103 @@ def create_workflows_router(
             if hasattr(instr, '_server') and instr._server:
                 registry.register(instr.id, instr._server)
 
-        # Pre-flight: validate all instrument names before starting
-        _live_names = [i.name.lower() for i in _exec_core.list_instruments()]
-        _missing = []
+        # Pre-flight: every instrument name must resolve to exactly one live
+        # instrument before anything physical starts.
+        _problems = []
         for _step in data.get("Steps", []):
             _instr = (_step.get("Instrument") or "").strip()
-            _instr_lower = _instr.lower()
-            if not _instr_lower or _instr_lower in ("manual", "delay", "refill"):
+            if not _instr or is_locally_handled(_instr, _step.get("Action", "")):
                 continue
-            if not any(_instr_lower in n or n in _instr_lower for n in _live_names):
-                _missing.append(_instr)
-        if _missing:
-            _available = [i.name for i in _exec_core.list_instruments()]
-            return {
-                "status": "error",
-                "error": f"Instrument(s) not found: {', '.join(set(_missing))}. "
-                         f"Available: {', '.join(_available) or 'none'}",
-            }
+            _match = _exec_core.resolve_instrument(_instr)
+            if not _match and _match.error:
+                _problems.append(_match.error)
+        if _problems:
+            return {"status": "error", "error": " | ".join(dict.fromkeys(_problems))}
 
         executor = PnPWorkflowExecutor(registry)
-        _wf_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        _wf_safe = re.sub(r'[^\w\-]', '_', workflow_name)
-        _run_id = f"{_wf_ts}_{_wf_safe}"
+        runs.attach_executor(_run_id, executor)
         shared_wf_ctx: dict = {
             "plate_id": None, "current_plate_id": None,
             "step_results": [], "workflow_name": workflow_name,
             "run_id": _run_id,
         }
 
+        if _db is not None:
+            # Create the run_results row up front, before any step executes.
+            # plates.run_id and instrument_measurements.run_id both carry a
+            # FOREIGN KEY REFERENCES run_results(run_id) - without this,
+            # every plate/measurement saved mid-run (i.e. always, since
+            # _save_run_archive() only runs at the very end) would silently
+            # fail the FK check and never actually persist. Also means a run
+            # that crashes before reaching _save_run_archive() still leaves a
+            # "running" record instead of vanishing from Run History.
+            try:
+                _db.save_run({
+                    "run_id": _run_id, "workflow_name": workflow_name,
+                    "started_at": datetime.now().isoformat(), "status": "running",
+                    "steps_completed": 0, "steps_failed": 0, "steps_skipped": 0,
+                    "step_results": [],
+                })
+            except Exception as exc:
+                logger.warning(f"Failed to pre-create run_results row for {_run_id}: {exc}")
+
+        # Attempt counters and start times, so a retry is a distinct row in the
+        # timeline instead of overwriting the attempt that failed.
+        _attempts: dict = {}
+        _step_started: dict = {}
+
         async def web_execute_step(step, wf_context) -> "CommandResult":
             if wf_context and wf_context.plate_id and not shared_wf_ctx["plate_id"]:
                 shared_wf_ctx["plate_id"] = wf_context.plate_id
 
-            result_dict = await _execute_step(
-                step.instrument, step.action, step.parameters,
-                state, ws_manager, _exec_core, shared_wf_ctx,
-                pending_operator_actions, pending_operator_actions_lock, WEBAPP_CONFIG,
-                base_dir=BASE_DIR,
-            )
+            _n = getattr(step, "step_number", None)
+            _attempts[_n] = _attempts.get(_n, 0) + 1
+            _step_started[_n] = datetime.now()
+            runs.record_step(_run_id, {
+                "step_number": _n,
+                "attempt": _attempts[_n],
+                "instrument": step.instrument,
+                "action": step.action,
+                "parameters": step.parameters,
+                "status": "running",
+                "started_at": _step_started[_n].isoformat(),
+            })
+
+            try:
+                result_dict = await _execute_step(
+                    step.instrument, step.action, step.parameters,
+                    state, ws_manager, _exec_core, shared_wf_ctx,
+                    pending_operator_actions, pending_operator_actions_lock,
+                    base_dir=BASE_DIR,
+                )
+            except (Exception, asyncio.CancelledError) as exc:
+                # CancelledError too, and it is not an Exception subclass: a
+                # step cut off by its own TimeoutSeconds is cancelled from
+                # outside, so without this its row stayed "running" exactly
+                # like an uncaught failure used to.
+                #
+                # A failing step raises, so the completion write below never
+                # ran and the row stayed "running" for ever - four retries of
+                # one step showed up in the timeline as four steps still in
+                # progress, with no reason recorded against any of them. Close
+                # the row here, then let the failure carry on to the retry and
+                # intervention machinery.
+                _failed_at = datetime.now()
+                _began_at = _step_started.pop(_n, None)
+                runs.record_step(_run_id, {
+                    "step_number": _n,
+                    "attempt": _attempts.get(_n, 1),
+                    "instrument": step.instrument,
+                    "action": step.action,
+                    "parameters": step.parameters,
+                    "status": "timeout" if isinstance(exc, asyncio.CancelledError) else "failed",
+                    "ended_at": _failed_at.isoformat(),
+                    "duration_seconds": ((_failed_at - _began_at).total_seconds()
+                                         if _began_at else None),
+                    "error": (str(exc) or "interrotto: TimeoutSeconds dello step scaduto"
+                              if isinstance(exc, asyncio.CancelledError) else str(exc)),
+                })
+                raise
 
             if wf_context and shared_wf_ctx.get("plate_id") and not wf_context.plate_id:
                 wf_context.plate_id = shared_wf_ctx["plate_id"]
@@ -343,15 +592,35 @@ def create_workflows_router(
                 success = True
                 error = None
 
+            final_status = r_status if r_status else ("completed" if success else "error")
             step_record = {
                 "step": getattr(step, 'step_number', None),
                 "instrument": step.instrument,
                 "action": step.action,
-                "status": r_status if r_status else ("completed" if success else "error"),
+                "status": final_status,
                 "error": error,
                 "timestamp": datetime.now().isoformat(),
             }
             shared_wf_ctx["step_results"].append(step_record)
+
+            # Persist the outcome now, not in an end-of-run replay: a run that
+            # crashes mid-way must still leave a diagnosable trail.
+            _ended = datetime.now()
+            _n = getattr(step, "step_number", None)
+            _began = _step_started.pop(_n, None)
+            runs.record_step(_run_id, {
+                "step_number": _n,
+                "attempt": _attempts.get(_n, 1),
+                "instrument": step.instrument,
+                "action": step.action,
+                "parameters": step.parameters,
+                "status": "success" if success else final_status,
+                "ended_at": _ended.isoformat(),
+                "duration_seconds": (_ended - _began).total_seconds() if _began else None,
+                "error": error,
+                "result": result_dict if isinstance(result_dict, dict) else None,
+                "plate_id": shared_wf_ctx.get("current_plate_id"),
+            })
 
             return CommandResult(success=success, data=result_dict, error=error, status=r_status)
 
@@ -359,7 +628,7 @@ def create_workflows_router(
         active_executor = executor
 
         def on_progress(p: "WorkflowProgress"):
-            asyncio.create_task(ws_manager.broadcast({
+            _msg = {
                 "type": "workflow_progress",
                 "workflow_name": p.workflow_name,
                 "step": p.current_step,
@@ -369,17 +638,17 @@ def create_workflows_router(
                 "status": p.step_status.value,
                 "message": p.message,
                 "percent": round((p.current_step / p.total_steps * 100) if p.total_steps else 0),
-            }))
+            }
+            _track_workflow_status(_msg)
+            runs.record_progress(_run_id, _msg)
+            asyncio.create_task(ws_manager.broadcast(_msg))
 
         executor.add_progress_callback(on_progress)
 
         async def on_intervention(req) -> "InterventionAction":
-            from src.lab_core import InterventionAction
             iid = f"step_{req.step_number}_{int(datetime.now().timestamp())}"
-            future: asyncio.Future = asyncio.get_event_loop().create_future()
-            pending_interventions[iid] = future
             total_steps = len(workflow_obj.steps)
-            await ws_manager.broadcast({
+            await _broadcast_workflow({
                 "type": "workflow_progress",
                 "workflow_name": workflow_name,
                 "step": req.step_number,
@@ -390,34 +659,21 @@ def create_workflows_router(
                 "message": f"Step failed: {req.error.message}",
                 "percent": round((req.step_number / total_steps * 100) if total_steps else 0),
             })
-            await ws_manager.broadcast({
-                "type": "intervention_required",
-                "intervention_id": iid,
-                "step": req.step_number,
-                "instrument": req.instrument,
-                "action": req.action,
-                "error": req.error.message,
-                "category": req.error.category.value,
-                "workflow_name": workflow_name
-            })
-            try:
-                timeout = float(WEBAPP_CONFIG.get("intervention_timeout", 3600))
-                return await asyncio.wait_for(future, timeout=timeout)
-            except asyncio.TimeoutError:
-                from src.lab_core import InterventionAction
-                pending_interventions.pop(iid, None)
-                return InterventionAction.SKIP
+            return await _ask_operator(
+                req,
+                intervention_id=iid,
+                pending_interventions=pending_interventions,
+                pending_operator_actions=pending_operator_actions,
+                pending_operator_actions_lock=pending_operator_actions_lock,
+                ws_manager=ws_manager,
+                state=state,
+                base_dir=BASE_DIR,
+                extra_broadcast={"workflow_name": workflow_name},
+            )
 
         executor.set_intervention_callback(on_intervention)
 
-        # Read parallel_execution from lab_config
-        _parallel = False
-        try:
-            from src.config_schema import load_lab_config
-            _cfg, _ = load_lab_config(BASE_DIR / "lab_config.yaml", apply_defaults=False, strict=False)
-            _parallel = bool(_cfg.get("workflow", {}).get("parallel_execution", False))
-        except Exception:
-            pass
+        _parallel = get_settings(BASE_DIR).workflow.parallel_execution
 
         try:
             # Validate upfront so dependency/instrument/command issues are explicit
@@ -425,7 +681,7 @@ def create_workflows_router(
             result = await executor.execute(workflow_obj, validate=True, parallel=_parallel)
         except Exception as e:
             state.add_log("error", f"Workflow error: {e}", "workflow")
-            await ws_manager.broadcast({"type": "workflow_failed", "workflow_name": workflow_name, "error": str(e)})
+            await _broadcast_workflow({"type": "workflow_failed", "workflow_name": workflow_name, "error": str(e)})
             return {"status": "error", "error": str(e)}
         finally:
             active_executor = None
@@ -439,7 +695,7 @@ def create_workflows_router(
                 f"Workflow completed: {workflow_name} ({result.steps_completed} steps in {result.duration_seconds:.1f}s)",
                 "workflow"
             )
-            await ws_manager.broadcast({
+            await _broadcast_workflow({
                 "type": "workflow_complete",
                 "workflow_name": workflow_name,
                 "run_id": run_id,
@@ -455,10 +711,15 @@ def create_workflows_router(
                 "steps_failed": result.steps_failed,
                 "steps_skipped": result.steps_skipped,
                 "duration_seconds": result.duration_seconds,
+                # A run can finish successfully and still have something worth
+                # reading: a step the operator chose to skip says so here.
+                # Without this the summary showed "1 skipped" and no hint of
+                # which one, or why.
+                "notes": result.errors,
             }
         else:
             state.add_log("error", f"Workflow failed: {result.errors}", "workflow")
-            await ws_manager.broadcast({
+            await _broadcast_workflow({
                 "type": "workflow_failed",
                 "workflow_name": workflow_name,
                 "run_id": run_id,
@@ -678,20 +939,14 @@ def create_workflows_router(
         if not samples:
             raise HTTPException(400, "Missing 'samples' list")
 
-        if _executor_lock.locked():
-            raise HTTPException(409, "A workflow is already running")
+        _active = runs.active()
+        if _active is not None:
+            raise HTTPException(409, str(RunBusy(_active)))
 
         batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         workflow_name = workflow_def.get("WorkflowName", "Batch")
 
-        # Read parallel_execution from lab_config (same logic as regular run)
-        _parallel = False
-        try:
-            from src.config_schema import load_lab_config
-            _cfg, _ = load_lab_config(BASE_DIR / "lab_config.yaml", apply_defaults=False, strict=False)
-            _parallel = bool(_cfg.get("workflow", {}).get("parallel_execution", False))
-        except Exception:
-            pass
+        _parallel = get_settings(BASE_DIR).workflow.parallel_execution
 
         state.add_log("info", f"Batch started: {batch_id} ({len(samples)} samples)", "workflow")
         await ws_manager.broadcast({
@@ -704,7 +959,14 @@ def create_workflows_router(
         run_ids = []
         errors = []
 
-        await _executor_lock.acquire()
+        # A batch holds the single run slot for its whole duration: it drives
+        # the same physical instruments, one sample after another.
+        batch_state = await runs.start(
+            f"{workflow_name} (batch of {len(samples)})",
+            lambda _rid: _noop_body(),
+            total_steps=len(samples),
+            run_id=batch_id,
+        )
         try:
             for idx, sample in enumerate(samples):
                 sample_id = sample.get("sample_id", f"sample_{idx + 1}")
@@ -748,7 +1010,7 @@ def create_workflows_router(
                         r = await _execute_step(
                             step.instrument, step.action, step.parameters,
                             state, ws_manager, _exec_core, _sc,
-                            pending_operator_actions, pending_operator_actions_lock, WEBAPP_CONFIG,
+                            pending_operator_actions, pending_operator_actions_lock,
                             base_dir=BASE_DIR,
                         )
                         if isinstance(r, dict):
@@ -766,7 +1028,7 @@ def create_workflows_router(
                         return CommandResult(success=success, data=r, error=error)
 
                     def on_batch_progress(p: "WorkflowProgress", _sid=sample_id):
-                        asyncio.create_task(ws_manager.broadcast({
+                        _msg = {
                             "type": "workflow_progress",
                             "workflow_name": p.workflow_name,
                             "step": p.current_step,
@@ -778,32 +1040,25 @@ def create_workflows_router(
                             "percent": round((p.current_step / p.total_steps * 100) if p.total_steps else 0),
                             "sample_id": _sid,
                             "batch_id": batch_id,
-                        }))
+                        }
+                        _track_workflow_status(_msg)
+                        asyncio.create_task(ws_manager.broadcast(_msg))
 
                     async def on_batch_intervention(req) -> "InterventionAction":
-                        from src.lab_core import InterventionAction
                         iid = f"batch_{batch_id}_step_{req.step_number}_{int(datetime.now().timestamp())}"
-                        future: asyncio.Future = asyncio.get_event_loop().create_future()
-                        pending_interventions[iid] = future
-                        total_steps = len(wf_obj.steps)
-                        await ws_manager.broadcast({
-                            "type": "intervention_required",
-                            "intervention_id": iid,
-                            "step": req.step_number,
-                            "instrument": req.instrument,
-                            "action": req.action,
-                            "error": req.error.message,
-                            "category": req.error.category.value,
-                            "workflow_name": req.workflow_name,
-                            "sample_id": sample_id,
-                            "batch_id": batch_id,
-                        })
-                        try:
-                            timeout = float(WEBAPP_CONFIG.get("intervention_timeout", 3600))
-                            return await asyncio.wait_for(future, timeout=timeout)
-                        except asyncio.TimeoutError:
-                            pending_interventions.pop(iid, None)
-                            return InterventionAction.SKIP
+                        return await _ask_operator(
+                            req,
+                            intervention_id=iid,
+                            pending_interventions=pending_interventions,
+                            pending_operator_actions=pending_operator_actions,
+                            pending_operator_actions_lock=pending_operator_actions_lock,
+                            ws_manager=ws_manager,
+                            state=state,
+                            base_dir=BASE_DIR,
+                            extra_broadcast={"workflow_name": req.workflow_name,
+                                             "sample_id": sample_id,
+                                             "batch_id": batch_id},
+                        )
 
                     executor.set_step_executor(_sample_step)
                     executor.add_progress_callback(on_batch_progress)
@@ -842,7 +1097,7 @@ def create_workflows_router(
                 finally:
                     active_executor = None
 
-            await ws_manager.broadcast({
+            await _broadcast_workflow({
                 "type": "batch_complete",
                 "batch_id": batch_id,
                 "run_ids": run_ids,
@@ -859,7 +1114,7 @@ def create_workflows_router(
                 "errors": errors,
             }
         finally:
-            _executor_lock.release()
+            runs.release(batch_id)
 
     return router
 
@@ -880,6 +1135,21 @@ def _create_version_snapshot(LIBRARY_DIR: Path, workflow_id: str, data: dict, no
 
 # execute_step: shared step execution logic
 
+async def _noop_body() -> dict:
+    """Body for a slot a caller drives itself (the batch runner).
+
+    RunManager.start() wants something to supervise; a batch already owns its
+    own loop over samples, so it just needs the slot reserved and released.
+    """
+    return {"status": "running"}
+
+
+def _timeouts(base_dir: Optional[Path]):
+    """Operator-facing timeouts, read at call time so a Settings edit applies
+    to the next step without restarting the webapp."""
+    return get_settings(base_dir).webapp.timeouts
+
+
 async def _execute_step(
     instrument: str,
     action: str,
@@ -890,76 +1160,100 @@ async def _execute_step(
     workflow_context: dict,
     pending_operator_actions: list,
     pending_operator_actions_lock: asyncio.Lock,
-    WEBAPP_CONFIG: dict,
     base_dir: Optional[Path] = None,
 ) -> dict:
-    """Execute one workflow step: delay, manual, refill, or instrument command."""
+    """Execute one workflow step: a delay, or a command on an instrument.
 
-    instrument_lower = instrument.lower()
+    Every step that is not the builder's Delay block goes to a SiLA2 server,
+    and that includes the people. A manual step is a command on the Manual
+    Station server, which puts the task on the Operator page and returns when
+    the operator confirms it - the same path as any other instrument.
+
+    This used to intercept any instrument with "manual" in its name, and any
+    action with "refill" in its name, and handle both here instead. The Manual
+    Station server was then never called by a workflow; a workflow that asked
+    the operator to refill tips and then recorded the refill asked the
+    operator twice; and SendNotification became a confirmation that blocked
+    the run until someone clicked.
+    """
 
     # Delay
-    if "delay" in instrument_lower or action.lower() == "wait":
+    if is_locally_handled(instrument, action):
         seconds = params.get("seconds", 30)
         state.add_log("info", f"Waiting {seconds} seconds...", "workflow")
         await asyncio.sleep(seconds)
         return {"action": "delay", "seconds": seconds, "status": "completed"}
 
-    # Manual station (requires operator acknowledgment)
-    if "manual" in instrument_lower:
-        return await _wait_operator(
-            action, params, state, ws_manager, pending_operator_actions,
-            pending_operator_actions_lock, WEBAPP_CONFIG["manual_action_timeout"]
-        )
-
-    # Explicit RefillTipRack step
-    if action.lower() in ("refilltiprack", "refill") or "refill" in action.lower():
-        rack_type = params.get("rack_type", "tiprack")
-        return await _wait_refill(
-            rack_type, state, ws_manager, pending_operator_actions,
-            pending_operator_actions_lock, WEBAPP_CONFIG["tip_refill_timeout"]
-        )
-
-    # Generic instrument via LabCore
-    matched_instr = None
-    if core:
-        for instr in core.list_instruments():
-            name_l = instr.name.lower()
-            id_l = instr.id.lower()
-            if (instrument_lower == id_l or instrument_lower == name_l
-                    or instrument_lower in name_l or name_l in instrument_lower
-                    or instrument_lower in id_l):
-                matched_instr = instr
-                break
-
-    if not matched_instr:
-        available = [f"{i.name} ({i.id})" for i in (core.list_instruments() if core else [])]
-        msg = f"Instrument '{instrument}' not found. Running: {available}"
+    # Generic instrument via LabCore, through the shared resolver: an ambiguous
+    # name is reported instead of being silently decided by dict ordering.
+    if not core:
+        msg = f"Cannot execute '{action}': LabCore is not available"
         logger.error(f"[WORKFLOW] {msg}")
         state.add_log("error", msg, "workflow")
         return {"status": "error", "error": msg}
 
+    match = core.resolve_instrument(instrument)
+    if not match:
+        msg = match.error or f"Instrument '{instrument}' not found"
+        logger.error(f"[WORKFLOW] {msg}")
+        state.add_log("error", msg, "workflow")
+        return {"status": "error", "error": msg}
+
+    matched_instr = match.target
     device_id = matched_instr.id
     if device_id in state.devices:
         state.devices[device_id].status = "busy"
         await ws_manager.broadcast({"type": "device_update", "device_id": device_id, "status": "busy"})
 
-    # Auto-inject PlateID/SampleSetID/PlateType for RunMeasurement from workflow context
-    if action.lower() == "runmeasurement" and not params.get("PlateID"):
+    # A command that measures a plate gets the plate prepared earlier in this
+    # run, when the step did not name one. Which commands measure plates, and
+    # which parameter carries the plate, is what the server declared; the
+    # parameters it may leave out are filled from its declared defaults at
+    # dispatch (src/client.py).
+    role = core.role_of(device_id, action)
+    if (role is not None and role.role == "measures_plate" and role.plate_parameter
+            and not params.get(role.plate_parameter) and workflow_context):
         params = dict(params)
-        params["PlateID"] = workflow_context.get("current_plate_id", "")
-        params.setdefault("SampleSetID", "")
-        params.setdefault("PlateType", "")
+        params[role.plate_parameter] = workflow_context.get("current_plate_id") or ""
 
     try:
         result = await core.execute_command(device_id, action, params)
         logger.info(f"[WORKFLOW] {device_id}/{action} → success={result.success}, error={result.error}")
 
+        # A validation that comes back negative is a successful *command* - it
+        # ran, and the verdict is in its result - but inside a workflow it is a
+        # failed *step*. The robot cannot execute that recipe, so every step
+        # after it is going to fail anyway, on a deck that has already been
+        # touched. Better to stop here and ask, while nothing has moved.
+        #
+        # Only inside a workflow: run from the Dashboard, ValidateRecipe stays
+        # what it is, a check that reports and changes nothing.
+        invalid = _validation_failure(action, result)
+        if invalid:
+            raise Exception(invalid)
+
         if result.success:
             state.add_log("info", f"{action} completed on {device_id}", "workflow")
 
-            # Plate ID assignment + DB population (Plates / Run History pages)
-            _wf_track_tecan(device_id, action, params, result, workflow_context, state, base_dir=base_dir)
-            _wf_track_opentrons(device_id, action, params, result, workflow_context, state, base_dir=base_dir)
+            # Plate ID assignment + DB population (Database page: Plates tab)
+            new_plate_id = plate_tracking.track_plate_measurement(
+                device_id, action, params, result, role=role,
+                run_id=workflow_context.get("run_id") if workflow_context else None,
+                current_plate_id=workflow_context.get("current_plate_id") if workflow_context else None,
+                base_dir=base_dir, state=state,
+            )
+            if new_plate_id and workflow_context is not None:
+                workflow_context.setdefault("plate_id", new_plate_id)
+                workflow_context["current_plate_id"] = new_plate_id
+
+            new_plate_id = plate_tracking.track_plate_preparation(
+                device_id, action, params, result, role=role,
+                run_id=workflow_context.get("run_id") if workflow_context else None,
+                base_dir=base_dir, state=state,
+            )
+            if new_plate_id and workflow_context is not None:
+                workflow_context["plate_id"] = new_plate_id
+                workflow_context["current_plate_id"] = new_plate_id
 
             # Tip refill notification on warning message
             result_msg = result.message or (result.data.get("message") if isinstance(result.data, dict) else str(result.data or ""))
@@ -995,7 +1289,7 @@ async def _execute_step(
             if "insufficient tips" in error_msg.lower() or "refill cancelled" in error_msg.lower():
                 await _wait_refill(
                     "all", state, ws_manager, pending_operator_actions,
-                    pending_operator_actions_lock, WEBAPP_CONFIG["tip_refill_timeout"],
+                    pending_operator_actions_lock, _timeouts(base_dir).tip_refill_timeout,
                     context_msg=error_msg
                 )
                 retry = await core.execute_command(device_id, action, params)
@@ -1016,47 +1310,141 @@ async def _execute_step(
         raise
 
 
-async def _wait_operator(action, params, state, ws_manager, pending_operator_actions, lock, timeout):
-    operator_message = (
-        params.get("TaskDescription")
-        or params.get("task_description")
-        or params.get("description")
-        or params.get("message")
-        or f"Esegui: {action}"
-    )
+def _validation_failure(action: str, result) -> Optional[str]:
+    """The complaint a negative validation should stop the workflow with.
 
-    notification_id = int(datetime.now().timestamp() * 1000)
+    None when the step is not a validation, or the recipe checks out.
+    """
+    if action.lower() != "validaterecipe" or not result.success:
+        return None
+    payload = result.data
+    if isinstance(payload, dict):
+        payload = next((v for v in payload.values() if isinstance(v, str)), "")
+    if not isinstance(payload, str) or not payload.strip():
+        return None
+    try:
+        verdict = json.loads(payload)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(verdict, dict) or verdict.get("valid") is not False:
+        return None
+    problems = verdict.get("errors") or ["no reason given"]
+    config = verdict.get("hal_config")
+    return ("La ricetta non è eseguibile con la configurazione hardware attiva"
+            + (f" ({config})" if config else "") + ": "
+            + "; ".join(str(e) for e in problems))
+
+
+async def _ask_operator(
+    req,
+    *,
+    intervention_id: str,
+    pending_interventions: dict,
+    pending_operator_actions: list,
+    pending_operator_actions_lock,
+    ws_manager,
+    state,
+    base_dir,
+    extra_broadcast: Optional[dict] = None,
+):
+    """Ask the operator to retry, skip or abort a step that failed.
+
+    The request goes into `pending_operator_actions` - the same queue manual
+    steps and tip refills use - and not only onto the websocket.
+
+    It used to be websocket-only, and that never worked, in any version of this
+    file. The Operator page pushes an incoming `intervention_required` into a
+    local array, and every three seconds `refreshPendingActions()` replaces that
+    array wholesale with `GET /api/operator/pending`, which interventions were
+    never part of. So the Retry/Skip/Abort buttons appeared and were wiped
+    within three seconds, before anyone could click them - and a page opened
+    after the failure, or reloaded, never saw the request at all. The workflow
+    then sat for the full hour and gave up on its own.
+
+    Being in the queue means it survives the refresh, survives a reload, and is
+    there for whoever walks up to the machine afterwards.
+    """
+    from src.lab_core import InterventionAction
+
+    loop = asyncio.get_event_loop()
+    future: asyncio.Future = loop.create_future()
+    pending_interventions[intervention_id] = future
+
     notification = {
-        "id": notification_id, "type": "operator_notification",
-        "title": f"Azione Manuale: {action}",
-        "message": operator_message,
-        "priority": "warning", "requires_action": True,
-        "timestamp": datetime.now().isoformat(), "action": action, "params": params
+        # The Operator page renders any entry carrying `is_intervention` with
+        # Retry/Skip/Abort instead of a Confirm button; `id` is what its
+        # acknowledge bookkeeping keys on.
+        "id": intervention_id,
+        "is_intervention": True,
+        "intervention_id": intervention_id,
+        "type": "intervention_required",
+        "title": f"Step {req.step_number} fallito — serve una decisione",
+        "message": (f"{req.instrument} → {req.action}\n"
+                    f"{req.error.details or req.error.message}"),
+        "priority": "urgent",
+        "requires_action": True,
+        "timestamp": datetime.now().isoformat(),
+        "step": req.step_number,
+        # The modal in base.html, which pops on whatever page the operator
+        # happens to be looking at, reads step_number/error_message/attempt/
+        # max_attempts. Nothing has ever sent those, so it has always rendered
+        # "Step ? - / Unknown error / Attempt ? / ?" - a dialog demanding a
+        # decision while telling the reader nothing. Both spellings go out.
+        "step_number": req.step_number,
+        "attempt": req.attempt,
+        "max_attempts": req.max_attempts,
+        "instrument": req.instrument,
+        "action": req.action,
+        # CategorizedError.message is a category label ("Hardware error:
+        # ValidateRecipe on Opentrons Flex"); what tells an operator what
+        # actually went wrong is .details, the raw error text. Asking for a
+        # decision without saying what it is about is not a decision.
+        "error": req.error.details or req.error.message,
+        "error_message": req.error.details or req.error.message,
+        "category": req.error.category.value,
+        "category_label": req.error.message,
     }
-    async with lock:
+    async with pending_operator_actions_lock:
         pending_operator_actions.append(notification)
-    await ws_manager.broadcast(notification)
-    state.add_log("warning", f"Waiting for operator: {action}", "workflow")
 
-    timeout_val = (
-        params.get("TimeoutSeconds")
-        or params.get("timeout_seconds")
-        or params.get("timeout")
-        or timeout
-    )
-    start = datetime.now()
-    while True:
-        async with lock:
-            if notification_id not in [int(a.get("id", 0)) for a in pending_operator_actions]:
-                break
-        await asyncio.sleep(1)
-        if (datetime.now() - start).total_seconds() > timeout_val:
-            async with lock:
-                pending_operator_actions[:] = [a for a in pending_operator_actions if int(a.get("id", 0)) != notification_id]
-            raise TimeoutError(f"Operator did not confirm '{action}' within {timeout_val}s")
+    broadcast = dict(notification)
+    if extra_broadcast:
+        broadcast.update(extra_broadcast)
+    await ws_manager.broadcast(broadcast)
+    state.add_log("warning",
+                  f"Step {req.step_number} failed on {req.instrument}: "
+                  f"{req.error.details or req.error.message} "
+                  f"— waiting for a decision on the Operator page", "workflow")
 
-    state.add_log("info", f"Operator completed: {action}", "workflow")
-    return {"status": "completed", "action": action, "acknowledged": True}
+    timeout = get_settings(base_dir).webapp.timeouts.intervention_timeout
+    try:
+        return await asyncio.wait_for(future, timeout=timeout)
+    except asyncio.TimeoutError:
+        # Abort, not skip. Nobody answered, so nobody knows whether the rest of
+        # the workflow still makes sense without this step - and carrying on
+        # without it is the outcome that quietly ruins a plate. Skipping stays
+        # available, as a decision someone takes.
+        state.add_log("error",
+                      f"No decision on step {req.step_number} within {timeout}s "
+                      f"— aborting the workflow", "workflow")
+        await ws_manager.broadcast({
+            "type": "intervention_timeout",
+            "intervention_id": intervention_id,
+            "step": req.step_number,
+            "message": f"Nessuna risposta entro {timeout}s: workflow interrotto",
+        })
+        return InterventionAction.ABORT
+    finally:
+        pending_interventions.pop(intervention_id, None)
+        async with pending_operator_actions_lock:
+            pending_operator_actions[:] = [
+                a for a in pending_operator_actions
+                if a.get("id") != intervention_id
+            ]
+        await ws_manager.broadcast({
+            "type": "intervention_resolved",
+            "intervention_id": intervention_id,
+        })
 
 
 async def _wait_refill(rack_type, state, ws_manager, pending_operator_actions, lock, timeout, context_msg=""):
@@ -1077,262 +1465,17 @@ async def _wait_refill(rack_type, state, ws_manager, pending_operator_actions, l
     start = datetime.now()
     while True:
         async with lock:
-            if notification_id not in [int(a.get("id", 0)) for a in pending_operator_actions]:
+            if str(notification_id) not in [str(a.get("id")) for a in pending_operator_actions]:
                 break
         await asyncio.sleep(1)
-        if (datetime.now() - start).total_seconds() > timeout:
+        if timeout is not None and (datetime.now() - start).total_seconds() > timeout:
             async with lock:
-                pending_operator_actions[:] = [a for a in pending_operator_actions if int(a.get("id", 0)) != notification_id]
+                pending_operator_actions[:] = [a for a in pending_operator_actions if str(a.get("id")) != str(notification_id)]
             raise TimeoutError(f"Operator did not refill tips within {timeout}s")
 
     state.add_log("info", f"Tip rack refilled: {rack_type}", "workflow")
     return {"status": "completed", "action": "RefillTipRack", "rack_type": rack_type}
 
-
-def _wf_track_tecan(device_id, action, params, result, wf_ctx, state, base_dir: Optional[Path] = None):
-    if "tecan" not in device_id.lower() or action not in ["RunMeasurement", "RunAnalysis"]:
-        return
-    plate_id = (params.get("PlateID") or params.get("plate_id") or params.get("plateId")
-                or (wf_ctx.get("current_plate_id") if wf_ctx else None))
-    result_data = result.data if isinstance(result.data, dict) else {}
-    animl_path = result_data.get("animl_file_path", "") or result_data.get("AnIMLFilePath", "")
-
-    if plate_id:
-        state.add_log("info", f"Analysis result linked to plate {plate_id}", "plates")
-
-    # DB: parse AnIML per-well and save with full measurement metadata
-    if _DB_AVAILABLE and animl_path and plate_id:
-        try:
-            from src.animl_parser import parse_animl
-            animl_result = parse_animl(Path(animl_path))
-            run_id = wf_ctx.get("run_id") if wf_ctx else None
-            measurement_id = _db.get_last_measurement_id(run_id) if run_id else None
-
-            protocol_name = params.get("ProtocolFile") or params.get("protocol", "")
-            protocol_id = None
-            if protocol_name:
-                # Build protocol metadata from the first experiment step that has it
-                proto_data: dict = {}
-                for exp_step in animl_result.get("experiment_steps", []):
-                    proto_data = {
-                        "measurement_type": exp_step.get("measurement_type"),
-                        "wavelength_nm": exp_step.get("wavelength_nm"),
-                        "excitation_nm": exp_step.get("excitation_nm"),
-                        "emission_nm": exp_step.get("emission_nm"),
-                        "parameters": exp_step.get("parameters"),
-                    }
-                    if any(v is not None for v in proto_data.values()):
-                        break
-                protocol_id = _db.get_or_create_protocol(protocol_name, proto_data)
-
-            well_values = []
-            for exp_step in animl_result.get("experiment_steps", []):
-                meas_type = exp_step.get("measurement_type")
-                wl_nm = exp_step.get("wavelength_nm")
-                ex_nm = exp_step.get("excitation_nm")
-                em_nm = exp_step.get("emission_nm")
-                for m in exp_step.get("measurements", []):
-                    well_values.append({
-                        "well": m.get("well"),
-                        "value": m.get("value"),
-                        "unit": m.get("unit"),
-                        "measurement_type": meas_type,
-                        "wavelength_nm": wl_nm,
-                        "excitation_nm": ex_nm,
-                        "emission_nm": em_nm,
-                        "cycle": 1,
-                        "timestamp": datetime.utcnow().isoformat(),
-                    })
-            if well_values:
-                _db.save_well_measurements(plate_id, measurement_id, well_values, protocol_id=protocol_id)
-                _db.update_plate_status(plate_id, "measured")
-        except Exception as exc:
-            logger.warning(f"AnIML DB integration failed: {exc}")
-
-
-def _resolve_plate_metadata(recipe_name: str, base_dir: Path) -> dict:
-    """Read active HAL config, find the primary well-plate labware, return plate metadata."""
-    try:
-        active_file = base_dir / "Library" / "HardwareConfig" / ".active"
-        hal_name = active_file.read_text(encoding="utf-8-sig").strip() if active_file.exists() else ""
-        if not hal_name:
-            return {}
-        hal_path = base_dir / "Library" / "HardwareConfig" / hal_name
-        if not hal_path.exists():
-            hal_path = base_dir / "Library" / "HardwareConfig" / f"{hal_name}.json"
-        if not hal_path.exists():
-            return {}
-        hal = json.loads(hal_path.read_text(encoding="utf-8-sig"))
-        for logical, lw in hal.get("Labware", {}).items():
-            load_name = lw.get("LoadName", "")
-            if "wellplate" in load_name.lower():
-                slot = lw.get("Slot", "")
-                plate_json = base_dir / "Library" / "Labware" / "Plates" / f"{load_name}.plate.json"
-                if plate_json.exists():
-                    meta = json.loads(plate_json.read_text(encoding="utf-8-sig"))
-                    return {
-                        "plate_type": load_name,
-                        "display_name": meta.get("display_name"),
-                        "rows": meta.get("rows"),
-                        "columns": meta.get("columns"),
-                        "total_wells": meta.get("total_wells"),
-                        "max_volume_ul": meta.get("max_volume_ul"),
-                        "working_volume_ul": meta.get("working_volume_ul"),
-                        "well_shape": meta.get("well_shape"),
-                        "well_depth_mm": meta.get("well_depth_mm"),
-                        "bottom_type": meta.get("bottom_type"),
-                        "brand": meta.get("brand"),
-                        "tecan_compatible": meta.get("tecan_compatible", True),
-                        "labware_slot": slot,
-                        "hal_config": hal_name.replace(".json", ""),
-                    }
-                return {"plate_type": load_name, "labware_slot": slot,
-                        "hal_config": hal_name.replace(".json", "")}
-    except Exception as exc:
-        logger.warning(f"HAL metadata resolution failed: {exc}")
-    return {}
-
-
-def _extract_wells_from_recipe(recipe_name: str, plate_id: str, base_dir: Path) -> list:
-    """
-    Parse recipe JSON to build per-well records with reagent, volume, liquid_class,
-    phase_name (from Comment steps used as group markers), and pipette_mount.
-
-    Supports: Transfer, TransferWithLiquidClass, Distribute, Aspirate→Dispense pairs.
-    """
-    try:
-        recipe_path = base_dir / "Library" / "Recipes" / f"{recipe_name}.json"
-        if not recipe_path.exists():
-            return []
-        recipe = json.loads(recipe_path.read_text(encoding="utf-8-sig"))
-        steps = recipe.get("Steps", [])
-        now = datetime.utcnow().isoformat()
-
-        # Build a well → cumulative record dict (last write wins per well+reagent combo)
-        well_records: dict = {}
-        current_phase = "default"
-        current_source = ""
-        current_volume = 0.0
-        current_liquid_class = ""
-        current_pipette = recipe.get("Pipettes", {}).get("left") and "left" or "left"
-
-        _transfer_cmds = {
-            "Transfer", "TransferWithLiquidClass", "Distribute",
-            "Aspirate", "Dispense",
-        }
-
-        for step in steps:
-            cmd = step.get("Command", "")
-
-            # Comment steps used as phase/group markers by the recipe generator
-            if cmd == "Comment":
-                msg = step.get("Message", step.get("Text", "")).strip()
-                if msg:
-                    current_phase = msg
-                continue
-
-            # Delay steps mark phase boundaries — reset phase label
-            if cmd == "Delay":
-                current_phase = "default"
-                continue
-
-            if cmd not in _transfer_cmds:
-                continue
-
-            pipette_mount = step.get("PipetteMount", current_pipette)
-            liquid_class = step.get("LiquidClass", current_liquid_class) or ""
-            source = step.get("Source", current_source)
-            volume = float(step.get("Volume", current_volume) or 0)
-
-            if cmd == "Aspirate":
-                # Remember source for the subsequent Dispense
-                current_source = source
-                current_volume = volume
-                current_liquid_class = liquid_class
-                continue
-
-            if cmd == "Dispense":
-                source = source or current_source
-                volume = volume or current_volume
-                liquid_class = liquid_class or current_liquid_class
-
-            destinations = step.get("Destinations") or step.get("Destination") or step.get("Dest") or []
-            if isinstance(destinations, str):
-                destinations = [destinations]
-
-            reagent_name = source.split(":")[0] if ":" in source else source
-
-            for dest in destinations:
-                if not dest or ":" not in dest:
-                    continue
-                labware, well_id = dest.split(":", 1)
-                well_id = well_id.strip()
-                if not well_id:
-                    continue
-                row_label = well_id[0].upper()
-                col_str = well_id[1:]
-                col_num = int(col_str) if col_str.isdigit() else 0
-
-                key = well_id
-                if key in well_records:
-                    # Accumulate volume if same reagent, otherwise keep last write
-                    if well_records[key]["reagent_name"] == reagent_name:
-                        well_records[key]["volume_ul"] = (
-                            well_records[key]["volume_ul"] + volume
-                        )
-                    else:
-                        well_records[key] = dict(well_records[key])
-                        well_records[key]["volume_ul"] = volume
-                        well_records[key]["reagent_name"] = reagent_name
-                else:
-                    well_records[key] = {
-                        "plate_id": plate_id,
-                        "well_id": well_id,
-                        "row_label": row_label,
-                        "col_number": col_num,
-                        "reagent_name": reagent_name,
-                        "volume_ul": volume,
-                        "liquid_class": liquid_class,
-                        "phase_name": current_phase,
-                        "source_well": source,
-                        "pipette_mount": pipette_mount,
-                        "pipetted_at": now,
-                    }
-
-        return list(well_records.values())
-    except Exception as exc:
-        logger.warning(f"Recipe well extraction failed: {exc}")
-        return []
-
-
-def _wf_track_opentrons(device_id, action, params, result, wf_ctx, state, base_dir: Optional[Path] = None):
-    if "opentrons" not in device_id.lower() or action not in ["ExecuteRecipe", "RunRecipe", "run_recipe"]:
-        return
-    recipe_name = params.get("RecipeName") or params.get("recipe_name") or params.get("recipe", "")
-    recipe_slug = re.sub(r'[^a-z0-9]', '', recipe_name.lower())[:12] if recipe_name else "unknown"
-    plate_id = f"PLT-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{recipe_slug}"
-
-    if wf_ctx is not None:
-        wf_ctx["plate_id"] = plate_id
-        wf_ctx["current_plate_id"] = plate_id
-        state.add_log("info", f"Plate ID: {plate_id}", "workflow")
-
-    if _DB_AVAILABLE:
-        try:
-            plate_meta = _resolve_plate_metadata(recipe_name, base_dir) if base_dir else {}
-            wells = _extract_wells_from_recipe(recipe_name, plate_id, base_dir) if base_dir else []
-            run_id = wf_ctx.get("run_id") if wf_ctx else None
-            _db.save_plate({
-                "plate_id": plate_id,
-                "run_id": run_id,
-                "recipe_name": recipe_name,
-                "prepared_at": datetime.utcnow().isoformat(),
-                "status": "prepared",
-                **plate_meta,
-            })
-            if wells:
-                _db.save_wells(wells)
-        except Exception as exc:
-            logger.warning(f"Plate DB save failed: {exc}")
-
-    state.add_log("info", f"Pipetting recorded for plate {plate_id}", "plates")
+# Plate/measurement DB tracking (moved to src/plate_tracking.py, imported as
+# plate_tracking) - shared with webapp/routes/instruments.py's manual command
+# execution path.

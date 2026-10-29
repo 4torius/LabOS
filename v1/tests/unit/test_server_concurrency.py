@@ -103,7 +103,7 @@ class TestRunProtocolBusyCheckFastPath:
 
         first_call_started = asyncio.Event()
 
-        async def _slow_execute(code):
+        async def _slow_execute(code, recipe=None):
             first_call_started.set()
             await asyncio.sleep(0.2)
             return "run-1"

@@ -35,8 +35,8 @@ Run this the morning of (or the night before) the session — nothing kills a tr
 - [ ] http://localhost:5000 loads, Dashboard shows Opentrons, Tecan, Manual Station, and Mobile Robot all **online**
 - [ ] A HAL config is active on the **Hardware** page and matches the physical deck you've set up
 - [ ] Tecan iControl software is **closed** on the host machine (it locks the USB port the bridge needs)
-- [ ] Run `Opentrons_Only_Test.workflow.json` once end-to-end with a scrap plate — confirms liquid handling actually works today, not just that the software is "online"
-- [ ] If mobile-robot plate transport is part of the demo: confirm ArUco markers at each workstation are clean and unobstructed, and do one `ExecuteTask` run with `ExecutionMode: DryRun` first
+- [ ] Run `Test_Bicocca.workflow.json` once end-to-end with a scrap plate — confirms the instruments actually work today, not just that the software is "online"
+- [ ] If mobile-robot plate transport is part of the demo: confirm ArUco markers at each workstation are clean and unobstructed, and run one `ExecuteTask` with someone watching the robot first — `ExecutionMode: DryRun` does **not** simulate, the current server ignores it and the robot moves
 
 ---
 
@@ -82,6 +82,12 @@ One card per instrument, live status, and a button to run any of its commands di
 ### Recipe Generator (`/batch`, also reachable as `/recipes` — same page)
 The normal way to create a recipe: upload or pick an Excel pipetting plan, group columns into phases, pick liquid classes and reservoir sharing per reagent, optionally insert module treatments (heater-shaker, temperature). Click Generate. **Point out explicitly**: the waste estimate is there, but it's inside the collapsible "Notes" panel, not a headline number — expand it or trainees will think it's missing.
 
+**How the waste estimate is calculated, and how much extra to prepare** (this will come up — it's exactly what tells you how much excess solution to make):
+The system doesn't aspirate once per well. With the "Distribute" strategy, it loads the pipette **once** and dispenses into as many wells as fit before the tip runs low, then reloads (a "trip"). Every time it reloads, a small fixed amount — the pipette's own minimum documented volume, e.g. 5 µL for the Flex 1-Channel 1000 µL pipette (a real spec-sheet number, not arbitrary) — stays in the tip as a safety margin and is never dispensed. That's the waste.
+So: more trips needed (more destination wells, or a tip whose capacity is small relative to the total volume) means more waste. It isn't a fixed percentage — it depends on how many reloads that specific reagent needs.
+*Concrete example*: distributing 50 µL to 24 wells with a Flex 1000 µL pipette (995 µL usable after reserving 5 µL of waste) → about 19 wells per trip → 2 trips to cover 24 wells → total waste ≈ 10 µL, against a required volume of 24 × 50 = 1200 µL (under 1%). A different pipette changes the per-trip waste accordingly (e.g. the Flex 50 µL pipette's minimum is 1 µL).
+*How much excess to actually prepare*: required volume (sum across wells) + the estimated waste (shown per reagent in the "Notes" panel) + your own margin for the source reservoir's dead volume (the system does **not** compute that — it depends on the container's shape, not the recipe). With the "Transfer" strategy (fresh tip per well) there's no reload-waste accumulation at all — slower, but without this effect.
+
 ### Hardware (`/hardware`)
 Pick which HAL config (deck layout) is active. This persists across restarts. **Point out**: clicking "Set Active" now shows a warning toast if the robot itself was offline and never actually got the update (versus a plain success toast when it did) — if you see the warning, re-apply once the robot is confirmed online.
 
@@ -91,14 +97,15 @@ Drag instruments onto a canvas, set parameters, connect dependencies, save. Clic
 ### Operator (`/operator`)
 Where a human responds to the system: confirm a manual step, respond to Emergency Stop, refill tips. **Point out**: "Add Log Note" here writes a free-text entry to the session log — it doesn't create a real workflow step, and its own modal says so. Don't rely on it for anything that needs to gate execution.
 
-### Plates (`/plates`) and Run History (`/runs`)
-The persistent, searchable record of every experiment: which plates were made, what runs happened, with rename/notes/delete and an "export for AI context" button useful if someone wants to feed a run's data to an LLM for analysis later.
+### Database (`/database`)
+The persistent, searchable record of every experiment, in two tabs:
+- **Plates** — the chemical record. Every successful Opentrons `ExecuteRecipe` automatically creates a plate here with the recipe's content per well (reagent, volume, % composition). Click a plate to see the well grid, click a well for its full content + linked measurements. If a plate was analyzed with more than one technique (e.g. fluorescence and absorbance), a "Tecnica" dropdown appears — the grid and stats always show one technique at a time, never an average across them. **Point out**: the "Add analysis" button on a plate's detail — it launches a new Tecan `RunMeasurement` with that plate's ID already filled in, so linking a follow-up analysis done days later (e.g. luminescence tomorrow, on the same plate you fluoresced today) is one click instead of copy-pasting an ID.
+- **Runs & Log** — the automation record: what the orchestrator did, step by step, with rename/notes/delete and an "export for AI context" button useful if someone wants to feed a run's data to an LLM for analysis later.
+
+**Point out**: this linking is **automatic only within a single workflow run** — a manual Dashboard command, or a workflow run on a different day, doesn't inherit a previous plate automatically. That's exactly what the "Add analysis" button is for.
 
 ### Results (`/results`)
-Raw output files (Excel, AnIML, CSV) — the actual instrument readouts, separate from the Run History metadata.
-
-### History (`/history`)
-A live session log, cleared on restart. **Point out**: this is easy to confuse with "Run History" — they are not the same thing. History = temporary; Run History = permanent record.
+Raw output files (Excel, AnIML, CSV) — the actual instrument readouts, separate from the Database's Runs & Log metadata.
 
 ### Settings (`/settings`)
 Direct editor for `lab_config.yaml`. Developer/admin territory — most operators won't need this.
@@ -114,7 +121,7 @@ A script you can literally follow live:
 3. **Workflow Builder** — build (or load a pre-made) workflow: Opentrons `ExecuteRecipe` → either a Manual Station `RequestOperatorTask` ("move the plate to the reader") or, if the mobile robot is set up for this session, a `mobile` `ExecuteTask` step (`TaskId`, `ExecutionMode: Normal`) to transport the plate automatically → Tecan `RunMeasurement`. Click Execute.
 4. **Watch the status bar** as the Opentrons step runs — narrate that the system is automatically protecting against leftover tips even though you can't see it happening (§8).
 5. **Operator page** — when the manual step fires, show the trainee confirming it themselves.
-6. **Run History** — after completion, open the run, show the step timeline, and open **Results** to show the actual Tecan output file.
+6. **Database** — after completion, open the **Runs & Log** tab to show the step timeline, then switch to **Plates** to show the same plate's recipe content and its linked measurement, and open **Results** to show the actual Tecan output file.
 
 This single walkthrough touches almost every page and most of the safety machinery worth explaining.
 
@@ -140,7 +147,8 @@ Cover this section explicitly — it prevents most "is this broken?" questions l
 
 - **There is no loop or IF/Else control flow** — the Workflow Builder only supports linear step dependencies. (An earlier version had Loop/IF-Else/Note toolbox blocks that looked usable but weren't actually implemented; they've been removed.)
 - **"Add Log Note"** on the Operator page writes a free-text entry to the session log — it's not a tracked workflow step, and the modal says so. Use a `RequestOperatorTask` workflow step for anything that needs to actually gate execution.
-- **Gripper offsets and liquid-presence verification** (`VerifyLiquid`) can only be set by hand-editing a recipe's JSON — there's no web UI control for either yet.
+- **Gripper offsets** can only be set by hand-editing a recipe's JSON — no web UI control yet.
+- **Liquid-presence verification** (`VerifyLiquid`) *is* now wired into the UI for `Transfer`/`Distribute` — a "Verify aspiration" checkbox per reagent in the Recipe Generator's advanced options. Turning it on makes the Flex pipette physically probe for liquid before aspirating and stop the run cleanly if it doesn't find any — no manual retry needed, the hardware does the probing. Note for `Distribute`: Opentrons only re-arms this probe on a fresh, clean tip, so to actually catch a source well running dry mid-operation (not just being empty at the start), the system automatically uses a new tip for every reload trip when this checkbox is on — more tips used, somewhat slower, but every reload gets checked. Only turn it on for reagents where you actually need the safety net. Backup wells are also assigned automatically whenever the checkbox is on — no count to type in: the system reserves enough extra wells in the same reservoir to cover the reagent's own required volume again, and if the well in use runs dry mid-run it automatically moves to the next one instead of stopping — the run only stops if every assigned well (primary + backups) turns out empty. Check "Quantità richieste / note" after generating to see exactly which wells got assigned, so you know where to load the backup liquid. (The older, standalone-`Aspirate`-only variant of `VerifyLiquid` is still JSON-only, but the Recipe Generator never emits that command anyway.)
 - **Waste estimates** from the Recipe Generator are real but only surfaced as a line of text inside the collapsible "Notes" panel — remind people to expand it.
 
 ---
@@ -158,7 +166,8 @@ Full detail and more scenarios: [OPERATIONS.md](OPERATIONS.md#troubleshooting).
 | A workflow won't validate ("Instrument(s) not found") | Check spelling and that the named instrument is currently online |
 | Recipe fails against the active HAL ("missing labware mapping") | Confirm the correct HAL is active **and actually applied to the robot** — the Hardware page now warns you explicitly if it wasn't |
 | Tip count looks wrong | The automatic tip guard may have force-dropped a tip you didn't expect — check the run's archived log before assuming a bug |
-| Can't find a plate/run you're sure exists | Make sure you're on **Plates**/**Run History** (SQLite-backed) |
+| Can't find a plate/run you're sure exists | Make sure you're on the **Database** page (SQLite-backed), on the right tab (**Plates** vs **Runs & Log**) |
+| Tecan `RunMeasurement` fails with "PlateType not found" | Expected — that plate isn't registered in `PlateTypes.json` yet, or leave `PlateType` empty to use the protocol's default plate. See [SERVERS.md](SERVERS.md#mdfx-protocol-files) |
 
 ---
 
@@ -173,8 +182,8 @@ Full detail and more scenarios: [OPERATIONS.md](OPERATIONS.md#troubleshooting).
 | Recipe/HAL format | [HAL_SYSTEM.md](HAL_SYSTEM.md) |
 | Workflow JSON format | [WORKFLOW_SYSTEM.md](WORKFLOW_SYSTEM.md) |
 | Adding a new instrument | [ADDING_NEW_INSTRUMENT.md](ADDING_NEW_INSTRUMENT.md) |
-| Application logs | Each server's own `logs/` folder; also the webapp's `/api/logs` endpoint and the **History** page for a live session view |
-| Permanent experiment records | **Run History** page / `Library`'s `Results/` folder / each Opentrons run's `run_archive/` |
+| Application logs | Each server's own `logs/` folder — there's no in-browser live log viewer page anymore, it was ephemeral and removed |
+| Permanent experiment records | **Database** page (Plates + Runs & Log tabs) / `Results/` folder / each Opentrons run's `run_archive/` |
 
 ---
 

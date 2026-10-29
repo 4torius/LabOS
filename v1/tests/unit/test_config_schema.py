@@ -30,7 +30,7 @@ class TestValidateLabConfig:
         assert result.errors == []
 
     def test_non_mapping_root_is_rejected(self):
-        result = validate_lab_config(["not", "a", "mapping"])
+        result = validate_lab_config(["not", "a", "mapping"])  # pyright: ignore[reportArgumentType]
         assert not result.ok
         assert "mapping" in result.errors[0]
 

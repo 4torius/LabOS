@@ -307,9 +307,9 @@ def reconstruct_tip_mount_state(
     never populates "result" (a loadPipette command there carries "params"
     only, no resulting pipetteId), so deriving the map from command results
     silently produces an empty map and reconciliation never learns anything
-    (the same pre-existing gap already affects `get_actual_tip_usage()`'s
-    loadLabware/labwareId lookup, which is why it always falls through to
-    "Applying full planned usage for safety" in practice).
+    (`get_actual_tip_usage()`'s loadLabware/labwareId lookup had the exact
+    same bug for the same reason - fixed by sourcing its labware map from
+    get_run_detail()'s data.labware too, same as pipette_mounts here).
     """
     state: Dict[str, bool] = {}
     for cmd in commands:
@@ -340,10 +340,14 @@ def calculate_tips_from_recipe(recipe: Dict[str, Any]) -> Dict[str, int]:
         Dict mapping rack load names to required tip counts
     """
     usage: Dict[str, int] = {}
-    
-    # Find default tip rack - check both Labware (post-HAL) and Requirements.Labware (pre-HAL)
+
+    # Find default tip rack - check both Labware (post-HAL) and Requirements.Labware (pre-HAL).
+    # This is only a FALLBACK now, for steps that don't carry their own "TipRack" field
+    # (legacy single-rack recipes) - a recipe with several distinct tip rack LoadNames
+    # (e.g. one per tip_sizes_ul entry: MyTips_50, MyTips_1000) is resolved per-step below,
+    # never lumped onto one rack regardless of how many racks actually exist.
     default_rack = ""
-    
+
     # Check Labware (post-HAL format with LoadName)
     if "Labware" in recipe:
         for key, value in recipe["Labware"].items():
@@ -354,7 +358,7 @@ def calculate_tips_from_recipe(recipe: Dict[str, Any]) -> Dict[str, int]:
             if "tip" in load_name.lower():
                 if not default_rack:
                     default_rack = load_name
-                    
+
     # Check Requirements.Labware (pre-HAL format with type)
     if not default_rack and "Requirements" in recipe:
         req = recipe["Requirements"]
@@ -367,16 +371,22 @@ def calculate_tips_from_recipe(recipe: Dict[str, Any]) -> Dict[str, int]:
                 if "tip" in load_name.lower():
                     if not default_rack:
                         default_rack = load_name
-                    
-    if not default_rack:
-        return usage
-        
+
     # Calculate from steps
     for step in recipe.get("Steps", []):
         cmd = step.get("Command", "").lower()  # Normalize to lowercase
         tip_strategy = step.get("NewTip", "once")
         tips_to_add = 0
-        
+
+        # Each step is credited to the rack IT actually names (PickUpTip/
+        # GetNextTip/ConsumeTips carry their own "TipRack"), falling back to
+        # the single detected rack only when the step doesn't say - so two
+        # different tip sizes in one recipe get two independent counters
+        # instead of one PickUpTip's usage silently covering both.
+        rack_type = step.get("TipRack") or default_rack
+        if not rack_type:
+            continue
+
         if cmd in ["pickuptip", "pick_up_tip"]:
             tips_to_add = 1
         elif cmd in ["consumetips", "consume_tips"]:
@@ -395,12 +405,12 @@ def calculate_tips_from_recipe(recipe: Dict[str, Any]) -> Dict[str, int]:
                     tips_to_add = 1
             else:  # "once"
                 tips_to_add = 1
-                
+
         if tips_to_add > 0:
-            if default_rack not in usage:
-                usage[default_rack] = 0
-            usage[default_rack] += tips_to_add
-            
+            if rack_type not in usage:
+                usage[rack_type] = 0
+            usage[rack_type] += tips_to_add
+
     return usage
 
 

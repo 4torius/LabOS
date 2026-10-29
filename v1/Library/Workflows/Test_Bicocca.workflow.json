@@ -1,0 +1,190 @@
+{
+  "WorkflowName": "Test_Bicocca",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "dygcadtafeigrdpnagztfdaececwotng",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "xkeqmsaqecoaxpclaefiebursgddrbff",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 3,
+      "Instrument": "manual_station",
+      "Action": "RequestOperatorTask",
+      "Parameters": {
+        "TaskType": "manual_operation",
+        "Priority": "low",
+        "TaskDescription": "Caricare Piastra",
+        "SourceInstrument": ""
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 4,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "cupxdbwrdxtcbxrybaxekhfticuhekfc",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 5,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 6,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "dxvadjvibetfceaybdybsqsqcmzimdfj",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 7,
+      "Instrument": "opentrons",
+      "Action": "ExecuteRecipe",
+      "Parameters": {
+        "RecipeName": "test_6.json"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 8,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "qufptekmeyycpckgbvcpudozfdfkctba",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 9,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "xkeqmsaqecoaxpclaefiebursgddrbff",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 10,
+      "Instrument": "tecan",
+      "Action": "PlateOut",
+      "Parameters": {},
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 11,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 12,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "rxzeeofvewbamneadgvdafucvefidfgb",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 13,
+      "Instrument": "tecan",
+      "Action": "PlateIn",
+      "Parameters": {},
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 14,
+      "Instrument": "tecan",
+      "Action": "RunMeasurement",
+      "Parameters": {
+        "ProtocolFile": "Script1",
+        "PlateType": "greiner_96_wellplate_flat",
+        "PlateID": "",
+        "SampleSetID": ""
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 15,
+      "Instrument": "tecan",
+      "Action": "PlateOut",
+      "Parameters": {},
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 16,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "nnegfohactaltbahtxfnejaaycafskaq",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 17,
+      "Instrument": "tecan",
+      "Action": "PlateIn",
+      "Parameters": {},
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 18,
+      "Instrument": "manual_station",
+      "Action": "RequestOperatorTask",
+      "Parameters": {
+        "TaskType": "manual_operation",
+        "Priority": "low",
+        "TaskDescription": "Prelevare piastra",
+        "SourceInstrument": ""
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 19,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "opfbbcdwkdfpvftuabototnjcedyqfbf",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    }
+  ],
+  "CreatedAt": "2026-10-06T16:07:47.302602",
+  "SchemaVersion": "1.0"
+}

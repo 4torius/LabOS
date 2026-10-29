@@ -11,7 +11,7 @@ SiLA2-native plug-and-play discovery.  Two-phase strategy:
     from the running server via SiLAService — no hardcoded command knowledge.
 
   Phase 2 — Runtime (continuous):
-    mDNS/DNS-SD (_sila2._tcp.local.) discovers every SiLA2-compliant server on
+    mDNS/DNS-SD (_sila._tcp.local.) discovers every SiLA2-compliant server on
     the network segment automatically.  start_continuous_discovery() keeps the
     registry up-to-date as servers come and go.
 
@@ -26,7 +26,6 @@ import logging
 import re
 import socket
 import xml.etree.ElementTree as ET
-import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Callable
@@ -45,22 +44,14 @@ try:
 except ImportError:
     ZEROCONF_AVAILABLE = False
 
+from src.catalog import ServerCatalog, parse_catalog
+from src.resolver import resolve
+from src.settings import get_settings
+
 logger = logging.getLogger(__name__)
 
 
 #                           CONFIGURATION
-
-def _load_discovery_config() -> Dict[str, Any]:
-    """Load discovery configuration from lab_config.yaml."""
-    from src.config_schema import DEFAULT_CONFIG, load_lab_config
-    config_path = Path(__file__).parent.parent / "lab_config.yaml"
-    defaults = DEFAULT_CONFIG["discovery"]
-    try:
-        config, _ = load_lab_config(config_path, apply_defaults=False, strict=False)
-        return config.get("discovery", defaults)
-    except Exception:
-        return defaults
-
 
 #                           DATA STRUCTURES
 
@@ -179,7 +170,12 @@ class PnPServer:
     # Source info
     server_dir: str = ""                    # Directory path if discovered from filesystem
 
-    # Library catalog (from LabOSLibraryProvider SiLA2 feature, populated at discovery)
+    # What the server declares about itself beyond its commands (library and
+    # result folders, display, parameter defaults, plate traceability), read
+    # from LabOSLibraryProvider.LibraryCatalog at discovery. See src/catalog.py.
+    catalog: ServerCatalog = field(default_factory=ServerCatalog)
+    # The library types alone, kept because callers and tests address them
+    # directly; always the same list as catalog.library_types.
     library_catalog: list = field(default_factory=list)
     discovered_via: str = ""                # "port_scan", "directory", "mdns"
     
@@ -386,7 +382,7 @@ class PnPDiscovery:
     SiLA2-native Plug & Play Discovery.
 
     Phase 1 — bootstrap from lab_config.yaml seeds (startup).
-    Phase 2 — mDNS/DNS-SD (_sila2._tcp.local.) continuous runtime discovery.
+    Phase 2 — mDNS/DNS-SD (_sila._tcp.local.) continuous runtime discovery.
     Server self-description via SiLAService is the only source of truth.
     """
 
@@ -400,7 +396,10 @@ class PnPDiscovery:
         self.base_dir = Path(base_dir).absolute() if base_dir else Path.cwd()
         self.xml_parser = SiLAXMLParser()
         self.servers: Dict[str, PnPServer] = {}
-        self._discovery_config = _load_discovery_config()
+        self._settings = get_settings(
+            self.base_dir if (self.base_dir / "lab_config.yaml").exists() else None
+        )
+        self._discovery_config = self._settings.discovery
         
         # mDNS discovery state
         self._zeroconf: Optional[Any] = None
@@ -475,7 +474,7 @@ class PnPDiscovery:
         await self._bootstrap_from_config(timeout)
 
         # Phase 2: mDNS (primary SiLA2-standard runtime discovery)
-        if use_mdns and ZEROCONF_AVAILABLE and self._discovery_config.get("enabled", True):
+        if use_mdns and ZEROCONF_AVAILABLE and self._discovery_config.enabled:
             await self._discover_via_mdns(timeout)
 
         # Fetch full metadata from each online server via SiLAService
@@ -493,29 +492,15 @@ class PnPDiscovery:
         is taken from config; all capability metadata is fetched from the
         running server via SiLAService in _query_server_metadata().
         """
-        config_path = self.base_dir / "lab_config.yaml"
-        if not config_path.exists():
-            return
-
         try:
-            with open(config_path) as f:
-                config = yaml.safe_load(f)
-
-            servers_config = config.get("servers", {})
             loop = asyncio.get_running_loop()
 
-            async def _check_one(srv_key: str, srv_config: dict):
-                if not srv_config.get("enabled", True):
-                    return
-
-                host = srv_config.get("host", "localhost")
-                port = srv_config.get("port", 0)
-                name = srv_config.get("name", srv_key)
-
+            async def _check_one(spec):
+                host, port, name = spec.host, spec.port, spec.name
                 if not port:
                     return
 
-                server_key = self._make_server_key(srv_key)
+                server_key = self._make_server_key(spec.key)
 
                 # Skip if already in registry (e.g. found by mDNS first)
                 if server_key in self.servers:
@@ -538,7 +523,9 @@ class PnPDiscovery:
                 self.servers[server_key] = server
                 logger.info(f"Bootstrap: {name} ({host}:{port}) — {'ONLINE' if is_online else 'OFFLINE'}")
 
-            await asyncio.gather(*[_check_one(k, v) for k, v in servers_config.items()])
+            await asyncio.gather(
+                *[_check_one(spec) for spec in self._settings.enabled_servers().values()]
+            )
 
         except Exception as e:
             logger.warning(f"Error bootstrapping from config: {e}")
@@ -547,14 +534,14 @@ class PnPDiscovery:
         """
         Discover SiLA2 servers via mDNS/DNS-SD (SiLA2 standard).
         
-        SiLA2 servers advertise themselves as _sila2._tcp.local. services.
+        SiLA2 servers advertise themselves as _sila._tcp.local. services.
         This is the preferred discovery method per SiLA2 specification.
         """
         if not ZEROCONF_AVAILABLE:
             logger.info("Zeroconf not available, skipping mDNS discovery")
             return
         
-        service_type = self._discovery_config.get("service_type", "_sila2._tcp.local.")
+        service_type = self._discovery_config.service_type
         logger.info(f"Starting mDNS discovery for {service_type}")
         
         discovered = []
@@ -659,7 +646,10 @@ class PnPDiscovery:
                         continue
                     
                     server = PnPServer(
-                        name=properties.get("name", name),
+                        # The sila2 library announces the name as `server_name`
+                        # and uses the UUID as the service name; the SiLAService
+                        # query that follows replaces this with the real name.
+                        name=properties.get("server_name") or properties.get("name") or name,
                         host=addr,
                         port=port,
                         uuid=properties.get("uuid", ""),
@@ -722,7 +712,7 @@ class PnPDiscovery:
         if self._zeroconf:
             return True  # Already running
         
-        service_type = self._discovery_config.get("service_type", "_sila2._tcp.local.")
+        service_type = self._discovery_config.service_type
         loop = asyncio.get_event_loop()
 
         class ContinuousListener(ServiceListener):
@@ -791,7 +781,7 @@ class PnPDiscovery:
                     properties[key] = value
             
             server = PnPServer(
-                name=properties.get("name", server_name),
+                name=properties.get("server_name") or properties.get("name") or server_name,
                 host=addr,
                 port=port,
                 uuid=properties.get("uuid", ""),
@@ -820,13 +810,17 @@ class PnPDiscovery:
     async def _handle_mdns_service_removed(self, name: str):
         """Handle mDNS service removal."""
         try:
-            # Find and mark server as offline
-            server_key = self._make_server_key(name.split(".")[0])
-            if server_key in self.servers:
-                self.servers[server_key].server_online = False
-                self.servers[server_key].hardware_online = False
-                self.servers[server_key].hardware_status = "offline"
-                logger.info(f"mDNS: Server offline - {name}")
+            # The service name is the server's UUID, while the registry may
+            # hold it under a lab_config key ("tecan"). Match on either, or the
+            # withdrawal of a configured server was never noticed.
+            announced = name.split(".")[0]
+            server_key = self._make_server_key(announced)
+            for key, server in self.servers.items():
+                if key == server_key or (server.uuid and server.uuid == announced):
+                    server.server_online = False
+                    server.hardware_online = False
+                    server.hardware_status = "offline"
+                    logger.info(f"mDNS: Server offline - {server.name}")
         except Exception as e:
             logger.error(f"Error handling mDNS service remove: {e}")
 
@@ -915,18 +909,23 @@ class PnPDiscovery:
             if server.hardware_status in ("unknown", "offline"):
                 server.hardware_status = "idle"
 
-            # ── LabOS Library Catalog (LabOSLibraryProvider feature, optional) ──
+            # ── What the server declares about itself (LabOSLibraryProvider) ──
+            # Optional: a server without the feature simply declares nothing.
             try:
-                import json as _json
                 catalog_feature = getattr(client, 'LabOSLibraryProvider', None)
                 if catalog_feature is not None:
-                    catalog_json = str(catalog_feature.LibraryCatalog.get())
-                    server.library_catalog = _json.loads(catalog_json).get("library_types", [])
+                    catalog = parse_catalog(str(catalog_feature.LibraryCatalog.get()),
+                                            source=server.name)
+                    for problem in catalog.problems:
+                        logger.warning("Catalog of %s: %s", server.name, problem)
+                    server.catalog = catalog
+                    server.library_catalog = catalog.library_types
                     logger.debug(
-                        "Library catalog loaded for %s: %d type(s)", server.name, len(server.library_catalog)
+                        "Catalog loaded for %s: %d library type(s), %d result folder(s)",
+                        server.name, len(catalog.library_types), len(catalog.result_types),
                     )
-            except Exception:
-                pass  # Server does not implement LabOSLibraryProvider — fallback to lab_config.yaml
+            except Exception as exc:
+                logger.debug("No catalog from %s: %s", server.name, exc)
 
             logger.info(
                 "sila2 query OK: %s (%s) — %d feature(s)", server.name, server.server_type, len(sila_features)
@@ -1023,32 +1022,18 @@ class PnPDiscovery:
     #                         PUBLIC API
     
     def get_server(self, name_or_key: str) -> Optional[PnPServer]:
+        """Find a discovered server by registry key or announced name.
+
+        Delegates to the shared resolver so this agrees with LabCore instead of
+        implementing its own substring rule (it used to return the first
+        partial match in dict order, which on a collision was effectively a
+        coin flip).
         """
-        Get a server by name or key.
-        
-        Supports:
-        - Exact key match: "tecan"
-        - Exact name match: "Tecan"
-        - Partial match: "tecan" matches "Tecan M200 Pro"
-        """
-        name_lower = name_or_key.lower()
-        
-        # Try exact key match
-        if name_lower in self.servers:
-            return self.servers[name_lower]
-        
-        # Try exact name match
-        for server in self.servers.values():
-            if server.name.lower() == name_lower:
-                return server
-        
-        # Try partial match
-        for server in self.servers.values():
-            if name_lower in server.name.lower():
-                return server
-        
-        return None
-    
+        return resolve(
+            name_or_key,
+            [(key, server.name, server) for key, server in self.servers.items()],
+        ).target
+
     def list_servers(self) -> List[PnPServer]:
         """List all discovered servers."""
         return list(self.servers.values())

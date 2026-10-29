@@ -1,11 +1,107 @@
 {
+  "_comment": "What this server declares about itself: the files it reads (library_types), the Results/ folders the bridge writes (result_types, created at startup), parameters a workflow may leave out, and that RunMeasurement measures a plate and returns AnIML. See v1/src/catalog.py.",
+  "display": {
+    "icon": "bi-eye-fill",
+    "color": "success"
+  },
   "library_types": [
     {
       "hint": "analysis",
       "display_name": "Analysis Protocol",
       "folder": "Library/Analysis",
       "file_extension": ".mdfx",
-      "parameter_names": ["ProtocolFile", "AnalysisFile"]
+      "parameter_names": [
+        "ProtocolFile",
+        "AnalysisFile"
+      ]
+    },
+    {
+      "hint": "tecan_connect_mode",
+      "display_name": "How to connect",
+      "values": [
+        "",
+        "usb",
+        "ask",
+        "dialog",
+        "last",
+        "sim",
+        "any"
+      ],
+      "value_labels": {
+        "": "default (from the server's config.yaml)",
+        "usb": "usb - stored connection, then a fresh scan (unattended-safe)",
+        "ask": "ask - as above, then the picker if still not found (needs someone at the PC)",
+        "dialog": "dialog - the picker, straight away (needs someone at the PC)",
+        "last": "last - the stored connection only",
+        "sim": "sim - the Tecan simulator",
+        "any": "any - USB or simulator, whichever answers"
+      },
+      "parameter_names": [
+        "ConnectionString"
+      ]
+    },
+    {
+      "hint": "reader_plate_type",
+      "display_name": "Plate type",
+      "json_keys_file": "Library/Analysis/PlateTypes.json",
+      "parameter_names": [
+        "PlateType"
+      ]
     }
-  ]
+  ],
+  "result_types": [
+    {
+      "key": "tecan_xml",
+      "display_name": "Plate reader - raw XML",
+      "folder": "Results/XML",
+      "file_extensions": [
+        ".xml"
+      ],
+      "description": "Native Tecan export, always written"
+    },
+    {
+      "key": "tecan_excel",
+      "display_name": "Plate reader - Excel",
+      "folder": "Results/Excel",
+      "file_extensions": [
+        ".xls",
+        ".xlsx"
+      ],
+      "description": "Written when the bridge's GenerateExcel is on"
+    },
+    {
+      "key": "animl",
+      "display_name": "AnIML",
+      "folder": "Results/AnIML",
+      "file_extensions": [
+        ".animl"
+      ],
+      "description": "ASTM E1947 analytical data, linked to plates"
+    },
+    {
+      "key": "tecan_csv",
+      "display_name": "Plate reader - CSV",
+      "folder": "Results/CSV",
+      "file_extensions": [
+        ".csv"
+      ]
+    }
+  ],
+  "parameter_defaults": {
+    "RunMeasurement": {
+      "PlateID": "",
+      "SampleSetID": "",
+      "PlateType": ""
+    },
+    "Connect": {
+      "ConnectionString": ""
+    }
+  },
+  "traceability": {
+    "RunMeasurement": {
+      "role": "measures_plate",
+      "plate_parameter": "PlateID",
+      "protocol_parameter": "ProtocolFile"
+    }
+  }
 }

@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <style>
     /* Main Layout */
@@ -146,7 +146,6 @@
     .tool-block.opentrons { border-left: 3px solid #0d6efd; }
     .tool-block.tecan { border-left: 3px solid #198754; }
     .tool-block.mobile { border-left: 3px solid #ffc107; }
-    .tool-block.incubator { border-left: 3px solid #dc3545; }
     .tool-block.delay { border-left: 3px solid #0dcaf0; }
     .tool-block.loop { border-left: 3px solid #6f42c1; }
     .tool-block.condition { border-left: 3px solid #fd7e14; }
@@ -219,7 +218,6 @@
     .workflow-step.opentrons { border-left: 4px solid #0d6efd; }
     .workflow-step.tecan { border-left: 4px solid #198754; }
     .workflow-step.mobile { border-left: 4px solid #ffc107; }
-    .workflow-step.incubator { border-left: 4px solid #dc3545; }
     .workflow-step.delay { border-left: 4px solid #0dcaf0; }
     .workflow-step.loop { border-left: 4px solid #6f42c1; background: rgba(111,66,193,0.1); }
     .workflow-step.condition { border-left: 4px solid #fd7e14; background: rgba(253,126,20,0.1); }
@@ -373,27 +371,9 @@
         <div class="toolbox">
             <div class="toolbox-section" id="toolbox-instruments">
                 <h6><i class="bi bi-cpu"></i> Instruments</h6>
-                <!-- Initial fallback blocks - will be replaced by discovered instruments -->
-                <div class="tool-block opentrons" data-type="opentrons" draggable="true">
-                    <i class="bi bi-droplet-fill text-primary"></i>
-                    <span>Opentrons</span>
-                </div>
-                <div class="tool-block tecan" data-type="tecan" draggable="true">
-                    <i class="bi bi-eye-fill text-success"></i>
-                    <span>Tecan</span>
-                </div>
-                <div class="tool-block mobile" data-type="mobile" draggable="true">
-                    <i class="bi bi-robot text-warning"></i>
-                    <span>Mobile</span>
-                </div>
-                <div class="tool-block incubator" data-type="incubator" draggable="true">
-                    <i class="bi bi-thermometer-half text-danger"></i>
-                    <span>Incubator</span>
-                </div>
-                <div class="tool-block manual" data-type="manual" draggable="true">
-                    <i class="bi bi-hand-index-thumb text-info"></i>
-                    <span>Manual</span>
-                </div>
+                <!-- Filled from discovery. Four fixed blocks used to sit here
+                     until it answered, offering instruments that may not exist. -->
+                <div class="text-muted small px-2" id="toolboxPlaceholder">Discovering instruments…</div>
             </div>
             
             <div class="toolbox-section">
@@ -454,14 +434,7 @@
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <div class="mb-3" id="halConfigSection">
-                    <label class="form-label">HAL Config (for Opentrons)</label>
-                    <select class="form-select" id="halSelect">
-                        <option value="">-- None (skip) --</option>
-                    </select>
-                    <small class="text-muted">Required only for Opentrons commands</small>
-                </div>
-                <div class="mb-3">
+<div class="mb-3">
                     <label class="form-label">Summary</label>
                     <div class="alert alert-secondary" id="executeSummary">
                         0 steps to execute
@@ -605,43 +578,64 @@ var UTILITY_BLOCKS = {
     // toolbox affordance rather than a real feature.
 };
 
-// ICON/COLOR mapping for known instrument types
-var INSTRUMENT_STYLES = {
-    tecan: { icon: 'bi-eye-fill', color: 'success' },
-    opentrons: { icon: 'bi-droplet-fill', color: 'primary' },
-    mobile: { icon: 'bi-robot', color: 'warning' },
-    incubator: { icon: 'bi-thermometer-half', color: 'danger' },
-    manual: { icon: 'bi-hand-index-thumb', color: 'info' },
-    _default: { icon: 'bi-gear', color: 'secondary' }
-};
+// The toolbox shows what discovery actually found, plus the utility blocks
+// above. Each instrument is keyed by its id - unique by construction - and
+// looks the way its server declares (LabOS.instrumentStyle). It used to be
+// keyed by whether its name contained "tecan", "opentrons", "mobile" or
+// "manual", so every other instrument got the key "_default" and a second
+// new instrument silently replaced the first in the toolbox.
 
-// Map server names to keys for styling
-function getInstrumentKey(name) {
-    var lower = name.toLowerCase();
-    if (lower.indexOf('tecan') !== -1) return 'tecan';
-    if (lower.indexOf('opentrons') !== -1) return 'opentrons';
-    if (lower.indexOf('mobile') !== -1) return 'mobile';
-    if (lower.indexOf('incubator') !== -1) return 'incubator';
-    if (lower.indexOf('manual') !== -1) return 'manual';
-    return '_default';
+function _normName(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// Which toolbox key a step's written Instrument means: the same order of
+// preference as the orchestrator's resolver (src/resolver.py) - the id, then
+// the name ignoring case and punctuation, then an unambiguous containment.
+function _instrumentKeyFor(written) {
+    if (!written) return 'note';
+    if (INSTRUMENTS[written]) return written;
+    var target = _normName(written), keys = Object.keys(INSTRUMENTS), i;
+    for (i = 0; i < keys.length; i++) {
+        if (_normName(keys[i]) === target || _normName(INSTRUMENTS[keys[i]].name) === target) return keys[i];
+    }
+    var partial = keys.filter(function (k) {
+        var name = _normName(INSTRUMENTS[k].name), id = _normName(k);
+        return target && ((name && (name.indexOf(target) !== -1 || target.indexOf(name) !== -1)) ||
+                          (id && (id.indexOf(target) !== -1 || target.indexOf(id) !== -1)));
+    });
+    return partial.length === 1 ? partial[0] : 'note';
+}
+
+function _instrumentBorder(inst) {
+    var colors = ['primary', 'secondary', 'success', 'danger', 'warning', 'info', 'dark'];
+    return colors.indexOf(inst && inst.color) !== -1 ? 'var(--bs-' + inst.color + ')' : 'var(--bs-secondary)';
+}
+
+// A server came online, went away, or re-read a picker's list (base.html).
+// Re-read the instruments without touching the canvas.
+function onInstrumentsChanged() {
+    loadInstrumentsFromServers({ keepCanvas: true });
 }
 
 // Load instruments from SiLA2 servers via API
-function loadInstrumentsFromServers() {
+function loadInstrumentsFromServers(options) {
+    var keepCanvas = options && options.keepCanvas;
     console.log('🔍 Discovering SiLA2 servers...');
-    
+
     fetch('/api/instruments/commands')
         .then(function(resp) { return resp.json(); })
         .then(function(data) {
             console.log('📡 Instruments loaded:', data.source);
-            
+
             var instruments = data.instruments || {};
-            
+            // Start from nothing, so an instrument that went away leaves.
+            Object.keys(INSTRUMENTS).forEach(function (k) { delete INSTRUMENTS[k]; });
+
             // Convert server data to INSTRUMENTS format
-            Object.keys(instruments).forEach(function(name) {
-                var inst = instruments[name];
-                var key = getInstrumentKey(name);
-                var style = INSTRUMENT_STYLES[key] || INSTRUMENT_STYLES._default;
+            Object.keys(instruments).forEach(function(key) {
+                var inst = instruments[key];
+                var style = LabOS.instrumentStyle(inst);
                 
                 // Build commands array from the commands list
                 // API returns: {commands: [{id, name, description, important, feature, parameters}]}
@@ -657,6 +651,7 @@ function loadInstrumentsFromServers() {
                             label: '⭐ ' + (cmd.name || cmd.id),
                             description: cmd.description || '',
                             important: true,
+                            feature: cmd.feature || '',
                             parameters: cmd.parameters || []
                         }, cmdProps));
                     }
@@ -671,14 +666,14 @@ function loadInstrumentsFromServers() {
                             label: cmd.name || cmd.id,
                             description: cmd.description || '',
                             important: false,
+                            feature: cmd.feature || '',
                             parameters: cmd.parameters || []
                         }, cmdProps));
                     }
                 });
                 
-                // Use lowercase key for consistency
                 INSTRUMENTS[key] = {
-                    name: inst.name || name,
+                    name: inst.name || key,
                     icon: style.icon,
                     color: style.color,
                     online: inst.status === 'online',
@@ -695,7 +690,12 @@ function loadInstrumentsFromServers() {
             updateToolbox();
 
             console.log('✅ INSTRUMENTS loaded:', Object.keys(INSTRUMENTS));
-            _restoreBuilderState();
+            if (keepCanvas) {
+                renderSteps();
+                renderProperties();
+            } else {
+                _restoreBuilderState();
+            }
         })
         .catch(function(err) {
             console.error('❌ Failed to load instruments:', err);
@@ -742,6 +742,8 @@ function updateToolbox() {
     // Clear existing tool blocks
     var existingBlocks = strumentiContainer.querySelectorAll('.tool-block');
     existingBlocks.forEach(function(block) { block.remove(); });
+    var placeholder = document.getElementById('toolboxPlaceholder');
+    if (placeholder) placeholder.remove();
     
     // Add discovered instruments (excluding utilities)
     Object.keys(INSTRUMENTS).forEach(function(key) {
@@ -749,9 +751,11 @@ function updateToolbox() {
         if (inst.isUtility || inst.isControl || inst.isAnnotation) return;
         
         var block = document.createElement('div');
-        block.className = 'tool-block ' + key;
+        block.className = 'tool-block';
+        block.style.borderLeft = '3px solid ' + _instrumentBorder(inst);
         block.setAttribute('data-type', key);
         block.setAttribute('draggable', 'true');
+        block.title = inst.name;
         
         var iconClass = 'text-' + inst.color;
         if (inst.color === 'purple') iconClass = '';
@@ -766,8 +770,9 @@ function updateToolbox() {
             '<span class="badge bg-success ms-1" style="font-size:8px;">●</span>' :
             '<span class="badge bg-danger ms-1" style="font-size:8px;">○</span>';
         
-        block.innerHTML = '<i class="bi ' + inst.icon + ' ' + iconClass + '" ' + iconStyle + '></i>' +
-                         '<span>' + (inst.name.length > 12 ? inst.name.substring(0, 10) + '..' : inst.name) + statusBadge + '</span>';
+        var shortName = inst.name.length > 12 ? inst.name.substring(0, 10) + '..' : inst.name;
+        block.innerHTML = '<i class="bi ' + LabOS.escapeAttr(inst.icon) + ' ' + iconClass + '" ' + iconStyle + '></i>' +
+                         '<span>' + LabOS.escapeHtml(shortName) + statusBadge + '</span>';
         
         strumentiContainer.appendChild(block);
         
@@ -796,7 +801,6 @@ var recipes = [];
 var protocols = [];
 var halConfigs = [];
 var liquidClasses = [];
-var mobileTasks = [];  // Mobile robot tasks from MobileSiLA2Server
 
 // Dropdown options - will be loaded from lab_config.yaml via API
 // These are defaults that get replaced when config is loaded
@@ -936,7 +940,7 @@ async function loadDropdownConfig() {
         }
         if (!LABWARE_TYPES.length) LABWARE_TYPES = ['corning_96_wellplate_360ul_flat', 'corning_384_wellplate_112ul_flat'];
 
-        if (DROPDOWN_CONFIG.priority && DROPDOWN_CONFIG.priority.options) PRIORITY_OPTIONS = DROPDOWN_CONFIG.priority.options;
+if (DROPDOWN_CONFIG.priority && DROPDOWN_CONFIG.priority.options) PRIORITY_OPTIONS = DROPDOWN_CONFIG.priority.options;
         if (DROPDOWN_CONFIG.task_type && DROPDOWN_CONFIG.task_type.options) TASK_TYPE_OPTIONS = DROPDOWN_CONFIG.task_type.options;
 
     } catch (error) {
@@ -1101,20 +1105,43 @@ function setupDragAndDrop() {
 // ============================================================================
 // STEP MANAGEMENT
 // ============================================================================
+function _defaultCommand(inst) {
+    // Not simply commands[0]. Every SiLA2 server answers SiLAService first,
+    // so an Opentrons step opened with GetFeatureDefinition selected and one
+    // field asking for a Feature Identifier - server plumbing presented as the
+    // first thing an operator does with a liquid handler.
+    var real = inst.commands.find(function (c) {
+        return c.feature && c.feature !== 'SiLAService';
+    });
+    return (real || inst.commands[0]).id;
+}
+
 function addStep(type) {
     var inst = INSTRUMENTS[type];
+    // Guard: an instrument can be discovered with zero commands (offline,
+    // or online but its command introspection failed/hasn't caught up -
+    // both look identical from here: an empty `commands` array). Without
+    // this check, `inst.commands[0].id` throws an uncaught TypeError and
+    // the drop silently does nothing - no console error the user notices,
+    // no step added, no visible feedback. That's the real bug behind
+    // "drag&drop doesn't work" (confirmed: not limited to offline devices).
+    if (!inst || !inst.commands || inst.commands.length === 0) {
+        console.warn('Cannot add step for "' + type + '": no commands available (offline or not yet discovered)');
+        showToast('warning', 'Strumento non disponibile', (inst && inst.name || type) + ' non ha comandi disponibili al momento (offline o non ancora rilevato)');
+        return;
+    }
     var step = {
         id: Date.now(),
         type: type,
-        command: inst.commands[0].id,
+        command: _defaultCommand(inst),
         params: {},
         dependsOn: []
     };
-    
+
     workflowSteps.push(step);
     renderSteps();
     selectStep(workflowSteps.length - 1);
-    
+
     console.log('Step added:', step);
 }
 
@@ -1157,15 +1184,22 @@ function renderSteps() {
     for (var i = 0; i < workflowSteps.length; i++) {
         var step = workflowSteps[i];
         var inst = INSTRUMENTS[step.type];
+        // Defensive: a step saved while its instrument was online/discovered
+        // can end up pointing at an instrument that's since gone offline or
+        // lost its command list - inst.commands.length would throw and abort
+        // rendering every step after this one. Fall back to a placeholder
+        // instead of crashing the whole canvas.
+        if (!inst) inst = { name: step.type, color: 'secondary', commands: [] };
+        if (!inst.commands) inst.commands = [];
         var cmd = null;
-        
+
         for (var j = 0; j < inst.commands.length; j++) {
             if (inst.commands[j].id === step.command) {
                 cmd = inst.commands[j];
                 break;
             }
         }
-        if (!cmd) cmd = inst.commands[0];
+        if (!cmd) cmd = inst.commands[0] || { id: step.command, label: step.command + ' (non disponibile)' };
         
         // Add connector line (except for first)
         if (i > 0) {
@@ -1177,6 +1211,9 @@ function renderSteps() {
         // Create step element
         var stepEl = document.createElement('div');
         stepEl.className = 'workflow-step ' + step.type + (selectedStepIndex === i ? ' selected' : '');
+        if (INSTRUMENTS[step.type] && !INSTRUMENTS[step.type].isUtility) {
+            stepEl.style.borderLeft = '4px solid ' + _instrumentBorder(inst);
+        }
         stepEl.setAttribute('data-index', i.toString());
         
         // Get color class
@@ -1299,6 +1336,11 @@ function _restoreBuilderState() {
     try {
         var saved = JSON.parse(raw);
         if (saved && Array.isArray(saved.steps) && saved.steps.length > 0) {
+            // Saved under the old name-derived keys ("manual", "tecan"),
+            // perhaps: map each back onto a discovered instrument.
+            saved.steps.forEach(function (step) {
+                if (!INSTRUMENTS[step.type]) step.type = _instrumentKeyFor(step.type);
+            });
             workflowSteps = saved.steps;
             if (saved.name) document.getElementById('workflowName').value = saved.name;
             _applyRequiredDefaultsToAllSteps();
@@ -1396,9 +1438,9 @@ function renderProperties() {
             break;
         }
     }
-    if (!cmd) cmd = inst.commands[0];
-    applyRequiredConstrainedDefaults(step, cmd);
-    applyRequiredStringDefaults(step, cmd);
+    if (!cmd) cmd = inst.commands[0] || { id: step.command, label: step.command, parameters: [] };
+    LabOS.params.applyRequiredSelectDefaults(step, cmd);
+    LabOS.params.applyRequiredStringDefaults(step, cmd);
 
     // Dynamic parameters with smart dropdowns
     // First check API parameters, then fallback to local cmd.params
@@ -1424,18 +1466,32 @@ function renderProperties() {
             var uiHint = (paramObj.ui_hint || '').toLowerCase();
             var paramLower = param.toLowerCase();
             var currentValue = step.params[param] || paramObj.default || '';
+            var paramType = String(paramObj.type || '').toLowerCase();
             
             html += '<div class="property-group">' + '<label>' + displayName + '</label>';
             
             // Check ui_hint first, then check for known parameter types
             // Constrained SiLA2 params carry their own options list from the API
-            if (paramObj.options && paramObj.options.length > 0 &&
+            if (paramType === 'boolean') {
+                // A Boolean used to land in the free-text box below, so it
+                // submitted a string: "false", or the parameter's own name.
+                // The sila2 client refuses both with "Expected a bool value".
+                html += LabOS.params.buildBooleanSelect(
+                    param, currentValue, 'form-select form-select-sm param-input');
+            } else if (paramType === 'integer' || paramType === 'real' ||
+                       paramType === 'float' || paramType === 'double') {
+                html += '<input type="number" class="form-control form-control-sm param-input" ' +
+                       'data-param="' + param + '" data-type="' + paramObj.type + '" ' +
+                       (paramType === 'integer' ? '' : 'step="0.01" ') +
+                       'value="' + String(currentValue).replace(/"/g, '&quot;') + '" ' +
+                       'placeholder="Enter ' + param + '">';
+            } else if (paramObj.options && paramObj.options.length > 0 &&
                     uiHint !== 'recipe' && uiHint !== 'protocol' && uiHint !== 'hal_config' &&
                     uiHint !== 'location' && uiHint !== 'labware' && uiHint !== 'tip_rack' &&
-                    uiHint !== 'liquid_class' && uiHint !== 'mobile_task') {
+                    uiHint !== 'liquid_class') {
                 // Server provided predefined options — shared with dashboard.html
                 // via /static/js/param-form-shared.js (see base.html).
-                html += buildConstrainedSelectHtml(param, paramObj.options, currentValue, paramObj.required, 'form-select form-select-sm param-input', true);
+                html += LabOS.params.buildSelect(param, paramObj, currentValue, paramObj.required, 'form-select form-select-sm param-input', true);
             } else if (uiHint === 'recipe' || RECIPE_PARAMS.indexOf(paramLower) !== -1) {
                 // Recipe dropdown
                 html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
@@ -1460,7 +1516,7 @@ function renderProperties() {
                     html += '<option value="' + TIP_RACK_TYPES[tr] + '"' + (currentValue === TIP_RACK_TYPES[tr] ? ' selected' : '') + '>' + TIP_RACK_TYPES[tr] + '</option>';
                 }
                 html += '</select>';
-            } else if (uiHint === 'labware' || LABWARE_PARAMS.indexOf(paramLower) !== -1) {
+            } else if(uiHint === 'labware' || LABWARE_PARAMS.indexOf(paramLower) !== -1) {
                 // Labware dropdown
                 html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
                 html += '<option value="">-- Select Labware --</option>';
@@ -1506,19 +1562,6 @@ function renderProperties() {
                 html += '<option value="">-- Select Task Type --</option>';
                 for (var tt = 0; tt < TASK_TYPE_OPTIONS.length; tt++) {
                     html += '<option value="' + TASK_TYPE_OPTIONS[tt] + '"' + (currentValue === TASK_TYPE_OPTIONS[tt] ? ' selected' : '') + '>' + TASK_TYPE_OPTIONS[tt].replace(/_/g, ' ') + '</option>';
-                }
-                html += '</select>';
-            } else if (uiHint === 'mobile_task' || paramLower === 'taskid' || paramLower === 'task_id') {
-                // Mobile robot task dropdown (from MobileSiLA2Server)
-                html += '<select class="form-select form-select-sm param-input" data-param="' + param + '">';
-                html += '<option value="">-- Select Mobile Task --</option>';
-                for (var mt = 0; mt < mobileTasks.length; mt++) {
-                    var task = mobileTasks[mt];
-                    var taskId = task.id || task.task_id || task;
-                    var taskName = task.name || task.task_name || taskId;
-                    var subtaskCount = task.subtask_count || 0;
-                    var displayText = taskName + (subtaskCount > 0 ? ' (' + subtaskCount + ' subtasks)' : '');
-                    html += '<option value="' + taskId + '"' + (currentValue === taskId ? ' selected' : '') + '>' + displayText + '</option>';
                 }
                 html += '</select>';
             } else {
@@ -1575,7 +1618,7 @@ function renderProperties() {
     }
 }
 
-// applyRequiredConstrainedDefaults() is defined once, shared with dashboard.html,
+// The parameter-form helpers live in /static/js/labos-params.js, shared with dashboard.html,
 // in /static/js/param-form-shared.js (loaded globally via base.html).
 
 // Steps rebuilt from a serialized source (Load, Template, Import) get their
@@ -1589,8 +1632,9 @@ function _applyRequiredDefaultsToAllSteps() {
         var inst = INSTRUMENTS[step.type];
         var cmd = inst && inst.commands && inst.commands.find(function(c) { return c.id === step.command; });
         if (cmd) {
-            applyRequiredConstrainedDefaults(step, cmd);
-            applyRequiredStringDefaults(step, cmd);
+            LabOS.params.applyRequiredSelectDefaults(step, cmd);
+            LabOS.params.applyRequiredStringDefaults(step, cmd);
+            LabOS.params.applyRequiredBooleanDefaults(step, cmd);
         }
     });
 }
@@ -1603,8 +1647,9 @@ function updateCommand(cmdId) {
 
     var inst = INSTRUMENTS[step.type];
     var cmd = inst && inst.commands.find(function(c) { return c.id === cmdId; });
-    applyRequiredConstrainedDefaults(step, cmd);
-    applyRequiredStringDefaults(step, cmd);
+    LabOS.params.applyRequiredSelectDefaults(step, cmd);
+    LabOS.params.applyRequiredStringDefaults(step, cmd);
+    LabOS.params.applyRequiredBooleanDefaults(step, cmd);
 
     step.params = normalizeStepParamsForCommand(step.command, step.params);
     renderSteps();
@@ -1649,14 +1694,9 @@ function loadFiles() {
         .then(function(data) { liquidClasses = data.files || []; })
         .catch(function(e) { console.error('Error loading liquid classes:', e); });
     
-    // Load mobile robot tasks (from MobileSiLA2Server)
-    fetch('/api/mobile/tasks')
-        .then(function(resp) { return resp.json(); })
-        .then(function(data) { 
-            mobileTasks = data.tasks || [];
-            console.log('📱 Loaded ' + mobileTasks.length + ' mobile tasks');
-        })
-        .catch(function(e) { console.error('Error loading mobile tasks:', e); });
+    // A list a server reads from one of its properties (the mobile robot's
+    // tasks, for one) arrives with the parameter as `options`, and is
+    // refreshed through onInstrumentsChanged().
 }
 
 // ============================================================================
@@ -1677,7 +1717,7 @@ function saveWorkflow() {
             StepNumber: i + 1,
             Instrument: INSTRUMENTS[step.type].name,
             Action: step.command,
-            Parameters: normalizeStepParamsForCommand(step.command, step.params),
+            Parameters: _stepParams(step),
             DependsOn: step.dependsOn || []
         });
     }
@@ -1756,15 +1796,7 @@ function loadWorkflowFile(filename) {
             
             for (var i = 0; i < steps.length; i++) {
                 var s = steps[i];
-                // Find instrument type by name
-                var type = 'note';
-                for (var key in INSTRUMENTS) {
-                    var inst = INSTRUMENTS[key];
-                    if (inst.name === s.Instrument || s.Instrument.toLowerCase().indexOf(key) !== -1) {
-                        type = key;
-                        break;
-                    }
-                }
+                var type = _instrumentKeyFor(s.Instrument);
                 
                 workflowSteps.push({
                     id: Date.now() + Math.random(),
@@ -1862,32 +1894,31 @@ function _showVariablesModal(variables) {
     };
 }
 
+// There was a "HAL Config (for Opentrons)" selector here. It added a
+// hal_config key to Opentrons steps, which no command declares, so dispatch
+// dropped it before it reached the robot: choosing a config did nothing. The
+// way to run against a configuration is a LoadHardwareConfig step, which
+// has a real picker.
 function _showExecuteModal() {
-    var hasOpentronsSteps = workflowSteps.some(function(s) {
-        return s.type === 'opentrons' || s.type === 'flex' || s.type === 'ot3';
-    });
-    var halSection = document.getElementById('halConfigSection');
-    if (halSection) halSection.style.display = hasOpentronsSteps ? 'block' : 'none';
-    if (hasOpentronsSteps) {
-        var halSelect = document.getElementById('halSelect');
-        halSelect.innerHTML = '<option value="">-- None --</option>' +
-            halConfigs.map(function(h) { return '<option value="' + h + '">' + h + '</option>'; }).join('');
-        // Pre-select active HAL config if set
-        fetch('/api/hardware/active')
-            .then(function(r) { return r.json(); })
-            .then(function(d) {
-                if (d.filename) halSelect.value = d.filename;
-            })
-            .catch(function() {});
-    }
     document.getElementById('executeSummary').textContent = workflowSteps.length + ' steps to execute';
     new bootstrap.Modal(document.getElementById('executeModal')).show();
 }
 
-function _buildSteps(halConfig) {
+function _stepParams(step) {
+    // Every form control hands back a string; the command declared types.
+    // Coercing here rather than only at edit time means a workflow saved
+    // before the Boolean field existed - with "false" already written into its
+    // JSON - is corrected on the way out, without anyone reopening it.
+    var params = normalizeStepParamsForCommand(step.command, step.params);
+    var inst = INSTRUMENTS[step.type];
+    var cmd = inst && inst.commands &&
+              inst.commands.find(function (c) { return c.id === step.command; });
+    return LabOS.params.coerceAll(params, cmd);
+}
+
+function _buildSteps() {
     return workflowSteps.map(function(step, i) {
-        var params = normalizeStepParamsForCommand(step.command, step.params);
-        if (step.type === 'opentrons' && halConfig) params.hal_config = halConfig;
+        var params = _stepParams(step);
         return {
             StepNumber: i + 1,
             Instrument: (INSTRUMENTS[step.type] || {}).name || step.type,
@@ -1899,10 +1930,9 @@ function _buildSteps(halConfig) {
 }
 
 function confirmExecution() {
-    var halConfig = document.getElementById('halSelect').value;
     var workflow = {
         WorkflowName: document.getElementById('workflowName').value.trim() || 'Workflow',
-        Steps: _buildSteps(halConfig),
+        Steps: _buildSteps(),
         variables: _collectedVariables
     };
 
@@ -1916,10 +1946,18 @@ function confirmExecution() {
     })
     .then(function(r) { return r.json(); })
     .then(function(result) {
-        if (result.status === 'completed') {
-            showNotification('Workflow completed! (' + (result.steps_completed || 0) + ' steps)', 'success');
+        // The run is a background job now: this response says it started, not
+        // that it finished. Completion arrives on the WebSocket
+        // (workflow_complete / workflow_failed) and drives the status bar in
+        // base.html, which is visible on every page.
+        if (result.started) {
+            window._activeRunId = result.run_id;
+            showNotification('Workflow started (' + (result.total_steps || 0) + ' steps). '
+                             + 'Progress is shown in the status bar below.', 'success');
+        } else if (result.status === 'busy') {
+            showNotification(result.error || 'Another workflow is already running', 'warning');
         } else {
-            showNotification((result.error || result.errors || 'Workflow failed'), 'danger');
+            showNotification((result.error || result.errors || 'Could not start workflow'), 'danger');
         }
     })
     .catch(function(e) { showNotification('Error: ' + e.message, 'danger'); });
@@ -2004,13 +2042,7 @@ function _loadTemplate(templateId) {
         document.getElementById('workflowName').value = wf.WorkflowName || templateId;
         workflowSteps = [];
         (wf.Steps || []).forEach(function(s, i) {
-            var type = 'note';
-            for (var key in INSTRUMENTS) {
-                var inst = INSTRUMENTS[key];
-                if (inst.name === s.Instrument || s.Instrument.toLowerCase().indexOf(key) !== -1) {
-                    type = key; break;
-                }
-            }
+            var type = _instrumentKeyFor(s.Instrument);
             workflowSteps.push({
                 id: Date.now() + Math.random(),
                 type: type,
@@ -2046,7 +2078,7 @@ function saveCurrentAsTemplate() {
                 StepNumber: i + 1,
                 Instrument: (INSTRUMENTS[step.type] || {}).name || step.type,
                 Action: step.command,
-                Parameters: normalizeStepParamsForCommand(step.command, step.params),
+                Parameters: _stepParams(step),
                 DependsOn: step.dependsOn || []
             };
         });
@@ -2104,7 +2136,7 @@ function exportWorkflow() {
             StepNumber: i + 1,
             Instrument: (INSTRUMENTS[step.type] || {}).name || step.type,
             Action: step.command,
-            Parameters: normalizeStepParamsForCommand(step.command, step.params),
+            Parameters: _stepParams(step),
             DependsOn: step.dependsOn || []
         };
     });
@@ -2130,13 +2162,7 @@ function importWorkflow(e) {
             document.getElementById('workflowName').value = wf.WorkflowName || file.name.replace('.workflow.json','');
             workflowSteps = [];
             (wf.Steps || []).forEach(function(s) {
-                var type = 'note';
-                for (var key in INSTRUMENTS) {
-                    var inst = INSTRUMENTS[key];
-                    if (inst.name === s.Instrument || s.Instrument.toLowerCase().indexOf(key) !== -1) {
-                        type = key; break;
-                    }
-                }
+                var type = _instrumentKeyFor(s.Instrument);
                 workflowSteps.push({
                     id: Date.now() + Math.random(),
                     type: type, command: s.Action,

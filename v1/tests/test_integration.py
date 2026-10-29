@@ -103,44 +103,51 @@ async def test_instruments_have_commands(base_dir, any_server_available):
 @pytest.mark.integration
 @pytest.mark.opentrons
 @pytest.mark.asyncio
-async def test_opentrons_execute_get_status(base_dir, opentrons_available):
-    """
-    Execute GetStatus command on Opentrons via SiLA2Common.ExecuteCommand.
-    This is a non-destructive read command — safe to run anytime.
+async def test_opentrons_read_status_property(base_dir, opentrons_available):
+    """Read the Status property — a pure read, safe to run at any time.
+
+    This was a GetStatus *command*. Reading state is not an operation, so it
+    is a Property now: it does not appear in the UI as something to run, and
+    a client can subscribe to it instead of polling.
     """
     if not opentrons_available:
         pytest.skip("Opentrons not running")
     core = LabCore(base_dir)
     await core.discover(timeout=2.0)
 
-    opentrons = next(
-        (i for i in core.list_instruments() if "opentrons" in i.name.lower()),
-        None
-    )
+    opentrons = core.find_instrument("opentrons")
     assert opentrons is not None, "Opentrons not found after discovery"
 
-    result = await core.execute_command(opentrons.id, "GetStatus", {})
-    assert result.success, f"GetStatus failed: {result.error}"
+    result = await core.get_property(opentrons.id, "WorkflowAPI", "Status")
+    assert result.success, f"Status read failed: {result.error}"
+
+    import json
+    status = json.loads(result.data) if isinstance(result.data, str) else result.data
+    assert "state" in status, f"unexpected Status payload: {status}"
 
 
 @pytest.mark.integration
 @pytest.mark.opentrons
 @pytest.mark.asyncio
-async def test_opentrons_execute_list_recipes(base_dir, opentrons_available):
-    """ListRecipes returns list of available recipes — non-destructive."""
+@pytest.mark.parametrize("property_name", ["ActiveConfig", "TipsAvailable", "RobotInfo"])
+async def test_opentrons_read_remaining_properties(base_dir, opentrons_available, property_name):
+    """The other pure reads: each returns JSON without touching the robot.
+
+    ListRecipes/ListHardwareConfigs/ListTipRacks used to be commands too. The
+    first two are gone entirely — the webapp reads Library/ from disk, which is
+    cheaper and works while the robot is offline — and tip state is this
+    TipsAvailable property.
+    """
     if not opentrons_available:
         pytest.skip("Opentrons not running")
     core = LabCore(base_dir)
     await core.discover(timeout=2.0)
-    opentrons = next(
-        (i for i in core.list_instruments() if "opentrons" in i.name.lower()),
-        None
-    )
+    opentrons = core.find_instrument("opentrons")
     if opentrons is None:
         pytest.skip("Opentrons not in discovered instruments")
 
-    result = await core.execute_command(opentrons.id, "ListRecipes", {})
-    assert result.success, f"ListRecipes failed: {result.error}"
+    result = await core.get_property(opentrons.id, "WorkflowAPI", property_name)
+    assert result.success, f"{property_name} read failed: {result.error}"
 
 
 @pytest.mark.integration

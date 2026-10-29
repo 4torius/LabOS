@@ -1,0 +1,16 @@
+{
+  "_comment": "Piastra -> definizione Tecan {file, range} usata da TecanBridge.RewritePlateType per sovrascrivere il tipo di piastra hardcoded in un .mdfx quando RunMeasurement riceve un PlateType esplicito. Se la chiave richiesta non e' presente qui, la misura fallisce con un errore chiaro (mai un fallback silenzioso). 'file' e' il codice piastra della libreria Tecan interna (visto dentro l'attributo <CyclePlate file=\"...\">  di un .mdfx reale creato con il Reader Editor); 'range' e' l'intervallo pozzetti completo di quella piastra (<PlateRange range=\"...\">), che deve combaciare con 'file' -- i due vanno sempre cambiati insieme.",
+
+  "corning_24_wellplate_3.4ml_flat": {
+    "file": "COS24ft",
+    "range": "A1~D6",
+    "_verified_from": "Library/Analysis/TestFluo.mdfx, TestIbrido.mdfx, TestLumi.mdfx"
+  },
+
+  "greiner_96_wellplate_flat": {
+    "file": "GRE96ft",
+    "range": "A1:H12",
+    "_verified_from": "Library/Analysis/Script1.mdfx",
+    "_note": "Verificare quale referenza catalogo Greiner 96 pozzetti (323ul / 340ul_chimney / 382ul in Library/Labware/Plates/) corrisponde davvero a questo codice prima di affidarsi al nome qui -- il codice GRE96ft e' confermato funzionante, il nome chiave e' una scelta descrittiva, non verificata contro il catalogo."
+  }
+}

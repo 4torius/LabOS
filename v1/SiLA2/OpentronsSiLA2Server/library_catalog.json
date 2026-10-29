@@ -1,25 +1,88 @@
 {
+  "_comment": "Which Library/ file types and deck concepts this server's parameters refer to. The orchestrator reads this at discovery time and turns the named parameters into the right picker. Entries with \"dynamic\": true are not folder listings — they are resolved at runtime (the deck ones from the active hardware config, see v1/src/deck.py). Everything else here is also this server speaking for itself: result_types are the Results/ folders it writes (created at startup), traceability says which command prepares a plate. See v1/src/catalog.py.",
+  "display": {
+    "icon": "bi-droplet-fill",
+    "color": "primary"
+  },
   "library_types": [
     {
       "hint": "recipe",
       "display_name": "Recipe",
       "folder": "Library/Recipes",
       "file_extension": ".json",
-      "parameter_names": ["RecipeName", "RecipeFile"]
+      "parameter_names": [
+        "RecipeName",
+        "RecipeFile"
+      ]
     },
     {
       "hint": "hal_config",
       "display_name": "Hardware Config",
       "folder": "Library/HardwareConfig",
       "file_extension": ".json",
-      "parameter_names": ["ConfigName"]
+      "parameter_names": [
+        "ConfigName"
+      ]
     },
     {
       "hint": "liquid_class",
       "display_name": "Liquid Class",
       "folder": "Library/LiquidClasses",
       "file_extension": ".json",
-      "parameter_names": ["LiquidClass"]
+      "parameter_names": [
+        "LiquidClass"
+      ]
+    },
+    {
+      "hint": "hal_labware",
+      "display_name": "Labware on the deck",
+      "dynamic": true,
+      "folder": "",
+      "file_extension": "",
+      "parameter_names": [
+        "LabwareName",
+        "LabwareID"
+      ]
+    },
+    {
+      "hint": "deck_target",
+      "display_name": "Free deck slot or module",
+      "dynamic": true,
+      "folder": "",
+      "file_extension": "",
+      "parameter_names": [
+        "NewLocation"
+      ]
+    },
+    {
+      "hint": "hal_module",
+      "display_name": "Module on the deck",
+      "dynamic": true,
+      "folder": "",
+      "file_extension": "",
+      "parameter_names": [
+        "ModuleName",
+        "ModuleID"
+      ]
     }
-  ]
+  ],
+  "result_types": [
+    {
+      "key": "deck_images",
+      "display_name": "Deck photos",
+      "folder": "Results/Images",
+      "file_extensions": [
+        ".jpg",
+        ".jpeg",
+        ".png"
+      ],
+      "description": "Photographs of the deck taken by CaptureImage"
+    }
+  ],
+  "traceability": {
+    "ExecuteRecipe": {
+      "role": "prepares_plate",
+      "recipe_parameter": "RecipeName"
+    }
+  }
 }

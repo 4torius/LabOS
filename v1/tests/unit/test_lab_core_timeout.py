@@ -55,10 +55,15 @@ class TestExecuteCommandTimeout:
         assert kwargs["timeout"] > 0
 
     @pytest.mark.asyncio
-    async def test_zero_default_timeout_means_unlimited_and_is_passed_through(self, tmp_path):
-        """default_timeout: 0 means unlimited and must reach client.execute() as
-        0 (not silently replaced by a finite fallback) — client.execute() is
-        responsible for normalizing 0 to None, not _command_timeout()."""
+    async def test_zero_default_timeout_means_unlimited(self, tmp_path):
+        """default_timeout: 0 means unlimited, and must not be silently replaced
+        by a finite fallback.
+
+        None is the unlimited sentinel every layer understands. It used to be
+        passed through as a literal 0 and normalized inside client.execute();
+        src.settings.normalize_timeout now does it once, when the config value
+        is read, so 0 and null cannot diverge.
+        """
         core = _make_core_with_instrument(tmp_path, default_timeout=0)
         mock_client = MagicMock()
         mock_client.connect = AsyncMock()
@@ -68,12 +73,17 @@ class TestExecuteCommandTimeout:
         await core.execute_command("instr1", "DoThing", {})
 
         _, kwargs = mock_client.execute.call_args
-        assert kwargs["timeout"] == 0.0
+        assert kwargs["timeout"] is None
 
     @pytest.mark.asyncio
-    async def test_null_default_timeout_falls_back_to_finite_default(self, tmp_path):
-        """default_timeout: null (missing significance, not "unlimited") must not
-        crash float(None) — it should fall back to the hardcoded 300s default."""
+    async def test_null_default_timeout_means_unlimited(self, tmp_path):
+        """default_timeout: null must mean unlimited, same as 0 — matching
+        _command_timeout()'s own documented contract ("0 or null means
+        unlimited"). Previously this fell back to a hardcoded 300.0 instead,
+        so no config setting could ever actually produce an unlimited
+        timeout: a real bug (confirmed on real hardware — a still-running
+        ExecuteRecipe got reported "failed" at the 600s default, which then
+        skipped the plate-tracking DB write gated on a success result)."""
         (tmp_path / "lab_config.yaml").write_text(
             yaml.dump({"workflow": {"default_timeout": None}})
         )
@@ -90,7 +100,46 @@ class TestExecuteCommandTimeout:
 
         assert result.success is True
         _, kwargs = mock_client.execute.call_args
-        assert kwargs["timeout"] == 300.0
+        assert kwargs["timeout"] is None
+
+
+class TestExecuteCommandObservableBypassesTimeout:
+    """Observable SiLA2 commands (ExecuteRecipe, RunMeasurement, ...) are
+    genuinely long-running by design and already have their own server-side
+    real-status tracking - a client-side cutoff on these doesn't catch a
+    real hang, it just abandons a command that's still working and reports
+    a false failure. Confirmed on real hardware: an ExecuteRecipe still
+    genuinely running past the 600s default got reported "failed" here."""
+
+    @pytest.mark.asyncio
+    async def test_observable_command_gets_no_timeout_even_with_finite_default(self, tmp_path):
+        core = _make_core_with_instrument(tmp_path, default_timeout=42)
+        cmd = Command(id="ExecuteRecipe", name="ExecuteRecipe", feature="Opentrons", observable=True)
+        core._instruments["instr1"].commands = [cmd]
+        mock_client = MagicMock()
+        mock_client.connect = AsyncMock()
+        mock_client.execute = AsyncMock(return_value=CommandResult(success=True, data={}))
+        core._client = mock_client
+
+        await core.execute_command("instr1", "ExecuteRecipe", {})
+
+        _, kwargs = mock_client.execute.call_args
+        assert kwargs["timeout"] is None
+
+    @pytest.mark.asyncio
+    async def test_non_observable_command_still_gets_the_bounded_default(self, tmp_path):
+        core = _make_core_with_instrument(tmp_path, default_timeout=42)
+        cmd = Command(id="GetStatus", name="GetStatus", feature="Opentrons", observable=False)
+        core._instruments["instr1"].commands = [cmd]
+        mock_client = MagicMock()
+        mock_client.connect = AsyncMock()
+        mock_client.execute = AsyncMock(return_value=CommandResult(success=True, data={}))
+        core._client = mock_client
+
+        await core.execute_command("instr1", "GetStatus", {})
+
+        _, kwargs = mock_client.execute.call_args
+        assert kwargs["timeout"] == 42.0
 
     @pytest.mark.asyncio
     async def test_client_timeout_is_reported_as_a_failed_result_not_raised(self, tmp_path):
