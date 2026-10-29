@@ -105,3 +105,38 @@ class TestANewStepOpensOnARealCommand:
         body = body[:body.index("\nfunction ", 1)]
         assert "inst.commands.length === 0" in body
         assert body.index("inst.commands.length === 0") < body.index("_defaultCommand(inst)")
+
+
+class TestBootstrapIsServedLocally:
+    """A lab PC is routinely offline, and every dialog is a Bootstrap component.
+
+    The page used to load the Bootstrap *JavaScript* from jsdelivr with a
+    fallback that covered only the CSS, so with no internet `window.bootstrap`
+    was undefined and `showEmergencyStopModal()` threw — the operator could not
+    open the emergency stop dialog on the machine most likely to be
+    disconnected. These tests stop that regressing.
+    """
+
+    @pytest.mark.parametrize("asset", [
+        "bootstrap.min.css", "bootstrap.bundle.min.js",
+    ])
+    def test_the_file_is_in_the_repository(self, asset):
+        assert (V1_DIR / "webapp" / "static" / "vendor" / asset).is_file(), (
+            f"{asset} must ship with the app, not come from a CDN"
+        )
+
+    @pytest.mark.parametrize("asset", [
+        "bootstrap.min.css", "bootstrap.bundle.min.js",
+    ])
+    def test_the_page_links_the_local_copy(self, asset):
+        assert f"/static/vendor/{asset}" in BASE_PAGE, f"{asset} is not linked locally"
+
+    def test_no_bootstrap_core_is_loaded_from_a_cdn(self):
+        # bootstrap-icons stays remote on purpose: it is cosmetic, and every
+        # control that moves hardware carries a text label too.
+        for line in BASE_PAGE.splitlines():
+            if "cdn" not in line or "bootstrap" not in line:
+                continue
+            assert "bootstrap-icons" in line, (
+                f"Bootstrap core is still loaded from a CDN: {line.strip()}"
+            )

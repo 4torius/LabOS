@@ -479,12 +479,36 @@ function showEmergencyStopModal() {
     new bootstrap.Modal(document.getElementById('emergencyStopModal')).show();
 }
 
+// The toast reports the server's actual outcome. It used to say "System
+// Stopped" for every reply, including the ones where nothing was reached — so
+// an operator could be told the lab was safe while an arm was still moving.
+// Anything short of every instrument acknowledging is sticky: it names what did
+// not confirm and stays on screen until dismissed.
 function confirmEmergencyStop() {
     bootstrap.Modal.getInstance(document.getElementById('emergencyStopModal')).hide();
     fetch('/api/emergency/stop', { method: 'POST' })
         .then(r => r.json())
-        .then(result => showToast('danger', 'System Stopped', result.message || 'Emergency stop executed'))
-        .catch(e => showToast('danger', 'Error', e.message));
+        .then(result => {
+            const lines = [result.message || ''];
+            if (result.failures && result.failures.length) {
+                lines.push('', 'Did NOT confirm:');
+                result.failures.forEach(f => lines.push('  • ' + f));
+            }
+            if (result.skipped_instruments && result.skipped_instruments.length) {
+                lines.push('', 'No stop command: ' + result.skipped_instruments.join(', '));
+            }
+            const ok = result.status === 'stopped';
+            showToast(
+                ok ? 'warning' : 'danger',
+                ok ? 'Stopped — all instruments confirmed'
+                   : (result.status === 'partial' ? 'PARTIALLY STOPPED — verify manually'
+                                                  : 'STOP NOT CONFIRMED — use the hardware stop'),
+                lines.join('\n'),
+                { sticky: !ok }
+            );
+        })
+        .catch(e => showToast('danger', 'STOP NOT CONFIRMED — use the hardware stop',
+                              'The request itself failed: ' + e.message, { sticky: true }));
 }
 
 // ── Pause / Resume ─────────────────────────────────────────────────────────
