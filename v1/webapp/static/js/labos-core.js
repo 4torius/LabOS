@@ -209,6 +209,74 @@
         return toast;
     };
 
+
+    // ── Workflow step dependencies ──────────────────────────────────────────
+    // A step's `dependsOn` holds 1-based POSITIONS, not stable ids, and the
+    // builder lets steps be reordered and deleted by splicing the array. Those
+    // two facts used to be left to disagree: deleting step 1 turned "depends on
+    // 2" into a reference to what had been step 3.
+    //
+    // That was cosmetic while nothing read the dependencies. It is not any
+    // more — DependsOn is what orders execution, so a stale number silently
+    // reorders or drops physical steps. These two helpers keep the numbers
+    // pointing at the steps the author picked, and they are pure so they can
+    // be tested.
+
+    /**
+     * Dependencies after the step at `removedIndex` (0-based) is deleted.
+     *
+     * Whatever depended on the removed step inherits what *it* depended on, so
+     * deleting the middle of 1→2→3 leaves 1→3 rather than leaving 3 with no
+     * predecessor. Simply dropping the reference would have been more literal
+     * and worse: in a sequential workflow it removes an ordering constraint, so
+     * deleting one step would quietly make two physical steps eligible to run
+     * at the same time. This is the ordinary way to delete a node from a DAG —
+     * close over it, preserving reachability.
+     *
+     * @returns {Array<Array<number>>} one dependency list per surviving step
+     */
+    LabOS.dependenciesAfterRemove = function (steps, removedIndex) {
+        var removedNumber = removedIndex + 1;
+        var inherited = (steps[removedIndex] && steps[removedIndex].dependsOn) || [];
+        var shift = function (n) { return n > removedNumber ? n - 1 : n; };
+
+        return steps
+            .filter(function (_s, i) { return i !== removedIndex; })
+            .map(function (step, newIndex) {
+                var deps = step.dependsOn || [];
+                var kept = deps.filter(function (n) { return n !== removedNumber; }).map(shift);
+                if (deps.indexOf(removedNumber) !== -1) {
+                    inherited.map(shift).forEach(function (n) {
+                        // Never let a step inherit a reference to itself: that
+                        // happens when the removed step depended on this one.
+                        if (n !== newIndex + 1 && kept.indexOf(n) === -1) kept.push(n);
+                    });
+                }
+                return kept.sort(function (a, b) { return a - b; });
+            });
+    };
+
+    /**
+     * Dependencies after the step at `from` (0-based) moves to `to`.
+     * Every reference follows the step it pointed at, so the graph the author
+     * drew survives a reorder even when it now runs in a different order.
+     * @returns {Array<Array<number>>} one dependency list per step, in the new order
+     */
+    LabOS.dependenciesAfterMove = function (steps, from, to) {
+        var order = steps.map(function (_s, i) { return i; });
+        order.splice(to, 0, order.splice(from, 1)[0]);
+        // old 1-based number -> new 1-based number
+        var renumbered = {};
+        order.forEach(function (oldIndex, newIndex) {
+            renumbered[oldIndex + 1] = newIndex + 1;
+        });
+        return order.map(function (oldIndex) {
+            return (steps[oldIndex].dependsOn || []).map(function (n) {
+                return renumbered[n] || n;
+            });
+        });
+    };
+
     // ── Page log ────────────────────────────────────────────────────────────
     // Several pages have a scrolling activity log with the same shape.
 

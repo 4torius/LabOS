@@ -1130,12 +1130,19 @@ function addStep(type) {
         showToast('warning', 'Strumento non disponibile', (inst && inst.name || type) + ' non ha comandi disponibili al momento (offline o non ancora rilevato)');
         return;
     }
+    // A new step depends on the one before it. Workflows here are sequential
+    // almost always, and DependsOn is what actually orders execution — leaving
+    // it empty by default is how Test_Bicocca ended up with nineteen steps and
+    // no dependencies at all, its order resting on the order it was written in.
+    // Chaining by default makes the common case correct without anybody
+    // ticking a box; clearing a box is now the deliberate act, and it is the
+    // rarer one (it says "these two may overlap").
     var step = {
         id: Date.now(),
         type: type,
         command: _defaultCommand(inst),
         params: {},
-        dependsOn: []
+        dependsOn: workflowSteps.length > 0 ? [workflowSteps.length] : []
     };
 
     workflowSteps.push(step);
@@ -1146,7 +1153,12 @@ function addStep(type) {
 }
 
 function removeStep(index) {
+    // dependsOn holds 1-based positions, so deleting a step invalidates every
+    // reference after it. Renumber before splicing or "depends on 2" quietly
+    // comes to mean whatever is in position 2 afterwards.
+    var remapped = LabOS.dependenciesAfterRemove(workflowSteps, index);
     workflowSteps.splice(index, 1);
+    workflowSteps.forEach(function (step, i) { step.dependsOn = remapped[i]; });
     selectedStepIndex = null;
     renderSteps();
     renderProperties();
@@ -1156,8 +1168,15 @@ function moveStep(index, direction) {
     var newIndex = index + direction;
     if (newIndex < 0 || newIndex >= workflowSteps.length) return;
     
+    // Each reference follows the step it pointed at, so the graph the author
+    // drew survives a reorder. That can leave a step depending on one further
+    // down the list, which is a valid DAG and runs in the right order — the
+    // alternative, rewriting the graph to match the new positions, would
+    // change what the author actually asked for.
+    var remapped = LabOS.dependenciesAfterMove(workflowSteps, index, newIndex);
     var step = workflowSteps.splice(index, 1)[0];
     workflowSteps.splice(newIndex, 0, step);
+    workflowSteps.forEach(function (s, i) { s.dependsOn = remapped[i]; });
     selectedStepIndex = newIndex;
     renderSteps();
 }
