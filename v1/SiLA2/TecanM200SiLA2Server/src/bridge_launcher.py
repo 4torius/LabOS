@@ -158,6 +158,8 @@ class BridgeLauncher:
                                capture_output=True, timeout=10)
             else:
                 os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            logger.info("Orphaned bridge PID %d already exited", pid)
         except Exception as exc:
             logger.error("Failed to terminate orphaned bridge PID %d: %s", pid, exc)
             return False

@@ -183,13 +183,13 @@ class TestOrphanedBridge:
     def test_terminate_orphan_reports_success_when_the_port_frees(self):
         launcher = BridgeLauncher()
         probes = iter([False])                      # already gone after the kill
-        with patch.object(launcher, "_pid_on_port", return_value=9999),              patch.object(launcher, "_probe", side_effect=lambda: next(probes, False)),              patch("subprocess.run") as run:
+        with patch.object(launcher, "_pid_on_port", return_value=9999),              patch.object(launcher, "_probe", side_effect=lambda: next(probes, False)),              patch("subprocess.run") as run,              patch("os.kill") as kill:
             assert launcher._terminate_orphan(timeout=1) is True
-            assert run.called
+            assert run.called or kill.called
 
     def test_terminate_orphan_reports_failure_when_the_port_stays_held(self):
         launcher = BridgeLauncher()
-        with patch.object(launcher, "_pid_on_port", return_value=9999),              patch.object(launcher, "_probe", return_value=True),              patch("subprocess.run"),              patch("time.sleep"):
+        with patch.object(launcher, "_pid_on_port", return_value=9999),              patch.object(launcher, "_probe", return_value=True),              patch("subprocess.run"),              patch("os.kill"),              patch("time.sleep"):
             assert launcher._terminate_orphan(timeout=0.5) is False
 
     def test_no_owner_and_a_free_port_is_success(self):
