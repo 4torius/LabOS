@@ -50,6 +50,8 @@ from typing import Any, Callable, Dict, List, Optional, Awaitable, Tuple
 # Local imports
 try:
     from src.settings import get_settings
+    from src.catalog import (ServerCatalog, ensure_folders, is_infrastructure_feature,
+                             parse_catalog, feature_name as _feature_name)
     from src.deck import DECK_HINTS, options as deck_options
     from src.resolver import Resolution, resolve
     from src.discovery import PnPDiscovery, PnPServer, PnPCommand
@@ -67,6 +69,8 @@ try:
 except ImportError:
     # Running from different directory
     from settings import get_settings
+    from catalog import (ServerCatalog, ensure_folders, is_infrastructure_feature,
+                         parse_catalog, feature_name as _feature_name)
     from deck import DECK_HINTS, options as deck_options
     from resolver import Resolution, resolve
     from discovery import PnPDiscovery, PnPServer, PnPCommand
@@ -177,10 +181,15 @@ class Instrument:
     port: int = 0
     commands: List[Command] = field(default_factory=list)
     properties: List[Property] = field(default_factory=list)
-    
+    # How the server asks to be drawn ({"icon", "color"}) and the Results
+    # folders it writes into - both declared by the server, see src/catalog.py.
+    display: Dict[str, str] = field(default_factory=dict)
+    results: List[Dict[str, Any]] = field(default_factory=list)
+    catalog: ServerCatalog = field(default_factory=ServerCatalog, repr=False)
+
     # Internal reference to PnP server
     _server: Optional[PnPServer] = field(default=None, repr=False)
-    
+
     def to_dict(self) -> Dict:
         return {
             "id": self.id,
@@ -188,6 +197,8 @@ class Instrument:
             "type": self.type,
             "status": self.status,
             "address": f"{self.host}:{self.port}",
+            "display": dict(self.display),
+            "results": list(self.results),
             "commands": [c.to_dict() for c in self.commands],
             "properties": [p.to_dict() for p in self.properties],
         }
@@ -200,13 +211,16 @@ class ExecutionResult:
     message: str = ""
     data: Any = None
     error: str = ""
-    
+    #: Picker lists re-read after this command, so the UI can refresh them.
+    options_changed: List[str] = field(default_factory=list)
+
     def to_dict(self) -> Dict:
         return {
             "success": self.success,
             "message": self.message,
             "data": self.data,
-            "error": self.error
+            "error": self.error,
+            "options_changed": list(self.options_changed),
         }
 
 
@@ -344,8 +358,11 @@ class LabCore:
         self._on_log: Optional[Callable] = None
         self._on_workflow_step: Optional[Callable] = None  # Step progress callback
         
-        # Cache for dynamic dropdown options (e.g., mobile_task from SiLA2 servers)
-        self._dynamic_options_cache: Dict[str, List[str]] = {}
+        # Last option list read from a server, per hint (e.g. mobile_task from
+        # the mobile robot's AvailableTasks). Whole options, not just their
+        # ids: the picker has to show "pick_from_tecan" while submitting the
+        # task id, so the label has to survive the trip.
+        self._dynamic_options_cache: Dict[str, List[Dict[str, Any]]] = {}
 
         # Discovery cache: avoid re-running gRPC discovery on every API call
         self._last_discovery_time: float = 0.0
@@ -462,19 +479,20 @@ class LabCore:
         dropdown_config = self._ui_dropdowns.get(ui_hint)
 
         if dropdown_config:
-            # Dynamic options from SiLA2 server (e.g., mobile_task)
-            # Note: These are populated asynchronously via API endpoint
-            if dropdown_config.get("dynamic"):
-                # Return cached options if available
-                cached = self._dynamic_options_cache.get(ui_hint, [])
-                if cached:
-                    return cached
-                # Return empty - actual options fetched via /api/instruments/dynamic_options
-                return []
-            
+            # Read from a property the server names (see fetch_dynamic_options).
+            # This path is synchronous, so it offers what was last read, or the
+            # snapshot kept on disk for when the server is not answering.
+            if dropdown_config.get("dynamic") or dropdown_config.get("source_property"):
+                return [o["id"] for o in self._dynamic_option_items(ui_hint)]
+
             # Static options
             if "options" in dropdown_config:
                 return dropdown_config["options"]
+
+            # The keys of a JSON file in Library/ - e.g. a plate catalog whose
+            # entries are the values a parameter accepts.
+            if dropdown_config.get("json_keys_file"):
+                return self._json_keys(dropdown_config["json_keys_file"])
             
             # Read from folder
             if "folder" in dropdown_config:
@@ -489,20 +507,12 @@ class LabCore:
                                 options.append(item.stem)
                     return sorted(options)
         
-        # Fallback: Try to infer from file type (backward compatibility)
-        hint_to_folder = {
-            "recipe": ("Library/Recipes", ".json"),
-            "analysis": ("Library/Analysis", ".mdfx"),
-            "hal_config": ("Library/HardwareConfig", ".json"),
-            "liquid_class": ("Library/LiquidClasses", ".json"),
-        }
-        
-        if ui_hint in hint_to_folder:
-            folder, ext = hint_to_folder[ui_hint]
-            folder_path = self.base_dir / folder
-            if folder_path.exists():
-                return sorted([f.stem for f in folder_path.iterdir() if f.suffix == ext])
-        
+        # There used to be a table here mapping "recipe", "analysis",
+        # "hal_config" and "liquid_class" to folders, for servers that did not
+        # say. Every server that uses them declares them in its catalog, and a
+        # table in the core is exactly the per-instrument knowledge the core is
+        # not supposed to hold.
+
         # Location: discovered instruments
         if ui_hint == "location":
             return self._get_available_locations()
@@ -527,7 +537,29 @@ class LabCore:
         if declared.get("options") is not None and labels:
             return [{"value": v, "label": labels.get(v, v) or v}
                     for v in declared["options"]]
+
+        # A property-backed list arrives as {id, name}: the mobile robot's
+        # tasks are ids like "bsffcndfdddchyrrbefecdanbcscfddy", and an
+        # operator choosing what the robot should do has to read
+        # "pick_from_tecan". The command still receives the id.
+        if declared.get("dynamic") or declared.get("source_property"):
+            return [{"value": o["id"], "label": str(o.get("name") or o["id"])}
+                    for o in self._dynamic_option_items(ui_hint)]
         return []
+
+    def _dynamic_option_items(self, ui_hint: str) -> List[Dict[str, Any]]:
+        """The last options read for a property-backed picker, without asking.
+
+        Reading the property is async; building a command's parameters is not.
+        So this offers what the last read left behind, falling back to the
+        snapshot kept on disk for when that server has not been reached yet
+        (or is off).
+        """
+        cached = self._dynamic_options_cache.get(ui_hint)
+        if cached:
+            return cached
+        folder = (self._ui_dropdowns.get(ui_hint) or {}).get("folder")
+        return self._read_options_snapshot(folder) if folder else []
 
     def get_dropdown_config(self) -> Dict[str, Any]:
         """
@@ -542,21 +574,95 @@ class LabCore:
         """Return discovered instrument IDs as available locations."""
         return sorted(self._instruments.keys())
     
-    async def fetch_dynamic_options(self, ui_hint: str) -> List[Dict[str, str]]:
+    def _json_keys(self, relative: str) -> List[str]:
+        """Top-level keys of a Library JSON file, skipping `_comment`-style ones."""
+        path = (self.base_dir / relative).resolve()
+        try:
+            path.relative_to(get_settings(self.base_dir).library_dir.resolve())
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (ValueError, OSError):
+            return []
+        if not isinstance(data, dict):
+            return []
+        return [k for k, v in data.items() if not k.startswith("_") and isinstance(v, dict)]
+
+    #: File a property-backed option list is kept in, inside its declared folder.
+    OPTIONS_SNAPSHOT = "_options.json"
+
+    def _read_options_snapshot(self, folder: str) -> List[Dict[str, Any]]:
+        """The last option list read from a server, as kept on disk.
+
+        Also reads the older one-file-per-option layout Library/MobileTasks
+        was written in, so an existing snapshot keeps working.
         """
-        Fetch dynamic options from SiLA2 servers for dropdown population.
-        
-        Used for options that need to be fetched from external servers,
-        like mobile robot tasks.
-        
-        Args:
-            ui_hint: The UI hint type (e.g., "mobile_task")
-            
-        Returns:
-            List of {id, name} dicts for dropdown options
+        directory = self.base_dir / folder
+        snapshot = directory / self.OPTIONS_SNAPSHOT
+        try:
+            if snapshot.is_file():
+                items = json.loads(snapshot.read_text(encoding="utf-8-sig"))
+                return [i for i in items if isinstance(i, dict) and i.get("id")]
+        except (OSError, ValueError) as exc:
+            logger.warning("Unreadable option snapshot %s: %s", snapshot, exc)
+        options = []
+        if directory.is_dir():
+            for item in sorted(directory.glob("*.json")):
+                try:
+                    data = json.loads(item.read_text(encoding="utf-8-sig"))
+                except (OSError, ValueError):
+                    continue
+                if isinstance(data, dict):
+                    options.append({**data, "id": str(data.get("id", item.stem)),
+                                    "name": str(data.get("name", item.stem))})
+        return options
+
+    def _write_options_snapshot(self, folder: str, options: List[Dict[str, Any]]) -> None:
+        directory = self.base_dir / folder
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / self.OPTIONS_SNAPSHOT).write_text(
+                json.dumps(options, indent=2, ensure_ascii=False), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Could not keep option snapshot in %s: %s", directory, exc)
+
+    def _option_source(self, ui_hint: str) -> Optional[Tuple[Instrument, Dict[str, Any]]]:
+        """The instrument, and the declaration, behind a property-backed picker.
+
+        A server declares it in its catalog:
+            {"hint": "mobile_task", "parameter_names": ["TaskId"],
+             "source_property": "AvailableTasks", "value_field": "TaskId",
+             "label_field": "TaskName", "folder": "Library/MobileTasks"}
+        lab_config.yaml's ui_dropdowns may supply or override the same keys,
+        with `server` naming the instrument, for a server whose catalog cannot
+        be changed (one deployed on another machine).
         """
-        dropdown_config = self._ui_dropdowns.get(ui_hint)
-        
+        configured = dict(self._ui_dropdowns.get(ui_hint) or {})
+        owner = None
+        if configured.get("server"):
+            owner = (self.get_instrument(str(configured["server"]))
+                     or self.find_instrument(str(configured["server"])))
+        declaration: Dict[str, Any] = {}
+        for instrument in self._instruments.values():
+            if owner is not None and instrument is not owner:
+                continue
+            entry = next((e for e in instrument.catalog.library_types
+                          if e.get("hint") == ui_hint), None)
+            if entry:
+                declaration = dict(entry)
+                owner = owner or instrument
+                break
+        declaration.update({k: v for k, v in configured.items() if v not in (None, "")})
+        if owner is None or not declaration.get("source_property"):
+            return None
+        return owner, declaration
+
+    async def fetch_dynamic_options(self, ui_hint: str) -> List[Dict[str, Any]]:
+        """Options for a picker whose values live on a server, not in a folder.
+
+        Read from the property the server names, and kept on disk so the picker
+        still offers something while that server is off. Returns
+        [{"id", "name", ...}] - the remaining fields of each item come along,
+        so a page can show more than the name if the server provides it.
+        """
         # Locations are the instruments discovery actually found. The dashboard
         # used to offer a hardcoded list here that included an "incubator" this
         # lab does not have and three invented storage racks — every one of them
@@ -567,180 +673,151 @@ class LabCore:
                 for inst in sorted(self._instruments.values(), key=lambda i: i.name)
             ]
 
-        if not dropdown_config or not dropdown_config.get("dynamic"):
-            return []
-        
-        # Handle mobile_task specifically
-        if ui_hint == "mobile_task":
-            return await self._fetch_mobile_tasks()
-        
-        return []
-    
-    async def _fetch_mobile_tasks(self) -> List[Dict[str, Any]]:
-        """
-        Fetch available tasks from Library/MobileTasks/ folder.
-        
-        Tasks are populated by calling RefreshTasks command.
-        
-        Returns:
-            List of {id, name, subtask_count} dicts
-        """
-        tasks_dir = self.library_dir / "MobileTasks"
-        
-        if not tasks_dir.exists():
-            logger.warning(f"MobileTasks directory not found: {tasks_dir}")
-            return []
-        
-        options = []
-        for task_file in tasks_dir.glob("*.json"):
-            try:
-                with open(task_file, 'r', encoding='utf-8-sig') as f:
-                    task = json.load(f)
-                    options.append({
-                        "id": task.get("id", task_file.stem),
-                        "name": task.get("name", task_file.stem),
-                        "subtask_count": task.get("subtask_count", 0)
-                    })
-                    logger.debug(f"Loaded task from {task_file.name}: {task.get('name')}")
-            except Exception as e:
-                logger.warning(f"Failed to load task file {task_file}: {e}")
-        
-        logger.info(f"Loaded {len(options)} mobile tasks from Library/MobileTasks/")
-        return options
-    
-    async def _save_mobile_tasks_to_library(self, tasks: List[Dict[str, Any]]) -> int:
-        """
-        Save mobile tasks to Library/MobileTasks/ folder.
-        
-        Clears the folder first, then saves each task as JSON.
-        
-        Args:
-            tasks: List of task dicts with id, name, subtask_count
-            
-        Returns:
-            Number of tasks saved
-        """
-        tasks_dir = self.library_dir / "MobileTasks"
-        tasks_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Clear existing tasks
-        for old_file in tasks_dir.glob("*.json"):
-            try:
-                old_file.unlink()
-            except Exception as e:
-                logger.warning(f"Failed to delete {old_file}: {e}")
-        
-        # Save new tasks
-        saved = 0
-        for task in tasks:
-            task_id = task.get("id", "")
-            if not task_id:
-                continue
-            
-            task_file = tasks_dir / f"{task_id}.json"
-            try:
-                with open(task_file, 'w', encoding='utf-8') as f:
-                    json.dump(task, f, indent=2)
-                saved += 1
-                logger.debug(f"Saved task: {task_id}")
-            except Exception as e:
-                logger.warning(f"Failed to save task {task_id}: {e}")
-        
-        logger.info(f"Saved {saved} mobile tasks to Library/MobileTasks/")
-        return saved
-    
-    async def refresh_mobile_tasks(self) -> int:
-        """
-        Refresh mobile tasks from ROS and save to Library.
-        
-        Calls Get_AvailableTasks on the MobileSiLA2Server,
-        then saves results to Library/MobileTasks/.
-        
-        Returns:
-            Number of tasks found
-        """
-        try:
-            # Get mobile instrument
-            mobile = None
-            for mobile_id in ["mobile", "mobile_robot", "gofa", "gofago"]:
-                mobile = self.get_instrument(mobile_id)
-                if mobile:
-                    break
-            
-            if not mobile:
-                for instr in self._instruments.values():
-                    if "mobile" in instr.name.lower() or "gofa" in instr.name.lower():
-                        mobile = instr
-                        break
-            
-            if not mobile or mobile.status != "online":
-                logger.warning("Mobile robot not available for refresh")
-                return 0
-            
-            # Use PnPClient to call Get_AvailableTasks
-            if self._client is None:
-                self._client = PnPClient()
-            
-            server = mobile._server
-            if not server:
-                return 0
-            
-            try:
-                await self._client.connect(server)
-            except (ConnectionError, OSError, TimeoutError, asyncio.TimeoutError) as e:
-                logger.warning(f"Mobile server unreachable at {server.host}:{server.port}: {e}")
-                return 0
+        source = self._option_source(ui_hint)
+        if source is None:
+            configured = self._ui_dropdowns.get(ui_hint) or {}
+            folder = configured.get("folder") if isinstance(configured, dict) else None
+            return self._read_options_snapshot(folder) if folder else []
 
-            result = await self._client.execute(
-                server,
-                "Get_AvailableTasks",
-                {},
-                feature="TaskManagement",
-                timeout=self._command_timeout()
-            )
-            
-            if not result.success:
-                logger.warning(f"Get_AvailableTasks failed: {result.error}")
-                return 0
-            
-            # Parse response
-            tasks_data = result.data
-            logger.info(f"Get_AvailableTasks response: {tasks_data}")
-            
-            tasks = []
-            if isinstance(tasks_data, dict):
-                tasks_raw = tasks_data.get("tasks", [])
-                if isinstance(tasks_raw, str):
-                    try:
-                        tasks = json.loads(tasks_raw)
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"Malformed tasks payload from mobile server: {e}")
-                        tasks = []
+        instrument, declaration = source
+        folder = declaration.get("folder") or ""
+        prop_name = declaration["source_property"]
+        prop = next((p for p in instrument.properties if p.id == prop_name), None)
+
+        options: Optional[List[Dict[str, Any]]] = None
+        if instrument.status == "online" and prop is not None:
+            try:
+                result = await self.get_property(instrument.id, prop.feature, prop_name)
+                if result.success:
+                    options = self._options_from_value(
+                        result.data,
+                        str(declaration.get("value_field") or "id"),
+                        str(declaration.get("label_field") or "name"),
+                    )
                 else:
-                    tasks = tasks_raw
-            elif isinstance(tasks_data, list):
-                tasks = tasks_data
-            
-            # Normalize task format
-            normalized_tasks = []
-            for task in tasks:
-                if isinstance(task, dict):
-                    normalized_tasks.append({
-                        "id": task.get("task_id", task.get("id", "")),
-                        "name": task.get("task_name", task.get("name", "")),
-                        "subtask_count": task.get("subtask_count", 0)
-                    })
-            
-            # Save to library
-            saved = await self._save_mobile_tasks_to_library(normalized_tasks)
-            return saved
-            
-        except (ConnectionError, OSError, TimeoutError, asyncio.TimeoutError) as e:
-            logger.warning(f"Mobile server connection error during task refresh: {e}")
-            return 0
-        except Exception as e:
-            logger.error(f"Error refreshing mobile tasks (malformed response or bug): {e}")
-            return 0
+                    logger.warning("Reading %s.%s for '%s' failed: %s",
+                                   instrument.name, prop_name, ui_hint, result.error)
+            except Exception as exc:
+                logger.warning("Reading %s.%s for '%s' failed: %s",
+                               instrument.name, prop_name, ui_hint, exc)
+
+        if options is None:
+            options = self._read_options_snapshot(folder) if folder else []
+        elif folder:
+            self._write_options_snapshot(folder, options)
+
+        self._dynamic_options_cache[ui_hint] = options
+        return options
+
+    @staticmethod
+    def _options_from_value(value: Any, value_field: str, label_field: str) -> List[Dict[str, Any]]:
+        """Turn a property value - a list of structures, or JSON of one - into options."""
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                return []
+        if isinstance(value, dict):
+            value = next((v for v in value.values() if isinstance(v, list)), [])
+        options = []
+        for item in value or []:
+            if isinstance(item, dict):
+                ident = item.get(value_field)
+                if ident in (None, ""):
+                    continue
+                options.append({**item, "id": str(ident),
+                                "name": str(item.get(label_field) or ident)})
+            elif isinstance(item, (str, int, float)):
+                options.append({"id": str(item), "name": str(item)})
+        return options
+
+    async def _refresh_options_owned_by(self, instrument: "Instrument") -> List[str]:
+        """Re-read every property-backed picker this instrument is the source of.
+
+        Called after each command that succeeds on it, since the orchestrator
+        cannot know which command changed the list - on the mobile robot it is
+        RefreshTasks, and that name used to be written into this file.
+        """
+        refreshed = []
+        hints = {e.get("hint") for e in instrument.catalog.library_types if e.get("hint")}
+        hints.update(h for h, c in self._ui_dropdowns.items()
+                     if isinstance(c, dict) and c.get("source_property"))
+        for hint in sorted(h for h in hints if h):
+            source = self._option_source(hint)
+            if source is None or source[0] is not instrument:
+                continue
+            await self.fetch_dynamic_options(hint)
+            refreshed.append(hint)
+        return refreshed
+
+    # ── Folders and results: what the servers declared ───────────────────────
+
+    def ensure_declared_folders(self, instrument: "Instrument") -> List[Path]:
+        """Create the Library and Results folders an instrument declares.
+
+        The server creates them on its own machine when it starts; this covers
+        the orchestrator's side, which for a server on another computer is the
+        only side the web interface can see.
+        """
+        settings = get_settings(self.base_dir)
+        created, refused = ensure_folders(
+            instrument.catalog, self.base_dir,
+            library_dir=settings.library_dir, results_dir=settings.results_dir,
+        )
+        for path in created:
+            logger.info("Created %s, declared by %s", path, instrument.name)
+        for folder in refused:
+            logger.warning("%s declares folder %r outside Library/ or Results/; not created",
+                           instrument.name, folder)
+        return created
+
+    #: Results subfolders that are LabOS's own bookkeeping, not instrument data.
+    INTERNAL_RESULT_FOLDERS = frozenset({"runs", "__pycache__"})
+
+    def list_result_folders(self) -> List[Dict[str, Any]]:
+        """Every folder under Results/ an instrument writes into, and who said so.
+
+        Declared folders come first, labelled by the instruments that declared
+        them. Any other folder that exists is listed too, marked undeclared, so
+        data an instrument wrote without declaring it is still visible rather
+        than silently missing from the page.
+        """
+        results_dir = get_settings(self.base_dir).results_dir
+        folders: Dict[str, Dict[str, Any]] = {}
+        for instrument in sorted(self._instruments.values(), key=lambda i: i.name):
+            for result in instrument.catalog.result_types:
+                path = (self.base_dir / result.folder).resolve()
+                try:
+                    relative = path.relative_to(results_dir.resolve())
+                except ValueError:
+                    continue
+                name = relative.as_posix()
+                entry = folders.setdefault(name, {
+                    "name": name,
+                    "display_name": result.display_name,
+                    "description": result.description,
+                    "file_extensions": list(result.file_extensions),
+                    "declared_by": [],
+                    "declared": True,
+                })
+                if instrument.name not in entry["declared_by"]:
+                    entry["declared_by"].append(instrument.name)
+        if results_dir.is_dir():
+            for child in sorted(results_dir.iterdir()):
+                if (child.is_dir() and child.name not in folders
+                        and child.name not in self.INTERNAL_RESULT_FOLDERS
+                        and not child.name.startswith(".")):
+                    folders[child.name] = {
+                        "name": child.name, "display_name": child.name,
+                        "description": "", "file_extensions": [],
+                        "declared_by": [], "declared": False,
+                    }
+        for entry in folders.values():
+            path = results_dir / entry["name"]
+            entry["exists"] = path.is_dir()
+            entry["file_count"] = (sum(1 for f in path.iterdir() if f.is_file())
+                                   if path.is_dir() else 0)
+        return list(folders.values())
 
     #                           DISCOVERY
 
@@ -791,8 +868,17 @@ class LabCore:
         # remote server made every command on every instrument in the lab fail
         # with the message 'folder'. A malformed entry now costs exactly the
         # dropdown it describes.
+        catalog = getattr(server, "catalog", None)
+        if not isinstance(catalog, ServerCatalog):
+            # A server object built without discovery (tests, a hand-registered
+            # server) may carry only the bare list of library types.
+            raw_types = getattr(server, "library_catalog", None)
+            catalog = parse_catalog(
+                {"library_types": list(raw_types) if isinstance(raw_types, list) else []},
+                source=str(server.name))
+
         param_hint_lookup: Dict[str, str] = {}
-        for lib_type in server.library_catalog:
+        for lib_type in catalog.library_types:
             hint = lib_type.get("hint")
             if not hint:
                 logger.warning(
@@ -804,7 +890,7 @@ class LabCore:
 
         # Merge catalog folder/extension into _ui_dropdowns for _get_options_for_hint().
         # Only adds new entries; static lab_config.yaml entries take precedence.
-        for lib_type in server.library_catalog:
+        for lib_type in catalog.library_types:
             hint = lib_type.get("hint")
             if not hint:
                 continue
@@ -821,7 +907,18 @@ class LabCore:
                     "option_labels": dict(lib_type.get("value_labels") or {}),
                 })
                 continue
-            if hint in self._ui_dropdowns or lib_type.get("dynamic"):
+            if hint in self._ui_dropdowns:
+                continue
+            if lib_type.get("json_keys_file"):
+                self._ui_dropdowns[hint] = {"json_keys_file": lib_type["json_keys_file"]}
+                continue
+            if lib_type.get("source_property"):
+                self._ui_dropdowns[hint] = {
+                    k: lib_type[k] for k in ("source_property", "value_field", "label_field", "folder")
+                    if lib_type.get(k)
+                }
+                continue
+            if lib_type.get("dynamic"):
                 continue
             folder = lib_type.get("folder")
             if not folder:
@@ -840,6 +937,11 @@ class LabCore:
 
         commands = []
         for feature_id, cmd_id, cmd in server.get_all_commands():
+            # SiLAService's GetFeatureDefinition/SetServerName are on every
+            # server; they are how the orchestrator reads an instrument, not
+            # something an operator would ever put in a workflow.
+            if is_infrastructure_feature(feature_id):
+                continue
             params = []
             for p in cmd.parameters:
                 ui_hint = param_hint_lookup.get(p.identifier) or p.infer_ui_hint()
@@ -874,7 +976,9 @@ class LabCore:
         properties = []
         for feature in server.features:
             fid = feature.identifier
-            feature_name = fid.split("/")[-2] if "/" in fid else fid
+            if is_infrastructure_feature(fid):
+                continue
+            feature_name = _feature_name(fid)
             for prop in feature.properties:
                 properties.append(Property(
                     id=prop.identifier,
@@ -894,6 +998,9 @@ class LabCore:
             port=server.port,
             commands=commands,
             properties=properties,
+            display=dict(catalog.display),
+            results=[r.to_dict() for r in catalog.result_types],
+            catalog=catalog,
             _server=server,
         )
 
@@ -916,6 +1023,7 @@ class LabCore:
         port_to_key, port_to_host = self._build_port_to_key()
         instrument = self._server_to_instrument(server, port_to_key, port_to_host)
         self._instruments[instrument.id] = instrument
+        self.ensure_declared_folders(instrument)
         logger.info(f"mDNS push: registered new instrument '{instrument.name}'")
         if self._on_discovery_update:
             self._on_discovery_update(list(self._instruments.values()))
@@ -963,6 +1071,10 @@ class LabCore:
                 )
                 continue
             instruments[inst.id] = inst
+            try:
+                self.ensure_declared_folders(inst)
+            except Exception as exc:
+                logger.warning("Could not create folders declared by %s: %s", inst.name, exc)
         self._instruments = instruments
 
         self._last_discovery_time = time.monotonic()
@@ -1006,6 +1118,11 @@ class LabCore:
             inst for inst in self._instruments.values()
             if any(cmd.id == command_id for cmd in inst.commands)
         ]
+
+    def role_of(self, instrument_id: str, command_id: str):
+        """The plate-traceability role a server declared for one of its commands."""
+        instrument = self.get_instrument(instrument_id) or self.find_instrument(instrument_id)
+        return instrument.catalog.role_of(command_id) if instrument else None
 
     def get_instrument(self, instrument_id: str) -> Optional[Instrument]:
         """Get instrument by ID."""
@@ -1163,28 +1280,16 @@ class LabCore:
                     error=result.error or "Unknown error"
                 )
             
-            # Special handling: after RefreshTasks, pull the real task list from the
-            # AvailableTasks property (RefreshTasks itself only returns a TaskCount)
-            # and save it to Library/MobileTasks/ for the mobile_task dropdown.
-            if command_id == "RefreshTasks":
-                try:
-                    prop_result = await self.get_property(instrument_id, cmd.feature, "AvailableTasks")
-                    if prop_result.success and isinstance(prop_result.data, list):
-                        tasks = [
-                            {
-                                "id": t.get("TaskId", ""),
-                                "name": t.get("TaskName", ""),
-                                "subtask_count": t.get("SubtaskCount", 0),
-                            }
-                            for t in prop_result.data
-                        ]
-                        saved = await self._save_mobile_tasks_to_library(tasks)
-                        self._log("info", f"Saved {saved} tasks to Library/MobileTasks/")
-                    else:
-                        self._log("warning", f"Could not read AvailableTasks: {prop_result.error}")
-                except Exception as e:
-                    self._log("warning", f"Failed to save tasks: {e}")
-            
+            # A command may change a list a picker offers (the mobile robot's
+            # RefreshTasks changes its task list). Which one is not knowable
+            # from here, so every list this instrument is the source of is
+            # re-read after any command that succeeds on it.
+            options_changed: List[str] = []
+            try:
+                options_changed = await self._refresh_options_owned_by(instrument)
+            except Exception as e:
+                self._log("warning", f"Could not refresh option lists from {instrument.name}: {e}")
+
             # Notify complete
             if self._on_command_complete:
                 self._on_command_complete(instrument_id, command_id, True, result.data)
@@ -1194,7 +1299,8 @@ class LabCore:
             return ExecutionResult(
                 success=True,
                 message=f"{command_id} completed",
-                data=result.data
+                data=result.data,
+                options_changed=options_changed,
             )
             
         except Exception as e:

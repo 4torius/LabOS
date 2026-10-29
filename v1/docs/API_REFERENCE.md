@@ -147,19 +147,27 @@ This is the SQLite-backed store behind the unified **Database** page (`/database
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/results/{fmt}/{filename}` | Download a raw result file |
-| GET | `/api/results/{fmt}/{filename}/view` | Inline text view |
+| GET | `/api/results/folders` | Every folder under `Results/`: who declared it (from each server's catalog), its extensions and its files. Undeclared folders that exist are listed too, with `declared: false` |
+| GET | `/api/results/{folder}/{filename}` | Download a file from a result folder (declared or existing only) |
+| GET | `/api/results/{folder}/{filename}/view` | Inline text view |
+| GET | `/api/results/{folder}/{filename}/animl` | Parse an AnIML file from any result folder into plate-heatmap data |
 | GET | `/api/files/animl_results` | List `.animl` files |
 | GET | `/api/properties` | Every instrument property value currently known, optionally `?instrument_id=`. Values are pushed to the server by the instruments; this is the snapshot a page reads on load instead of firing one request per property |
 | GET | `/api/images` | Deck photos taken with the robot's camera (`CaptureImage`, or a `TakeSnapshot` recipe step) |
 | GET | `/api/images/{filename}` | One image. Shown in **Results → Deck photos** |
-| GET | `/api/results/animl/{filename}/parse` | Parse an AnIML file into plate-heatmap data |
+| GET | `/api/results/animl/{filename}/parse` | The same, for `Results/AnIML` only (kept for older links) |
 
 ---
 
 ## WebSocket Events (`ws://localhost:5000/ws`)
 
 All messages are JSON with a `type` field.
+
+**`instruments_changed`** — a server appeared, went away, or changed status or command count. Pages re-read `/api/instruments/commands`; nothing is keyed on a particular instrument.
+
+**`options_changed`** — `{"hints": [...]}`: a picker list a server holds (the mobile robot's tasks, say) was re-read after a command.
+
+`/api/tecan/protocols`, `/api/tecan/plate-types` and `/api/mobile/tasks` were removed: those lists are declared by the servers and arrive with each parameter as `options` in `/api/instruments/commands`. `/api/dynamic-options/{ui_hint}` returns any property-backed list.
 
 **`workflow_progress`** — sent on every step-state change:
 ```json

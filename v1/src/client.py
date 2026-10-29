@@ -21,7 +21,7 @@ import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # The SiLA2 server packages each ship a top-level module named `src`; keep both
 # this directory and the project root importable so relative and absolute forms
@@ -82,46 +82,59 @@ def invalidate_shared_sila_client(host: str, port: int) -> None:
 
 #                           HELPERS
 
-def _normalize_params_for_command(
+def map_parameters(
     params: Dict[str, Any],
     cmd_parameters: list,
-) -> Dict[str, Any]:
+    defaults: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], List[str]]:
     """
-    Map workflow parameter keys to the SiLA2 command parameter identifiers.
+    Map workflow parameter keys onto a command's SiLA2 parameter identifiers.
 
-    Three-pass strategy so workflow JSON files with slightly different naming
-    conventions (e.g. "recipe", "Recipe", "recipe_name") still resolve to the
-    correct SiLA2 identifier (e.g. "RecipeName").
+    Returns (mapped, unmatched): the values keyed by the identifiers the
+    command declares, and the keys that matched nothing. Dispatch sends the
+    first and drops the second; validation reports the second. They share this
+    one mapping so a workflow cannot pass validation and then be sent something
+    different, or fail validation over a key dispatch would have accepted.
 
-    Keys that don't match any parameter are silently dropped (workflow-level
-    hints like UseHAL / HALConfig are not SiLA2 params).
+    Three passes so files written with slightly different conventions
+    ("recipe", "Recipe", "recipe_name") still reach "RecipeName": exact,
+    case-insensitive, then containment with underscores ignored.
+
+    `defaults` are the values the server declared for this command in its
+    catalog (src/catalog.py). They fill only parameters nothing else supplied,
+    which is what lets a server say "Priority may be left out" without the
+    orchestrator knowing what a Priority is.
     """
     if not cmd_parameters:
-        return {}
+        return {}, list(params or {})
 
+    params = params or {}
     out: Dict[str, Any] = {}
     remaining = {p.identifier: p for p in cmd_parameters}
+    used = set()
 
     # Pass 1 — exact match
     for k, v in params.items():
         if k in remaining:
             out[k] = v
             del remaining[k]
+            used.add(k)
 
     # Pass 2 — case-insensitive exact
     for k, v in params.items():
-        if k in out:
+        if k in used:
             continue
         kl = k.lower()
         for pid in list(remaining):
             if kl == pid.lower():
                 out[pid] = v
                 del remaining[pid]
+                used.add(k)
                 break
 
     # Pass 3 — substring: "Recipe" ↔ "RecipeName", "recipe_name" ↔ "RecipeName"
     for k, v in params.items():
-        if k in out:
+        if k in used:
             continue
         kn = k.replace("_", "").lower()
         for pid in list(remaining):
@@ -129,13 +142,30 @@ def _normalize_params_for_command(
             if kn in pn or pn in kn:
                 out[pid] = v
                 del remaining[pid]
+                used.add(k)
                 break
 
+    for pid, value in (defaults or {}).items():
+        if pid in remaining:
+            out[pid] = value
+            del remaining[pid]
+
+    unmatched = [k for k in params if k not in used]
     # Convert None values to "" so sila2 String validators don't raise TypeError.
-    # Non-string params with None values will still fail in sila2, but Fix B in
-    # _execute_via_sila2_client will surface the error properly instead of
-    # cascading to the "Server needs sila2 library" fallback.
-    return {k: ("" if v is None else v) for k, v in out.items()}
+    return {k: ("" if v is None else v) for k, v in out.items()}, unmatched
+
+
+def _normalize_params_for_command(
+    params: Dict[str, Any],
+    cmd_parameters: list,
+    defaults: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """The mapped half of map_parameters(): what is actually sent.
+
+    Keys that don't match any parameter are silently dropped (workflow-level
+    hints are not SiLA2 parameters).
+    """
+    return map_parameters(params, cmd_parameters, defaults)[0]
 
 
 #                           DATA STRUCTURES
@@ -469,7 +499,9 @@ class PnPClient:
                     )
                     return None
 
-                sila_params = _normalize_params_for_command(params, command.parameters)
+                catalog = getattr(server, "catalog", None)
+                defaults = catalog.defaults_for(command_name) if hasattr(catalog, "defaults_for") else None
+                sila_params = _normalize_params_for_command(params, command.parameters, defaults)
                 result = method(**sila_params)
 
                 if command.observable and ClientObservableCommandInstance and isinstance(result, ClientObservableCommandInstance):

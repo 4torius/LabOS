@@ -227,8 +227,14 @@
         LabOS.ws.on('tip_refill_complete', function (d) {
             showToast('success', 'Tips Reloaded', d.message || 'Tip rack reloaded successfully');
         });
-        LabOS.ws.on('mobile_tasks_updated', function () {
-            if (typeof refreshMobileTasks === 'function') refreshMobileTasks();
+        // A server appeared, disappeared, or re-read a list one of its
+        // parameters offers. Pages that show instruments define
+        // onInstrumentsChanged(); nothing is keyed on a particular instrument.
+        LabOS.ws.on('instruments_changed', function () {
+            if (typeof onInstrumentsChanged === 'function') onInstrumentsChanged();
+        });
+        LabOS.ws.on('options_changed', function () {
+            if (typeof onInstrumentsChanged === 'function') onInstrumentsChanged();
         });
 
         function updateDeviceStatus(deviceId, status) {

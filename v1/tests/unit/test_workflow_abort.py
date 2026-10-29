@@ -160,3 +160,38 @@ class TestAbortReachesTheInstrument:
         ex, _ = _executor()
         ex.request_abort()
         assert ex._abort_requested is True
+
+
+class TestOnlyABlindStopIsSent:
+    """An abort command is sent with no arguments, so it must not need any.
+
+    The Manual Station's CancelTask takes the id of the task to cancel. It was
+    picked for every run waiting on a person, and every such abort reported
+    "CancelTask FAILED - verify manually" about a step nothing was running.
+    """
+
+    @staticmethod
+    def _server(parameters, catalog=None):
+        from types import SimpleNamespace
+        from src.catalog import parse_catalog
+        command = SimpleNamespace(identifier="CancelTask",
+                                  parameters=[SimpleNamespace(identifier=p) for p in parameters])
+        server = MagicMock()
+        server.get_all_commands.return_value = [("ManualStation", "CancelTask", command)]
+        server.catalog = parse_catalog(catalog or {})
+        return server
+
+    def _executor_for(self, server):
+        registry = MagicMock()
+        registry.get_server_by_name.return_value = server
+        return PnPWorkflowExecutor(registry)
+
+    def test_a_stop_command_with_no_parameters_is_used(self):
+        assert self._executor_for(self._server([]))._find_abort_command("x") == "CancelTask"
+
+    def test_one_that_needs_arguments_is_not(self):
+        assert self._executor_for(self._server(["TaskId", "Reason"]))._find_abort_command("x") is None
+
+    def test_unless_its_server_declared_them_all(self):
+        server = self._server(["Reason"], {"parameter_defaults": {"CancelTask": {"Reason": "Aborted"}}})
+        assert self._executor_for(server)._find_abort_command("x") == "CancelTask"

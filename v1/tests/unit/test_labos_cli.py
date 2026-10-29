@@ -24,13 +24,25 @@ class TestParser:
 
     @pytest.mark.parametrize("command", [
         "status", "instruments", "validate", "run", "read",
-        "new-server", "codegen", "doctor",
+        "new-server", "codegen", "doctor", "folders", "call",
     ])
     def test_every_documented_command_is_wired(self, command):
         parser = labos.build_parser()
         actions = [a for a in parser._subparsers._actions if hasattr(a, "choices")]
         choices = {c for a in actions for c in (a.choices or {})}
         assert command in choices
+
+    def test_call_requires_confirmation_by_default(self):
+        args = labos.build_parser().parse_args(["call", "stacker", "Home"])
+        assert args.yes is False, "a single command can move hardware too"
+
+    def test_call_reads_values_as_json_when_they_are(self):
+        assert labos._parse_assignments(["Rpm=300", "Open=false", "Label=deck A", 'L=["a"]']) == {
+            "Rpm": 300, "Open": False, "Label": "deck A", "L": ["a"]}
+
+    def test_call_refuses_a_pair_without_equals(self):
+        with pytest.raises(ValueError):
+            labos._parse_assignments(["Rpm"])
 
     def test_run_requires_confirmation_by_default(self):
         args = labos.build_parser().parse_args(["run", "W"])
@@ -102,9 +114,9 @@ class TestNewServerScaffold:
                                 root))
         return root
 
-    def _make(self, root, name="Centrifuge", port=None, key=None):
+    def _make(self, root, name="Centrifuge", port=None, key=None, results=None, library=None):
         import argparse
-        args = argparse.Namespace(name=name, port=port, key=key)
+        args = argparse.Namespace(name=name, port=port, key=key, results=results, library=library)
         code = labos.cmd_new_server(args)
         return code, root / "SiLA2" / f"{name}SiLA2Server"
 
@@ -136,12 +148,43 @@ class TestNewServerScaffold:
         assert config["sila2"]["server_name"] == "Centrifuge"
         assert "TODO" not in config["sila2"]["server_name"]
 
-    def test_the_library_catalog_starts_empty(self, scaffold):
-        """The template's example entry would advertise Library/ folders this
+    def test_the_catalog_declares_no_folders_unless_asked(self, scaffold):
+        """The template's example entries would advertise folders this
         instrument does not use, and populate UI dropdowns with them."""
         _, folder = self._make(scaffold)
         catalog = json.loads((folder / "library_catalog.json").read_text(encoding="utf-8"))
-        assert catalog == {"library_types": []}
+        assert catalog["library_types"] == [] and catalog["result_types"] == []
+
+    def test_results_and_library_folders_are_declared_from_the_command_line(self, scaffold):
+        """`--results Cells` is the whole of "this instrument needs a Cells folder"."""
+        from src.catalog import parse_catalog
+        _, folder = self._make(scaffold, name="CellImager", results=["Cells"], library=["Library/Stains"])
+        catalog = parse_catalog((folder / "library_catalog.json").read_text(encoding="utf-8"))
+        assert catalog.problems == []
+        assert ("results", "Results/Cells") in catalog.declared_folders()
+        assert ("library", "Library/Stains") in catalog.declared_folders()
+
+    @pytest.mark.parametrize("bad", ["../escape", "C:/Windows", "Cells;rm"])
+    def test_an_unusable_folder_is_refused_before_anything_is_created(self, scaffold, bad):
+        code, folder = self._make(scaffold, name="CellImager", results=[bad])
+        assert code == 1
+        assert not folder.exists()
+
+    def test_the_server_type_is_one_sila2_accepts(self, scaffold):
+        """The template said "instrument"; SiLA2 requires CamelCase, so every
+        scaffolded server raised ValueError before it could start."""
+        _, folder = self._make(scaffold)
+        config = yaml.safe_load((folder / "config.yaml").read_text(encoding="utf-8"))
+        assert re.fullmatch(r"[A-Z][a-zA-Z0-9]*", config["sila2"]["server_type"])
+        main_py = (folder / "main.py").read_text(encoding="utf-8")
+        default = re.search(r'sila2_cfg\.get\("server_type", "([^"]*)"\)', main_py).group(1)
+        assert re.fullmatch(r"[A-Z][a-zA-Z0-9]*", default)
+
+    def test_a_run_of_the_template_does_not_leak_its_identity(self, scaffold):
+        (scaffold / "SiLA2" / "_NewInstrumentTemplate" / ".server_uuid").write_text(
+            "0c1f8cb7-664a-4570-a015-b38e46fac549", encoding="utf-8")
+        _, folder = self._make(scaffold)
+        assert not (folder / ".server_uuid").exists(), "two servers would share one mDNS identity"
 
     def test_the_shared_library_provider_is_left_untouched(self, scaffold):
         _, folder = self._make(scaffold)

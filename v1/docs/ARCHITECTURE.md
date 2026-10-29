@@ -56,9 +56,19 @@ Each instrument is wrapped by a dedicated SiLA2 server built with the **`sila2` 
 
 Full per-command reference: [SERVERS.md](SERVERS.md).
 
-### `LabOSLibraryProvider` — self-declaring library types
+### `LabOSLibraryProvider` — what a server declares besides its commands
 
-Every server also implements a small shared feature, `LabOSLibraryProvider`, exposing one property (`LibraryCatalog`) that returns a JSON description of which `Library/` subfolders and file types that server cares about (e.g. Opentrons declares `recipe`, `hal_config`, `liquid_class`; Tecan declares `analysis`). The orchestrator reads this at discovery time to populate UI dropdowns automatically. **Adding a new instrument never requires touching orchestrator code** — see [ADDING_NEW_INSTRUMENT.md](ADDING_NEW_INSTRUMENT.md).
+Every server also implements a small shared feature, `LabOSLibraryProvider`, exposing one property (`LibraryCatalog`) that returns the server's `library_catalog.json`. It carries everything the orchestrator needs that an FDL cannot say:
+
+| Section | Used for | Example |
+|---|---|---|
+| `library_types` | parameter pickers over `Library/` folders, fixed values, JSON keys, or a property the server holds | Opentrons: recipes, HAL configs, liquid classes, deck labware; Tecan: `.mdfx` protocols, plate types |
+| `result_types` | `Results/` folders the instrument writes; created at server start and at discovery; one tab each on the Results page | Tecan: `XML`, `Excel`, `AnIML`, `CSV`; Opentrons: `Images` |
+| `parameter_defaults` | parameters a workflow may omit, filled at dispatch | Manual Station: `Priority`, `TaskType`, `TimeoutSeconds`; Tecan: `PlateID`, `PlateType` |
+| `traceability` | which command prepares a plate and which measures one | Opentrons `ExecuteRecipe` prepares; Tecan `RunMeasurement` measures |
+| `display` | icon and colour in the dashboard and the builder toolbox | |
+
+`src/catalog.py` is the one reader, and treats the catalog as untrusted input: a malformed entry costs that entry, folders outside `Library/` and `Results/` are refused, and icon/colour must match a fixed shape because pages render them. **Adding a new instrument never requires touching orchestrator code**, and `tests/unit/test_catalog.py::TestNoInstrumentNamesInTheCore` fails if a branch on an instrument's name comes back into the dispatch path — see [ADDING_NEW_INSTRUMENT.md](ADDING_NEW_INSTRUMENT.md).
 
 ### Execution (`src/client.py`)
 
@@ -90,7 +100,7 @@ The registry uses a SiLA2-native two-phase strategy:
 
 **Phase 2 — Runtime (continuous):** mDNS/DNS-SD (`_sila2._tcp.local.`) discovers every SiLA2-compliant server on the local network segment automatically, merging/correcting bootstrap entries as live announcements arrive.
 
-In both phases, server self-description via `SiLAService` (`ServerName`, `ImplementedFeatures`, `GetFeatureDefinition`) plus `LabOSLibraryProvider.LibraryCatalog` is the source of truth for features, commands, and file-type dropdowns — nothing is hardcoded per instrument.
+In both phases, server self-description via `SiLAService` (`ServerName`, `ImplementedFeatures`, `GetFeatureDefinition`) plus `LabOSLibraryProvider.LibraryCatalog` is the source of truth for features, commands, pickers, result folders, parameter defaults and plate roles — nothing is hardcoded per instrument. When the set of instruments changes (a server started after the web app, one switched off), the web app pushes `instruments_changed` and the open pages re-read it.
 
 **Stable instrument IDs**: a server announcing on a `lab_config.yaml`-configured port only claims that config's instrument ID if its announcing host matches the configured host (or the host of whatever is already registered under that ID). This specifically guards against a stale/foreign server left running on a different machine after a redeploy silently taking over another instrument's identity in the UI — a real bug from an earlier version, now fixed (`lab_core.py::_server_to_instrument`).
 
@@ -189,8 +199,10 @@ Not two files — one file, two conventions, so a plate's chemical content and i
 
 `src/plate_tracking.py` is the business logic that turns "a SiLA2 command just succeeded" into database rows, shared identically between the workflow-execution path (`webapp/routes/workflows.py::_execute_step`) and manual Dashboard commands (`webapp/routes/instruments.py::execute_device_command`) — a plate gets created and linked the same way regardless of how the command was launched:
 
-- **`track_opentrons_recipe()`** — every successful Opentrons `ExecuteRecipe` always creates a new `plates` row (`plate_id` auto-generated as `PLT-{timestamp}-{recipe-name-slug}`, there is currently no way to name it yourself) plus one `wells` row per (well, reagent) pair extracted from the recipe JSON, with volumes and — when a reagent's stock concentration is registered in `reagent_catalog` — a computed `concentration_mm`.
-- **`track_tecan_measurement()`** — every successful Tecan `RunMeasurement`/`RunAnalysis` resolves the effective `plate_id` (explicit `PlateID` param → `current_plate_id` from workflow context → recovered from the AnIML filename as a last resort), guarantees a `plates` row exists via `ensure_plate_for_measurement()` even with no prior pipetting record (e.g. a manual measurement — the plate gets a note explaining why it has no well content), and writes `instrument_measurements` + `well_measurements` eagerly (not deferred to end-of-run).
+Which commands these apply to is declared by each server (`traceability` in its catalog), not decided by the instrument's name:
+
+- **`track_plate_preparation()`** — every successful command declared `prepares_plate` (on this lab, Opentrons `ExecuteRecipe`) always creates a new `plates` row (`plate_id` auto-generated as `PLT-{timestamp}-{recipe-name-slug}`, there is currently no way to name it yourself) plus one `wells` row per (well, reagent) pair extracted from the recipe JSON, with volumes and — when a reagent's stock concentration is registered in `reagent_catalog` — a computed `concentration_mm`.
+- **`track_plate_measurement()`** — every successful command declared `measures_plate` (on this lab, Tecan `RunMeasurement`) resolves the effective `plate_id` (explicit `PlateID` param → `current_plate_id` from workflow context → recovered from the AnIML filename as a last resort), guarantees a `plates` row exists via `ensure_plate_for_measurement()` even with no prior pipetting record (e.g. a manual measurement — the plate gets a note explaining why it has no well content), and writes `instrument_measurements` + `well_measurements` eagerly (not deferred to end-of-run).
 - **Auto-linking only happens within a single workflow execution** (`workflow_context["current_plate_id"]`, in-memory, per-run) — a manual command from the Dashboard, or a workflow run on a different day, does not inherit a previous plate_id automatically. The Database page's "Add analysis" button (on a plate's detail view) closes that gap for the common case: it pre-fills `PlateID` and launches a Tecan `RunMeasurement` from there, so linking a same-plate follow-up analysis (e.g. a fluorescence read one day, luminescence the next) is one click instead of copy-pasting the plate_id by hand.
 - A plate measured with more than one technique (e.g. fluorescence and absorbance on the same plate) keeps every technique as distinct `well_measurements`/`instrument_measurements` rows — the Database page's well-grid and per-well tables never average or overwrite across techniques; a "Tecnica" dropdown appears whenever a plate has more than one.
 

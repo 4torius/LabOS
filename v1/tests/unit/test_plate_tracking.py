@@ -11,6 +11,11 @@ import pytest
 
 from src import database as db
 from src import plate_tracking as pt
+from src.catalog import Traceability
+
+PREPARES = Traceability(role="prepares_plate", recipe_parameter="RecipeName")
+MEASURES = Traceability(role="measures_plate", plate_parameter="PlateID",
+                        protocol_parameter="ProtocolFile")
 
 
 @pytest.fixture
@@ -184,13 +189,28 @@ class TestApplyConcentrations:
         assert wells[0]["concentration_mm"] is None
 
 
-class TestTrackOpentronsRecipe:
-    def test_ignores_non_recipe_commands(self, fresh_db, tmp_path):
-        result = pt.track_opentrons_recipe(
-            "opentrons", "GetStatus", {}, _fake_result({}),
-            run_id=None, base_dir=tmp_path,
+class TestTrackPlatePreparation:
+    """Gated on the role the server declared, not on the instrument's name."""
+
+    def test_ignores_a_command_with_no_declared_role(self, fresh_db, tmp_path):
+        result = pt.track_plate_preparation(
+            "opentrons", "ExecuteRecipe", {"RecipeName": "r"}, _fake_result({}),
+            role=None, run_id=None, base_dir=tmp_path,
         )
-        assert result is None
+        assert result is None, "a name that used to match is no longer enough"
+
+    def test_ignores_a_measuring_command(self, fresh_db, tmp_path):
+        assert pt.track_plate_preparation(
+            "reader", "Read", {}, _fake_result({}),
+            role=MEASURES, run_id=None, base_dir=tmp_path,
+        ) is None
+
+    def test_any_instrument_that_declares_the_role_is_tracked(self, fresh_db, tmp_path):
+        plate_id = pt.track_plate_preparation(
+            "second_liquid_handler", "RunProtocol", {"RecipeName": "my_recipe"}, _fake_result({}),
+            role=PREPARES, run_id=None, base_dir=tmp_path,
+        )
+        assert plate_id and plate_id.startswith("PLT-")
 
     def test_creates_plate_row_on_execute_recipe(self, fresh_db, tmp_path):
         # plates.run_id has FOREIGN KEY REFERENCES run_results(run_id) — the
@@ -199,9 +219,9 @@ class TestTrackOpentronsRecipe:
         # failed" bug this test caught before that fix existed).
         fresh_db.save_run({"run_id": "R1", "workflow_name": "wf", "status": "running", "step_results": []})
 
-        plate_id = pt.track_opentrons_recipe(
+        plate_id = pt.track_plate_preparation(
             "opentrons", "ExecuteRecipe", {"RecipeName": "my_recipe"}, _fake_result({}),
-            run_id="R1", base_dir=tmp_path,
+            role=PREPARES, run_id="R1", base_dir=tmp_path,
         )
         assert plate_id is not None
         assert plate_id.startswith("PLT-")
@@ -215,22 +235,32 @@ class TestTrackOpentronsRecipe:
         with a run_id that has no run_results row logs an error and the
         plate is NOT created — this is exactly the bug the pre-create-the-
         run-row fix in workflows.py exists to avoid hitting in production."""
-        plate_id = pt.track_opentrons_recipe(
+        plate_id = pt.track_plate_preparation(
             "opentrons", "ExecuteRecipe", {"RecipeName": "my_recipe"}, _fake_result({}),
-            run_id="R-does-not-exist", base_dir=tmp_path,
+            role=PREPARES, run_id="R-does-not-exist", base_dir=tmp_path,
         )
         assert plate_id is not None  # the id is still generated/returned...
         assert fresh_db.get_plate(plate_id) is None  # ...but nothing was actually persisted
         assert "FOREIGN KEY constraint failed" in caplog.text
 
 
-class TestTrackTecanMeasurement:
-    def test_ignores_non_measurement_commands(self, fresh_db, tmp_path):
-        result = pt.track_tecan_measurement(
-            "tecan", "PlateIn", {}, _fake_result({}),
-            run_id=None, current_plate_id=None, base_dir=tmp_path,
+class TestTrackPlateMeasurement:
+    def test_ignores_a_command_with_no_declared_role(self, fresh_db, tmp_path):
+        result = pt.track_plate_measurement(
+            "tecan", "RunMeasurement", {"PlateID": "P1"}, _fake_result({}),
+            role=None, run_id=None, current_plate_id=None, base_dir=tmp_path,
         )
         assert result is None
+
+    def test_the_result_field_is_found_whatever_the_server_called_it(self, fresh_db, tmp_path):
+        """A SiLA2 response comes back keyed by its own identifier."""
+        animl_file = tmp_path / "P7_20260115_143022.animl"
+        animl_file.write_text("<AnIML/>", encoding="utf-8")
+        result = pt.track_plate_measurement(
+            "fluorimeter", "Read", {}, _fake_result({"ResultFile": str(animl_file)}),
+            role=MEASURES, run_id=None, current_plate_id=None, base_dir=tmp_path,
+        )
+        assert result == "P7"
 
     def test_derives_plate_id_from_animl_filename_when_none_supplied(self, fresh_db, tmp_path):
         """Regression for the corrected PlateID-reconciliation fix (§3.4):
@@ -242,10 +272,10 @@ class TestTrackTecanMeasurement:
         animl_file = animl_dir / "abs_450nm_20260115_143022.animl"
         animl_file.write_text("<AnIML/>", encoding="utf-8")
 
-        result = pt.track_tecan_measurement(
+        result = pt.track_plate_measurement(
             "tecan", "RunMeasurement", {"PlateID": ""},
             _fake_result({"animl_file_path": str(animl_file)}),
-            run_id=None, current_plate_id=None, base_dir=tmp_path,
+            role=MEASURES, run_id=None, current_plate_id=None, base_dir=tmp_path,
         )
         assert result == "abs_450nm"
 
@@ -261,15 +291,15 @@ class TestTrackTecanMeasurement:
         monkeypatch.setattr(
             pt, "parse_animl", lambda p: {"experiment_steps": []}, raising=False
         )
-        # parse_animl is imported lazily inside track_tecan_measurement via
+        # parse_animl is imported lazily inside track_plate_measurement via
         # `from src.animl_parser import parse_animl` — patch at the source.
         import src.animl_parser as animl_parser
         monkeypatch.setattr(animl_parser, "parse_animl", lambda p: {"experiment_steps": []})
 
-        plate_id = pt.track_tecan_measurement(
+        plate_id = pt.track_plate_measurement(
             "tecan", "RunMeasurement", {"PlateID": ""},
             _fake_result({"animl_file_path": str(animl_file)}),
-            run_id=None, current_plate_id=None, base_dir=tmp_path,
+            role=MEASURES, run_id=None, current_plate_id=None, base_dir=tmp_path,
         )
         assert plate_id == "TestProtocol"
         plate = fresh_db.get_plate(plate_id)

@@ -14,101 +14,108 @@
 .heat-legend { display: flex; align-items: center; gap: 8px; font-size: 11px; }
 .heat-legend-bar { width: 140px; height: 14px; border-radius: 3px;
                    background: linear-gradient(to right, #053061, #2166ac, #4dac26, #d6604d, #67001f); }
+.result-thumb { object-fit: cover; aspect-ratio: 4/3; cursor: zoom-in; }
 </style>
 
 <div class="container-fluid">
-    <h2 class="mb-4"><i class="bi bi-file-earmark-bar-graph"></i> Results</h2>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="mb-0"><i class="bi bi-file-earmark-bar-graph"></i> Results</h2>
+        <a href="/results" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-clockwise"></i> Refresh</a>
+    </div>
 
+    {# One tab per folder under Results/. The folders, their names and who
+       writes into them come from the instruments themselves - each server
+       declares its result folders - so an instrument added tomorrow gets its
+       tab here without this page changing. A folder nobody declared is listed
+       too, so data is never silently missing from the page. #}
+    {% if not folders %}
+    <div class="text-muted text-center py-5">
+        <i class="bi bi-folder2-open display-4 d-block mb-2"></i>
+        No result folders yet. They appear when an instrument that declares one is discovered.
+    </div>
+    {% else %}
     <ul class="nav nav-tabs mb-4" id="resultsTabs">
-        <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#animl">AnIML</a></li>
-        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#excel">Excel</a></li>
-        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#xml">XML</a></li>
-        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#images"
-               onclick="loadDeckImages()">Deck photos</a></li>
+        {% for folder in folders %}
+        <li class="nav-item">
+            <a class="nav-link {% if loop.first %}active{% endif %}" data-bs-toggle="tab"
+               href="#folder-{{ loop.index }}" title="{{ folder.name }}">
+                {{ folder.display_name }}
+                <span class="badge bg-secondary ms-1">{{ folder.files|length }}</span>
+                {% if not folder.declared %}<i class="bi bi-question-circle text-warning ms-1"
+                   title="No instrument declares this folder"></i>{% endif %}
+            </a>
+        </li>
+        {% endfor %}
     </ul>
 
     <div class="tab-content">
-        <!-- Deck photos: images captured with the robot's on-board camera.
-             The capture pipeline existed for a long time but had no front
-             door: frames landed in the Opentrons server's own ./images
-             directory that no route served. -->
-        <div class="tab-pane" id="images">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <div class="text-muted small">
-                    Photographs taken by the Flex's camera, via the
-                    <code>CaptureImage</code> command or a <code>TakeSnapshot</code>
-                    recipe step.
+        {% for folder in folders %}
+        <div class="tab-pane {% if loop.first %}active{% endif %}" id="folder-{{ loop.index }}">
+            <div class="text-muted small mb-3">
+                <code>Results/{{ folder.name }}</code>
+                {% if folder.declared_by %} · written by {{ folder.declared_by|join(', ') }}{% else %} · not declared by any instrument{% endif %}
+                {% if folder.description %} · {{ folder.description }}{% endif %}
+            </div>
+
+            {% set images = folder.files|selectattr('kind', 'equalto', 'image')|list %}
+            {% if folder.files and images|length == folder.files|length %}
+            <div class="row g-3">
+                {% for f in folder.files %}
+                <div class="col-6 col-md-4 col-lg-3">
+                    <div class="card h-100">
+                        <img src="{{ f.url }}" class="card-img-top result-thumb" alt="{{ f.name }}" loading="lazy"
+                             data-url="{{ f.url }}" data-name="{{ f.name }}" onclick="openImage(this)">
+                        <div class="card-body p-2">
+                            <div class="small text-truncate" title="{{ f.name }}">{{ f.name }}</div>
+                            <div class="text-muted" style="font-size:.7rem">{{ f.modified[:19]|replace('T', ' ') }} · {{ (f.size / 1024)|round|int }} KB</div>
+                        </div>
+                        <div class="card-footer p-1 bg-transparent border-0">
+                            <a href="{{ f.url }}" download class="btn btn-sm btn-outline-primary w-100"><i class="bi bi-download"></i> Download</a>
+                        </div>
+                    </div>
                 </div>
-                <button class="btn btn-sm btn-outline-secondary" onclick="loadDeckImages()">
-                    <i class="bi bi-arrow-clockwise"></i> Refresh
-                </button>
+                {% endfor %}
             </div>
-            <div class="row g-3" id="deckImagesGrid">
-                <div class="col-12 text-muted text-center py-4">Loading…</div>
-            </div>
-        </div>
-
-        <!-- AnIML tab -->
-        <div class="tab-pane active" id="animl">
+            {% else %}
             <div class="table-responsive">
                 <table class="table table-hover">
                     <thead><tr><th>File</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead>
                     <tbody>
-                    {% for r in results if r.format == 'AnIML' %}
+                    {% for f in folder.files %}
                     <tr>
-                        <td><i class="bi bi-file-earmark"></i> {{ r.name }}</td>
-                        <td>{{ (r.size / 1024)|round(1) }} KB</td>
-                        <td>{{ r.modified[:19] }}</td>
+                        <td><i class="bi {% if f.kind == 'image' %}bi-image{% else %}bi-file-earmark{% endif %}"></i> {{ f.name }}</td>
+                        <td>{{ (f.size / 1024)|round(1) }} KB</td>
+                        <td>{{ f.modified[:19] }}</td>
                         <td>
-                            <a href="/api/results/AnIML/{{ r.name }}" class="btn btn-sm btn-outline-primary" download>
+                            <a href="{{ f.url }}" class="btn btn-sm btn-outline-primary" download title="Download">
                                 <i class="bi bi-download"></i>
                             </a>
-                            <button class="btn btn-sm btn-outline-info" onclick="viewFile('AnIML','{{ r.name }}')">
-                                <i class="bi bi-eye"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-success" onclick="visualizeAnIML('{{ r.name }}')">
-                                <i class="bi bi-grid-3x3-gap"></i> Visualize
-                            </button>
+                            {% if f.kind == 'image' %}
+                            <button class="btn btn-sm btn-outline-info" data-url="{{ f.url }}" data-name="{{ f.name }}"
+                                    onclick="openImage(this)" title="Show"><i class="bi bi-eye"></i></button>
+                            {% else %}
+                            <button class="btn btn-sm btn-outline-info" data-folder="{{ folder.name }}" data-name="{{ f.name }}"
+                                    onclick="viewFile(this)" title="Show contents"><i class="bi bi-eye"></i></button>
+                            {% endif %}
+                            {% if f.kind == 'animl' %}
+                            <button class="btn btn-sm btn-outline-success" data-folder="{{ folder.name }}" data-name="{{ f.name }}"
+                                    onclick="visualizeAnIML(this)"><i class="bi bi-grid-3x3-gap"></i> Visualize</button>
+                            {% endif %}
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="4" class="text-muted text-center py-4">No AnIML files found</td></tr>
+                    <tr><td colspan="4" class="text-muted text-center py-4">
+                        No files yet{% if folder.file_extensions %} ({{ folder.file_extensions|join(', ') }}){% endif %}
+                    </td></tr>
                     {% endfor %}
                     </tbody>
                 </table>
             </div>
-        </div>
-
-        <!-- Excel and XML tabs -->
-        {% for fmt in ['Excel', 'XML'] %}
-        <div class="tab-pane" id="{{ fmt|lower }}">
-            <div class="table-responsive">
-                <table class="table table-hover">
-                    <thead><tr><th>File</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead>
-                    <tbody>
-                    {% for r in results if r.format == fmt %}
-                    <tr>
-                        <td><i class="bi bi-file-earmark"></i> {{ r.name }}</td>
-                        <td>{{ (r.size / 1024)|round(1) }} KB</td>
-                        <td>{{ r.modified[:19] }}</td>
-                        <td>
-                            <a href="/api/results/{{ r.format }}/{{ r.name }}" class="btn btn-sm btn-outline-primary" download>
-                                <i class="bi bi-download"></i>
-                            </a>
-                            <button class="btn btn-sm btn-outline-info" onclick="viewFile('{{ r.format }}','{{ r.name }}')">
-                                <i class="bi bi-eye"></i>
-                            </button>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="4" class="text-muted text-center py-4">No {{ fmt }} files found</td></tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+            {% endif %}
         </div>
         {% endfor %}
     </div>
+    {% endif %}
 </div>
 
 <!-- Raw file viewer modal -->
@@ -126,6 +133,17 @@
                 <a id="downloadLink" href="#" class="btn btn-primary" download><i class="bi bi-download"></i> Download</a>
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Image modal -->
+<div class="modal fade" id="imageModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title" id="imageTitle"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body text-center p-0"><img id="imageFull" class="img-fluid" alt=""></div>
         </div>
     </div>
 </div>
@@ -181,74 +199,31 @@
 </div>
 
 <script>
-// ── Raw file viewer ──────────────────────────────────────────────────────────
-async function loadDeckImages() {
-    var grid = document.getElementById('deckImagesGrid');
-    if (!grid) return;
-    grid.innerHTML = '<div class="col-12 text-muted text-center py-4">Loading…</div>';
-
-    fetch('/api/images')
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            var images = data.images || [];
-            if (!images.length) {
-                grid.innerHTML = '<div class="col-12 text-muted text-center py-5">' +
-                    '<i class="bi bi-camera display-4 d-block mb-2"></i>' +
-                    'No deck photos yet. Run <code>CaptureImage</code> on the Opentrons, ' +
-                    'or add a <code>TakeSnapshot</code> step to a recipe.</div>';
-                return;
-            }
-            grid.innerHTML = images.map(function(img) {
-                return '<div class="col-6 col-md-4 col-lg-3">' +
-                    '<div class="card h-100">' +
-                    '<img src="' + img.url + '" class="card-img-top" alt="' + img.name + '" ' +
-                    'style="cursor:zoom-in;object-fit:cover;aspect-ratio:4/3" ' +
-                    'onclick="openDeckImage(\'' + img.url + '\', \'' + img.name + '\')">' +
-                    '<div class="card-body p-2">' +
-                    '<div class="small text-truncate" title="' + img.name + '">' + img.name + '</div>' +
-                    '<div class="text-muted" style="font-size:.7rem">' +
-                    (img.modified || '').slice(0, 19).replace('T', ' ') +
-                    ' · ' + Math.round((img.size || 0) / 1024) + ' KB</div>' +
-                    '</div>' +
-                    '<div class="card-footer p-1 bg-transparent border-0">' +
-                    '<a href="' + img.url + '" download class="btn btn-sm btn-outline-primary w-100">' +
-                    '<i class="bi bi-download"></i> Download</a>' +
-                    '</div></div></div>';
-            }).join('');
-        })
-        .catch(function(e) {
-            grid.innerHTML = '<div class="col-12 text-danger text-center py-4">' +
-                'Could not load images: ' + e.message + '</div>';
-        });
+// Every URL here is built by the server and handed over in data- attributes,
+// so a file name with a quote or a space in it cannot break the markup.
+function _resultUrl(folder, name, suffix) {
+    var path = folder.split('/').map(encodeURIComponent).join('/');
+    return '/api/results/' + path + '/' + encodeURIComponent(name) + (suffix || '');
 }
 
-function openDeckImage(url, name) {
-    var modal = document.getElementById('deckImageModal');
-    if (!modal) {
-        document.body.insertAdjacentHTML('beforeend',
-            '<div class="modal fade" id="deckImageModal" tabindex="-1">' +
-            '<div class="modal-dialog modal-xl modal-dialog-centered">' +
-            '<div class="modal-content">' +
-            '<div class="modal-header"><h5 class="modal-title" id="deckImageTitle"></h5>' +
-            '<button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>' +
-            '<div class="modal-body text-center p-0">' +
-            '<img id="deckImageFull" class="img-fluid" alt=""></div>' +
-            '</div></div></div>');
-        modal = document.getElementById('deckImageModal');
-    }
-    document.getElementById('deckImageTitle').textContent = name;
-    document.getElementById('deckImageFull').src = url;
-    new bootstrap.Modal(modal).show();
+function openImage(el) {
+    document.getElementById('imageTitle').textContent = el.dataset.name;
+    document.getElementById('imageFull').src = el.dataset.url;
+    new bootstrap.Modal(document.getElementById('imageModal')).show();
 }
 
-function viewFile(format, filename) {
+// This was `function viewFile` with an `await` inside - a syntax error that
+// stopped the whole script on this page from loading, so View, Visualize and
+// the deck photos all did nothing from 10 September onwards.
+async function viewFile(el) {
+    var folder = el.dataset.folder, filename = el.dataset.name;
     try {
-        const resp = await fetch(`/api/results/${format}/${filename}/view`);
+        const resp = await fetch(_resultUrl(folder, filename, '/view'));
         const data = await resp.json();
         document.getElementById('viewModalTitle').textContent = filename;
-        document.getElementById('downloadLink').href = `/api/results/${format}/${filename}`;
+        document.getElementById('downloadLink').href = _resultUrl(folder, filename);
         let content = data.content;
-        if (!data.binary && (format === 'XML' || format === 'AnIML')) {
+        if (!data.binary && /\.(xml|animl)$/i.test(filename)) {
             content = content.replace(/></g, '>\n<');
         }
         document.getElementById('fileContent').textContent = content;
@@ -259,17 +234,18 @@ function viewFile(format, filename) {
 }
 
 // ── AnIML heatmap visualization ──────────────────────────────────────────────
-async function visualizeAnIML(filename) {
+async function visualizeAnIML(el) {
+    var folder = el.dataset.folder, filename = el.dataset.name;
     const modal = new bootstrap.Modal(document.getElementById('animlModal'));
     document.getElementById('animlModalTitle').textContent = filename;
     document.getElementById('animlLoading').style.display = 'block';
     document.getElementById('animlContent').style.display = 'none';
     document.getElementById('animlError').style.display = 'none';
-    document.getElementById('animlDownloadLink').href = `/api/results/AnIML/${filename}`;
+    document.getElementById('animlDownloadLink').href = _resultUrl(folder, filename);
     modal.show();
 
     try {
-        const resp = await fetch(`/api/results/animl/${encodeURIComponent(filename)}/parse`);
+        const resp = await fetch(_resultUrl(folder, filename, '/animl'));
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         _renderAnIML(data);

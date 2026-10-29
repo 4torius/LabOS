@@ -10,22 +10,12 @@
 
   <Identifier>LabOSLibraryProvider</Identifier>
   <DisplayName>LabOS Library Provider</DisplayName>
-  <Description>
-    Exposes the library file types used by this instrument.
-    The LabOS orchestrator reads this property at discovery time to populate
-    workflow builder dropdowns automatically, without requiring static
-    configuration in lab_config.yaml.
-  </Description>
+  <Description>Declares what the orchestrator needs to know about this instrument beyond its commands: the Library files it reads, the Results folders it writes into (created when the server starts), parameters a workflow may omit, which commands prepare or measure a plate, and how it is shown. The LabOS orchestrator reads this property at discovery, so adding an instrument changes nothing in the orchestrator.</Description>
 
   <Property>
     <Identifier>LibraryCatalog</Identifier>
     <DisplayName>Library Catalog</DisplayName>
-    <Description>
-      JSON string describing the library file types this instrument uses.
-      Each entry contains: hint (UI identifier), display_name, folder (relative
-      to v1/), file_extension, and parameter_names (SiLA2 parameter identifiers
-      that map to this library type).
-    </Description>
+    <Description>JSON object. Every section is optional. display: {icon, color}. library_types: [{hint, display_name, folder, file_extension, parameter_names}] - files in Library/ a parameter picks from (or values, json_keys_file, source_property instead of folder). result_types: [{key, display_name, folder, file_extensions}] - folders under Results/ this instrument writes. parameter_defaults: {Command: {Parameter: value}}. traceability: {Command: {role: prepares_plate|measures_plate, plate_parameter, recipe_parameter, protocol_parameter}}. Folders are relative to the LabOS root.</Description>
     <Observable>No</Observable>
     <DataType><Basic>String</Basic></DataType>
   </Property>

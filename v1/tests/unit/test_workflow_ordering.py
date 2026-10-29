@@ -7,6 +7,7 @@ topological ordering.
 """
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -101,13 +102,12 @@ class TestCycleDetection:
 
 
 class TestIsLocallyHandled:
+    """Only the Delay block is the orchestrator's own. People are a station."""
 
     @pytest.mark.parametrize("instrument,action", [
-        ("manual_station", "RequestOperatorTask"),
-        ("Manual Station", "anything"),
         ("delay", "Wait"),
+        ("Delay", "anything"),
         ("anything", "Wait"),
-        ("opentrons", "RefillTipRack"),
     ])
     def test_local(self, instrument, action):
         assert is_locally_handled(instrument, action)
@@ -116,6 +116,11 @@ class TestIsLocallyHandled:
         ("opentrons", "ExecuteRecipe"),
         ("tecan", "RunMeasurement"),
         ("mobile", "ExecuteTask"),
+        ("manual_station", "RequestOperatorTask"),
+        ("Manual Station", "SendNotification"),
+        ("opentrons", "RefillTipRack"),
+        ("Manual Pipettor", "Aspirate"),
+        ("Delay Line Controller", "SetDelay"),
     ])
     def test_dispatched_to_a_server(self, instrument, action):
         assert not is_locally_handled(instrument, action)
@@ -215,13 +220,30 @@ class TestExecutionOrdering:
     @pytest.mark.asyncio
     async def test_context_plate_id_propagates_in_both_modes(self):
         """Plate tracking used to work only in sequential mode, so the same
-        workflow recorded plates or not depending on a config flag."""
+        workflow recorded plates or not depending on a config flag.
+
+        And only for instruments named "opentrons" and "tecan": the roles are
+        now declared by the servers, so these deliberately have other names."""
+        from src.catalog import parse_catalog
+        servers = {
+            "Pipettor": SimpleNamespace(catalog=parse_catalog({"traceability": {
+                "Dispense": {"role": "prepares_plate", "recipe_parameter": "RecipeName"}}})),
+            "Reader": SimpleNamespace(catalog=parse_catalog({"traceability": {
+                "Read": {"role": "measures_plate", "plate_parameter": "PlateID"}}})),
+        }
         for parallel in (False, True):
             ex = _executor()
+            ex.registry.get_server_by_name = lambda name: servers.get(name)
+            sent = {}
+
+            async def _execute(instrument, action, parameters, timeout=None):
+                sent[action] = dict(parameters)
+                return CommandResult(success=True, data={})
+            ex.registry.execute = AsyncMock(side_effect=_execute)
             steps = [
-                _step(1, instrument="opentrons", action="ExecuteRecipe",
+                _step(1, instrument="Pipettor", action="Dispense",
                       parameters={"RecipeName": "r.json"}),
-                _step(2, [1], instrument="tecan", action="RunMeasurement"),
+                _step(2, [1], instrument="Reader", action="Read"),
             ]
             import datetime
             wf = Workflow(name="W", steps=steps)
@@ -229,3 +251,57 @@ class TestExecutionOrdering:
             ctx = WorkflowContext()
             await ex._execute_waves(wf, ctx, parallel=parallel)
             assert ctx.plate_id, f"no plate id generated (parallel={parallel})"
+            assert sent["Read"]["PlateID"] == ctx.plate_id, "the reader was told which plate"
+
+    @pytest.mark.asyncio
+    async def test_no_declared_role_means_no_plate_id(self):
+        ex = _executor()
+        ex.registry.get_server_by_name = lambda name: None
+        steps = [_step(1, instrument="opentrons", action="ExecuteRecipe",
+                       parameters={"RecipeName": "r.json"})]
+        import datetime
+        wf = Workflow(name="W", steps=steps)
+        wf.start_time = datetime.datetime.now()
+        ctx = WorkflowContext()
+        await ex._execute_waves(wf, ctx, parallel=False)
+        assert ctx.plate_id is None, "a name alone no longer makes a step a pipetting run"
+
+
+class TestParallelModeRespectsInstruments:
+    """Independent steps run together, but never two at once on one instrument."""
+
+    @staticmethod
+    def _executor_tracking_overlap():
+        ex = _executor()
+        servers = {"A": SimpleNamespace(name="A"), "B": SimpleNamespace(name="B")}
+        ex.registry.get_server_by_name = lambda name: servers.get(name)
+        running = {"A": 0, "B": 0}
+        peak = {"A": 0, "B": 0, "total": 0}
+
+        async def _execute(instrument, action, parameters, timeout=None):
+            import asyncio
+            running[instrument] += 1
+            peak[instrument] = max(peak[instrument], running[instrument])
+            peak["total"] = max(peak["total"], sum(running.values()))
+            await asyncio.sleep(0.05)
+            running[instrument] -= 1
+            return CommandResult(success=True, data={})
+
+        ex.registry.execute = AsyncMock(side_effect=_execute)
+        return ex, peak
+
+    @pytest.mark.asyncio
+    async def test_two_instruments_overlap_one_instrument_does_not(self):
+        ex, peak = self._executor_tracking_overlap()
+        steps = [_step(1, instrument="A"), _step(2, instrument="A"), _step(3, instrument="B")]
+        completed, failed, _, _, _ = await _run(ex, steps, parallel=True)
+        assert (completed, failed) == (3, 0)
+        assert peak["A"] == 1, "a second command was sent to A while it was busy"
+        assert peak["total"] == 2, "A and B should have worked at the same time"
+
+    @pytest.mark.asyncio
+    async def test_sequential_mode_never_overlaps(self):
+        ex, peak = self._executor_tracking_overlap()
+        steps = [_step(1, instrument="A"), _step(2, instrument="B")]
+        await _run(ex, steps, parallel=False)
+        assert peak["total"] == 1

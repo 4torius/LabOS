@@ -157,6 +157,33 @@ def create_app() -> "FastAPI":
         state.devices  # noqa: B018 - keep the closure's intent obvious
         return ws_manager.broadcast({"type": "property_update", **entry.to_dict()})
 
+    # Tell open pages when the set of instruments changes - a server switched
+    # on, switched off, or one nobody had seen before - so a new instrument
+    # appears in the dashboard and the workflow builder without a reload.
+    # Discovery reports on every cache refresh; only a real change is sent.
+    _instrument_signature: dict = {"value": None}
+
+    def _on_discovery_update(instruments):
+        signature = sorted((i.id, i.status, len(i.commands)) for i in instruments)
+        if signature == _instrument_signature["value"]:
+            return
+        first = _instrument_signature["value"] is None
+        _instrument_signature["value"] = signature
+        for inst in instruments:
+            state.devices[inst.id] = DeviceState(
+                id=inst.id, name=inst.name, type=inst.type,
+                status=inst.status, host=inst.host, port=inst.port)
+        if first:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(ws_manager.broadcast({
+            "type": "instruments_changed",
+            "instruments": [{"id": i.id, "name": i.name, "status": i.status} for i in instruments],
+        }))
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         state.add_log("info", "LabOS WebApp started")
@@ -224,6 +251,7 @@ def create_app() -> "FastAPI":
                 pending_interventions.pop(intervention_id, None)
 
         lab_core.set_intervention_callback(webapp_intervention_handler)
+        lab_core.set_callbacks(on_discovery_update=_on_discovery_update)
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     # Available to every template without each route passing it along.
@@ -256,49 +284,118 @@ def create_app() -> "FastAPI":
             "nodered_url": get_settings(BASE_DIR).webapp.nodered_url
         })
 
+    # ── Results: whatever folders the instruments declare ────────────────────
+    #
+    # This page used to know four folder names - CSV, Excel, AnIML, XML - which
+    # are the Tecan bridge's, plus a separate deck-photos route for the
+    # Opentrons camera. An instrument writing anywhere else produced data the
+    # web interface could not show. Each server now declares its result folders
+    # (src/catalog.py); the page lists those, and any other folder that exists.
+
+    _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp"}
+
+    def _photos_last(folders: list) -> list:
+        """Measurement data first; a folder that only holds pictures goes last."""
+        def only_images(entry):
+            exts = {e.lower() if e.startswith(".") else "." + e.lower()
+                    for e in entry.get("file_extensions") or []}
+            return bool(exts) and exts <= _IMAGE_SUFFIXES
+        return sorted(folders, key=only_images)
+
+    async def _result_folders() -> list:
+        return _photos_last(await _all_result_folders())
+
+    async def _all_result_folders() -> list:
+        results_dir = get_settings(BASE_DIR).results_dir
+        if lab_core:
+            try:
+                await lab_core.discover()
+                return lab_core.list_result_folders()
+            except Exception as exc:
+                logger.warning(f"Could not read declared result folders: {exc}")
+        # No LabCore: the folders that exist are still worth showing.
+        return [{"name": d.name, "display_name": d.name, "description": "",
+                 "file_extensions": [], "declared_by": [], "declared": False,
+                 "exists": True}
+                for d in sorted(results_dir.iterdir())
+                if d.is_dir() and d.name not in ("runs", "__pycache__") and not d.name.startswith(".")
+                ] if results_dir.is_dir() else []
+
+    def _result_url(folder: str, name: str) -> str:
+        from urllib.parse import quote
+        return f"/api/results/{quote(folder)}/{quote(name)}"
+
+    def _files_in(folder: str) -> list:
+        directory = get_settings(BASE_DIR).results_dir / folder
+        if not directory.is_dir():
+            return []
+        files = []
+        for f in directory.iterdir():
+            if not f.is_file() or f.name.startswith("."):
+                continue
+            suffix = f.suffix.lower()
+            stat = f.stat()
+            files.append({
+                "name": f.name,
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "kind": ("image" if suffix in _IMAGE_SUFFIXES
+                         else "animl" if suffix == ".animl" else "file"),
+                "url": _result_url(folder, f.name),
+            })
+        return sorted(files, key=lambda item: item["modified"], reverse=True)
+
+    async def _result_file(folder: str, filename: str) -> Path:
+        """A file inside a known result folder, or an HTTP error."""
+        known = {entry["name"] for entry in await _result_folders()}
+        if folder not in known:
+            raise HTTPException(404, f"No result folder '{folder}'")
+        results_dir = get_settings(BASE_DIR).results_dir.resolve()
+        file_path = (results_dir / folder / filename).resolve()
+        try:
+            file_path.relative_to(results_dir / folder)
+        except ValueError:
+            raise HTTPException(403, "Access denied")
+        if not file_path.is_file():
+            raise HTTPException(404, "File not found")
+        return file_path
+
     @app.get("/results", response_class=HTMLResponse)
     async def results_page(request: Request):
-        results = []
-        for fmt in ["CSV", "Excel", "AnIML", "XML"]:
-            fmt_dir = RESULTS_DIR / fmt
-            if fmt_dir.exists():
-                for f in fmt_dir.glob("*"):
-                    if f.is_file():
-                        results.append({
-                            "name": f.name, "format": fmt,
-                            "size": f.stat().st_size,
-                            "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat()
-                        })
-        return templates.TemplateResponse(request, "results.html", {"request": request, "title": "Results", "results": results})
+        folders = await _result_folders()
+        for entry in folders:
+            entry["files"] = _files_in(entry["name"])
+        return templates.TemplateResponse(request, "results.html", {
+            "request": request, "title": "Results", "folders": folders})
 
-    @app.get("/api/results/{fmt}/{filename}")
-    async def download_result(fmt: str, filename: str):
-        if fmt not in ["CSV", "Excel", "AnIML", "XML"]:
-            raise HTTPException(400, "Invalid format")
-        file_path = RESULTS_DIR / fmt / filename
-        if not file_path.exists():
-            raise HTTPException(404, "File not found")
-        try:
-            file_path.resolve().relative_to(RESULTS_DIR.resolve())
-        except ValueError:
-            raise HTTPException(403, "Access denied")
-        return FileResponse(path=str(file_path), filename=filename, media_type="application/octet-stream")
+    @app.get("/api/results/folders")
+    async def list_result_folders():
+        """The Results folders, who declared each, and the files in them."""
+        folders = await _result_folders()
+        for entry in folders:
+            entry["files"] = _files_in(entry["name"])
+        return {"folders": folders}
 
-    @app.get("/api/results/{fmt}/{filename}/view")
-    async def view_result(fmt: str, filename: str):
-        if fmt not in ["CSV", "Excel", "AnIML", "XML"]:
-            raise HTTPException(400, "Invalid format")
-        file_path = RESULTS_DIR / fmt / filename
-        if not file_path.exists():
-            raise HTTPException(404, "File not found")
+    @app.get("/api/results/{folder:path}/{filename}/view")
+    async def view_result(folder: str, filename: str):
+        file_path = await _result_file(folder, filename)
         try:
-            file_path.resolve().relative_to(RESULTS_DIR.resolve())
-        except ValueError:
-            raise HTTPException(403, "Access denied")
-        try:
-            return {"filename": filename, "format": fmt, "content": file_path.read_text(encoding="utf-8-sig"), "size": file_path.stat().st_size}
+            return {"filename": filename, "folder": folder, "format": folder,
+                    "content": file_path.read_text(encoding="utf-8-sig"), "size": file_path.stat().st_size}
         except UnicodeDecodeError:
-            return {"filename": filename, "format": fmt, "content": "(Binary file - download to view)", "size": file_path.stat().st_size, "binary": True}
+            return {"filename": filename, "folder": folder, "format": folder,
+                    "content": "(Binary file - download to view)",
+                    "size": file_path.stat().st_size, "binary": True}
+
+    @app.get("/api/results/{folder:path}/{filename}/animl")
+    async def parse_animl_in_folder(folder: str, filename: str):
+        """Structured measurement data from an AnIML file in any result folder."""
+        file_path = await _result_file(folder, filename)
+        try:
+            from src.animl_parser import parse_animl
+            return parse_animl(file_path)
+        except Exception as e:
+            raise HTTPException(500, f"Parse error: {e}")
 
     @app.get("/api/properties")
     async def get_property_snapshot(instrument_id: str = ""):
@@ -376,6 +473,13 @@ def create_app() -> "FastAPI":
             return parse_animl(file_path)
         except Exception as e:
             raise HTTPException(500, f"Parse error: {e}")
+
+    # Last of the /api/results routes: `{folder:path}` would otherwise swallow
+    # the /view, /animl and /parse routes above it.
+    @app.get("/api/results/{folder:path}/{filename}")
+    async def download_result(folder: str, filename: str):
+        file_path = await _result_file(folder, filename)
+        return FileResponse(path=str(file_path), filename=filename, media_type="application/octet-stream")
 
     @app.get("/hardware", response_class=HTMLResponse)
     async def hardware_page(request: Request):

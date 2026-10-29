@@ -471,7 +471,7 @@ python main.py
 
 ### Usage in Workflows
 
-Any workflow step whose `Instrument` value contains `"manual"` is intercepted by the workflow executor's manual-step handling — it posts an operator notification and blocks until the Operator page's "Confirm" is clicked or the timeout fires. See [WORKFLOW_SYSTEM.md](WORKFLOW_SYSTEM.md).
+A workflow step on the Manual Station goes to this server like any step goes to its instrument: `RequestOperatorTask` puts the task on the Operator page (the server posts it to the web app) and returns when the operator confirms it; `SendNotification` shows a message without waiting. Its `library_catalog.json` declares defaults for `TaskType`, `Priority`, `SourceInstrument` and `TimeoutSeconds` (600 s), so a step may give only `TaskDescription`. See [WORKFLOW_SYSTEM.md](WORKFLOW_SYSTEM.md#manual-steps-a-person-is-a-station).
 
 ---
 
@@ -551,7 +551,7 @@ Gripper labware profiles (width / grip force / grip offset) are pre-defined for 
 
 ### Task Library
 
-Tasks are stored as JSON descriptors in `Library/MobileTasks/`, refreshed from the remote host's ROS action server (webapp: `POST /api/library/mobile-tasks/refresh`, or automatically via `RefreshTasks`). Each task encodes a complete arm trajectory (approach, grasp, transfer, retract) relative to a workstation's ArUco fiducial marker — not the global map frame — decoupling manipulation accuracy from SLAM/navigation accuracy.
+The task picker in the web interface is read from the `AvailableTasks` property (declared in `lab_config.yaml` under `ui_dropdowns.mobile_task`, because this server's catalog lives on the robot's computer). It is re-read after every successful command on the robot - so after `RefreshTasks` the new list is there - and the last list read is kept in `Library/MobileTasks/_options.json` for when the robot is off. Each task encodes a complete arm trajectory (approach, grasp, transfer, retract) relative to a workstation's ArUco fiducial marker — not the global map frame — decoupling manipulation accuracy from SLAM/navigation accuracy.
 
 ### ArUco Marker Requirements
 
@@ -566,6 +566,6 @@ New manipulation tasks are taught by physically guiding the arm, not by programm
 3. Physically guide the arm through the full task: approach → grasp → transfer → retract to a safe position. Poses are recorded relative to the ArUco marker frame.
 4. Replay and validate with the Exsensia platform; re-record if execution isn't correct.
 5. Register the task under a name — it publishes to the ROS action server.
-6. Call `RefreshTasks` (or `POST /api/library/mobile-tasks/refresh` from the webapp) — the new task appears in the Workflow Builder toolbox immediately.
+6. Call `RefreshTasks` — the new task appears in the task picker of every open page.
 
 Anticipate the gripper's forward-push displacement during closure by pre-positioning slightly back before the final grasp. Verify a new task with at least 3 successful replays before using it in a real workflow.

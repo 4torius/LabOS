@@ -39,6 +39,46 @@
             .replace(/>/g, '&gt;');
     };
 
+    // ── How an instrument looks ─────────────────────────────────────────────
+    // The server says, in its catalog (`display`: a Bootstrap icon and a
+    // contextual colour). Both pages used to carry a table keyed on whether
+    // the name contained "tecan", "opentrons", "mobile" or "manual", so every
+    // other instrument was a grey gear, and the workflow builder filed every
+    // one of them under the same key - two new instruments overwrote each
+    // other in the toolbox. A server that declares nothing gets a look from
+    // its SiLA2 server type, which it also reports itself.
+
+    var COLORS = ['primary', 'secondary', 'success', 'danger', 'warning', 'info', 'dark'];
+    var BY_SERVER_TYPE = [
+        [/liquid|pipett|dispens/i, 'bi-droplet-fill', 'primary'],
+        [/reader|spectro|photomet|imag|camera|microscop/i, 'bi-eye-fill', 'success'],
+        [/operator|manual|human/i, 'bi-hand-index-thumb', 'info'],
+        [/robot|mobile|arm|manipulat|transport/i, 'bi-robot', 'warning'],
+        [/incubat|heat|thermo|temperat/i, 'bi-thermometer-half', 'danger']
+    ];
+
+    LabOS.instrumentStyle = function (instrument) {
+        var declared = (instrument && instrument.display) || {};
+        var icon = /^bi-[a-z0-9-]+$/.test(declared.icon || '') ? declared.icon : null;
+        var color = COLORS.indexOf(declared.color) !== -1 ? declared.color : null;
+        if (!icon || !color) {
+            var type = (instrument && instrument.type) || '';
+            for (var i = 0; i < BY_SERVER_TYPE.length; i++) {
+                if (BY_SERVER_TYPE[i][0].test(type)) {
+                    icon = icon || BY_SERVER_TYPE[i][1];
+                    color = color || BY_SERVER_TYPE[i][2];
+                    break;
+                }
+            }
+        }
+        color = color || 'secondary';
+        return {
+            icon: icon || 'bi-cpu',
+            color: color,
+            bg: color === 'warning' || color === 'info' ? 'bg-' + color + ' text-dark' : 'bg-' + color
+        };
+    };
+
     // ── HTTP ────────────────────────────────────────────────────────────────
 
     /**

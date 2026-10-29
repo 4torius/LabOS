@@ -147,12 +147,24 @@ class TestTheManualStepParameterIsADifferentThing:
     long a person has to confirm. Same name, different field, and it works -
     the shipped Opentrons_Refill_Test workflow uses it."""
 
-    def test_the_manual_station_default_is_still_applied(self):
-        assert 'normalized.setdefault("TimeoutSeconds", 300)' in SOURCE
+    def test_the_manual_station_declares_its_default(self):
+        """It used to be a setdefault in the executor, keyed on the action name.
+        The server says it now, in its own catalog, and dispatch applies it."""
+        import json
+        catalog = json.loads((V1_DIR / "SiLA2" / "ManualStationSiLA2Server"
+                              / "library_catalog.json").read_text(encoding="utf-8"))
+        defaults = catalog["parameter_defaults"]["RequestOperatorTask"]
+        assert defaults["TimeoutSeconds"] == 600
 
-    def test_the_operator_wait_reads_it_from_the_parameters(self):
-        routes = (V1_DIR / "webapp" / "routes" / "workflows.py").read_text(encoding="utf-8-sig")
-        assert '("TimeoutSeconds", "timeout_seconds", "timeout") if k in params' in routes
+    def test_a_manual_step_is_dispatched_with_it(self):
+        from types import SimpleNamespace
+        from src.client import map_parameters
+        declared = [SimpleNamespace(identifier=n) for n in
+                    ("TaskDescription", "TaskType", "Priority", "SourceInstrument", "TimeoutSeconds")]
+        sent, _ = map_parameters({"TaskDescription": "Load the plate", "TimeoutSeconds": 1800},
+                                 declared, {"TimeoutSeconds": 600, "Priority": "normal"})
+        assert sent["TimeoutSeconds"] == 1800, "the step's own value wins"
+        assert sent["Priority"] == "normal"
 
     def test_the_shipped_workflow_uses_it_as_a_parameter(self):
         import json

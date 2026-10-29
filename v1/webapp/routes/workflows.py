@@ -1162,31 +1162,27 @@ async def _execute_step(
     pending_operator_actions_lock: asyncio.Lock,
     base_dir: Optional[Path] = None,
 ) -> dict:
-    """Execute one workflow step: delay, manual, refill, or instrument command."""
+    """Execute one workflow step: a delay, or a command on an instrument.
 
-    instrument_lower = instrument.lower()
+    Every step that is not the builder's Delay block goes to a SiLA2 server,
+    and that includes the people. A manual step is a command on the Manual
+    Station server, which puts the task on the Operator page and returns when
+    the operator confirms it - the same path as any other instrument.
+
+    This used to intercept any instrument with "manual" in its name, and any
+    action with "refill" in its name, and handle both here instead. The Manual
+    Station server was then never called by a workflow; a workflow that asked
+    the operator to refill tips and then recorded the refill asked the
+    operator twice; and SendNotification became a confirmation that blocked
+    the run until someone clicked.
+    """
 
     # Delay
-    if "delay" in instrument_lower or action.lower() == "wait":
+    if is_locally_handled(instrument, action):
         seconds = params.get("seconds", 30)
         state.add_log("info", f"Waiting {seconds} seconds...", "workflow")
         await asyncio.sleep(seconds)
         return {"action": "delay", "seconds": seconds, "status": "completed"}
-
-    # Manual station (requires operator acknowledgment)
-    if "manual" in instrument_lower:
-        return await _wait_operator(
-            action, params, state, ws_manager, pending_operator_actions,
-            pending_operator_actions_lock, _timeouts(base_dir).manual_action_timeout
-        )
-
-    # Explicit RefillTipRack step
-    if action.lower() in ("refilltiprack", "refill") or "refill" in action.lower():
-        rack_type = params.get("rack_type", "tiprack")
-        return await _wait_refill(
-            rack_type, state, ws_manager, pending_operator_actions,
-            pending_operator_actions_lock, _timeouts(base_dir).tip_refill_timeout
-        )
 
     # Generic instrument via LabCore, through the shared resolver: an ambiguous
     # name is reported instead of being silently decided by dict ordering.
@@ -1209,12 +1205,16 @@ async def _execute_step(
         state.devices[device_id].status = "busy"
         await ws_manager.broadcast({"type": "device_update", "device_id": device_id, "status": "busy"})
 
-    # Auto-inject PlateID/SampleSetID/PlateType for RunMeasurement from workflow context
-    if action.lower() == "runmeasurement" and not params.get("PlateID"):
+    # A command that measures a plate gets the plate prepared earlier in this
+    # run, when the step did not name one. Which commands measure plates, and
+    # which parameter carries the plate, is what the server declared; the
+    # parameters it may leave out are filled from its declared defaults at
+    # dispatch (src/client.py).
+    role = core.role_of(device_id, action)
+    if (role is not None and role.role == "measures_plate" and role.plate_parameter
+            and not params.get(role.plate_parameter) and workflow_context):
         params = dict(params)
-        params["PlateID"] = workflow_context.get("current_plate_id", "")
-        params.setdefault("SampleSetID", "")
-        params.setdefault("PlateType", "")
+        params[role.plate_parameter] = workflow_context.get("current_plate_id") or ""
 
     try:
         result = await core.execute_command(device_id, action, params)
@@ -1236,8 +1236,8 @@ async def _execute_step(
             state.add_log("info", f"{action} completed on {device_id}", "workflow")
 
             # Plate ID assignment + DB population (Database page: Plates tab)
-            new_plate_id = plate_tracking.track_tecan_measurement(
-                device_id, action, params, result,
+            new_plate_id = plate_tracking.track_plate_measurement(
+                device_id, action, params, result, role=role,
                 run_id=workflow_context.get("run_id") if workflow_context else None,
                 current_plate_id=workflow_context.get("current_plate_id") if workflow_context else None,
                 base_dir=base_dir, state=state,
@@ -1246,8 +1246,8 @@ async def _execute_step(
                 workflow_context.setdefault("plate_id", new_plate_id)
                 workflow_context["current_plate_id"] = new_plate_id
 
-            new_plate_id = plate_tracking.track_opentrons_recipe(
-                device_id, action, params, result,
+            new_plate_id = plate_tracking.track_plate_preparation(
+                device_id, action, params, result, role=role,
                 run_id=workflow_context.get("run_id") if workflow_context else None,
                 base_dir=base_dir, state=state,
             )
@@ -1447,50 +1447,6 @@ async def _ask_operator(
         })
 
 
-async def _wait_operator(action, params, state, ws_manager, pending_operator_actions, lock, timeout):
-    operator_message = (
-        params.get("TaskDescription")
-        or params.get("task_description")
-        or params.get("description")
-        or params.get("message")
-        or f"Esegui: {action}"
-    )
-
-    notification_id = int(datetime.now().timestamp() * 1000)
-    notification = {
-        "id": notification_id, "type": "operator_notification",
-        "title": f"Azione Manuale: {action}",
-        "message": operator_message,
-        "priority": "warning", "requires_action": True,
-        "timestamp": datetime.now().isoformat(), "action": action, "params": params
-    }
-    async with lock:
-        pending_operator_actions.append(notification)
-    await ws_manager.broadcast(notification)
-    state.add_log("warning", f"Waiting for operator: {action}", "workflow")
-
-    # A step's own TimeoutSeconds wins; 0 means "wait indefinitely" (a manual
-    # step can legitimately sit overnight), which normalize_timeout maps to None.
-    _explicit = next(
-        (params[k] for k in ("TimeoutSeconds", "timeout_seconds", "timeout") if k in params),
-        None,
-    )
-    timeout_val = normalize_timeout(_explicit) if _explicit is not None else timeout
-    start = datetime.now()
-    while True:
-        async with lock:
-            if notification_id not in [int(a.get("id", 0)) for a in pending_operator_actions]:
-                break
-        await asyncio.sleep(1)
-        if timeout_val is not None and (datetime.now() - start).total_seconds() > timeout_val:
-            async with lock:
-                pending_operator_actions[:] = [a for a in pending_operator_actions if int(a.get("id", 0)) != notification_id]
-            raise TimeoutError(f"Operator did not confirm '{action}' within {timeout_val}s")
-
-    state.add_log("info", f"Operator completed: {action}", "workflow")
-    return {"status": "completed", "action": action, "acknowledged": True}
-
-
 async def _wait_refill(rack_type, state, ws_manager, pending_operator_actions, lock, timeout, context_msg=""):
     notification_id = int(datetime.now().timestamp() * 1000)
     notification = {
@@ -1509,12 +1465,12 @@ async def _wait_refill(rack_type, state, ws_manager, pending_operator_actions, l
     start = datetime.now()
     while True:
         async with lock:
-            if notification_id not in [int(a.get("id", 0)) for a in pending_operator_actions]:
+            if str(notification_id) not in [str(a.get("id")) for a in pending_operator_actions]:
                 break
         await asyncio.sleep(1)
         if timeout is not None and (datetime.now() - start).total_seconds() > timeout:
             async with lock:
-                pending_operator_actions[:] = [a for a in pending_operator_actions if int(a.get("id", 0)) != notification_id]
+                pending_operator_actions[:] = [a for a in pending_operator_actions if str(a.get("id")) != str(notification_id)]
             raise TimeoutError(f"Operator did not refill tips within {timeout}s")
 
     state.add_log("info", f"Tip rack refilled: {rack_type}", "workflow")

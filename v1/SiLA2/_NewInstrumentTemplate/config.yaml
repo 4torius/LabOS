@@ -34,6 +34,7 @@ hardware:
 # SiLA2 metadata (shown in discovery)
 sila2:
   server_name: "New Instrument"     # TODO: Change this
+  server_type: "Instrument"         # CamelCase, e.g. PlateReader, Centrifuge
   server_uuid: "new-instrument-001" # TODO: Unique identifier
   vendor_url: "https://github.com/BicoccaLab"
   description: "Template server for new instruments"

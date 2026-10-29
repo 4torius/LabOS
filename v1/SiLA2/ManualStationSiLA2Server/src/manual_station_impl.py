@@ -193,6 +193,26 @@ class ManualStationImpl(ManualStationBase):
     def _on_notification_sent(self, notif: Notification) -> None:
         icon = {"info": "ℹ", "warning": "⚠", "error": "✗"}.get(notif.level, "►")
         print(f"\n  {icon} [{notif.source_instrument}] {notif.message}\n")
+        # A notification that only reaches this server's console reaches
+        # nobody: the operator is looking at the web interface. It used to
+        # arrive there only because the webapp intercepted every "manual"
+        # step itself - and turned it into a confirmation that blocked the run.
+        threading.Thread(
+            target=self._post_notification, args=(notif,), daemon=True
+        ).start()
+
+    def _post_notification(self, notif: Notification) -> None:
+        payload = {
+            "title": notif.source_instrument or "Manual Station",
+            "message": notif.message,
+            "priority": {"error": "urgent", "warning": "warning"}.get(notif.level, "info"),
+            "requires_action": False,
+        }
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                client.post(f"{self._webapp_url}/api/operator/notify", json=payload)
+        except Exception:
+            pass  # WebApp offline is not fatal
 
     def _notify_webapp(self, task: OperatorTask) -> None:
         priority_map = {

@@ -1,11 +1,30 @@
 {
+  "_comment": "Everything the orchestrator needs to know about this instrument beyond its commands. Delete the sections you do not need. library_types: files it reads (a parameter becomes a picker). result_types: folders under Results/ it writes (created when the server starts, listed on the Results page). parameter_defaults: parameters a workflow may omit. traceability: commands that prepare (prepares_plate) or measure (measures_plate) a plate. See v1/src/catalog.py.",
+  "display": {
+    "icon": "bi-cpu",
+    "color": "secondary"
+  },
   "library_types": [
     {
       "hint": "your_hint_name",
       "display_name": "Display Name in Workflow Builder",
       "folder": "Library/YourFolder",
       "file_extension": ".json",
-      "parameter_names": ["YourSiLA2ParameterIdentifier"]
+      "parameter_names": [
+        "YourSiLA2ParameterIdentifier"
+      ]
     }
-  ]
+  ],
+  "result_types": [
+    {
+      "key": "your_results",
+      "display_name": "Your instrument's data",
+      "folder": "Results/YourFolder",
+      "file_extensions": [
+        ".csv"
+      ]
+    }
+  ],
+  "parameter_defaults": {},
+  "traceability": {}
 }

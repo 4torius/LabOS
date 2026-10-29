@@ -207,18 +207,34 @@ know which one to stop by hand.
 
 ---
 
-## Manual Intervention Steps
+## Manual Steps: a Person Is a Station
 
-Some steps have no SiLA2 server behind them and are executed by the
-orchestrator itself. One predicate decides this, shared by the executor and the
-web app so they cannot disagree: an instrument containing `"manual"`, an
-instrument containing `"delay"` or an action of `Wait`, and any action
-containing `"refill"`.
+The only step the orchestrator executes itself is the builder's **Delay** block
+(`Instrument: Delay`, or an action of `Wait`). Every other step goes to a SiLA2
+server — including the steps a person does.
 
-A manual step posts an operator notification and blocks until the Operator
-page's "Confirm" is clicked or the timeout fires. `TimeoutSeconds: 0` on such a
-step now means **wait indefinitely**, which is what an overnight manual
-operation needs; it used to crash the comparison.
+A manual step is a command on the **Manual Station** server:
+
+```json
+{"StepNumber": 2, "Instrument": "Manual Station", "Action": "RequestOperatorTask",
+ "Parameters": {"TaskDescription": "Move the plate to the dialysis bench"}, "DependsOn": [1]}
+```
+
+The server puts the task on the Operator page and the command returns when the
+operator clicks **Confirm** (or after its `TimeoutSeconds`; `0` waits
+indefinitely). `TaskType`, `Priority`, `SourceInstrument` and `TimeoutSeconds`
+may be left out: the Manual Station declares defaults for them in its catalog.
+`SendNotification` shows a message and does not wait.
+
+This used to be different, and it matters if an old workflow now behaves
+differently. Any instrument whose name contained `"manual"`, and any action
+containing `"refill"`, was intercepted by the web app and handled there. The
+Manual Station server was never called by a workflow; `SendNotification`
+became a confirmation that stopped the run until someone clicked; and a
+workflow that asked the operator to refill tips and then recorded the refill
+(`Opentrons_Refill_Test`) asked the operator twice. A manual step is now an
+ordinary step: it validates, retries, times out and appears in the run timeline
+like any other - and the Manual Station must be running.
 
 ---
 

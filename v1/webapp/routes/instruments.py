@@ -1,4 +1,4 @@
-﻿"""Instrument, device, and file API routes."""
+"""Instrument, device, and file API routes."""
 import json
 import logging
 from datetime import datetime
@@ -202,21 +202,26 @@ def create_instruments_router(
                     "timestamp": datetime.now().isoformat(),
                 })
 
-                if command == "RefreshTasks":
-                    await ws_manager.broadcast({"type": "mobile_tasks_updated"})
+                if result.options_changed:
+                    # A list a picker offers was re-read after this command
+                    # (the mobile robot's tasks after RefreshTasks, say).
+                    await ws_manager.broadcast({"type": "options_changed",
+                                                "hints": result.options_changed})
 
                 # Plate ID assignment + DB population (Database page: Plates tab).
                 # Same shared logic the workflow-execution path uses, so a
-                # manually-triggered Tecan measurement or Opentrons recipe
-                # (no workflow running) is tracked identically instead of
-                # only reaching the ephemeral command history.
+                # measurement or recipe run by hand (no workflow running) is
+                # tracked identically instead of only reaching the ephemeral
+                # command history. Whether a command does either is declared
+                # by its server.
                 try:
-                    plate_tracking.track_tecan_measurement(
-                        actual_id, command, params, result,
+                    role = core.role_of(actual_id, command)
+                    plate_tracking.track_plate_measurement(
+                        actual_id, command, params, result, role=role,
                         run_id=None, current_plate_id=None, base_dir=BASE_DIR, state=state,
                     )
-                    plate_tracking.track_opentrons_recipe(
-                        actual_id, command, params, result,
+                    plate_tracking.track_plate_preparation(
+                        actual_id, command, params, result, role=role,
                         run_id=None, base_dir=BASE_DIR, state=state,
                     )
                 except Exception as exc:
@@ -395,46 +400,12 @@ def create_instruments_router(
                     classes[f.stem] = {'displayName': f.stem, 'description': ''}
         return {"files": files, "classes": classes}
 
-    @router.get("/api/tecan/protocols")
-    async def get_tecan_protocols():
-        protocols = [f.name for f in (LIBRARY_DIR / "Analysis").glob("*.mdfx")] if (LIBRARY_DIR / "Analysis").exists() else []
-        return {"protocols": protocols}
-
-    @router.get("/api/tecan/plate-types")
-    async def get_tecan_plate_types():
-        """Real Tecan-compatible plate catalog for the RunMeasurement `PlateType`
-        parameter (Library/Analysis/PlateTypes.json - maps a plate id to the
-        Tecan-internal {file, range} pair TecanBridge.RewritePlateType uses to
-        override the plate hardcoded in a .mdfx). Passing anything not listed
-        here fails on the bridge with a clear error, never a silent fallback -
-        this endpoint is the same list, just exposed to the frontend so the
-        dropdown can show real options instead of a generic placeholder."""
-        path = LIBRARY_DIR / "Analysis" / "PlateTypes.json"
-        if not path.exists():
-            return {"plate_types": []}
-        try:
-            data = json.loads(path.read_text(encoding='utf-8-sig'))
-        except Exception:
-            return {"plate_types": []}
-        plate_types = [
-            {"id": key, "display_name": key.replace("_", " "), "tecan_file": val.get("file", "")}
-            for key, val in data.items()
-            if not key.startswith("_") and isinstance(val, dict)
-        ]
-        return {"plate_types": plate_types}
-
-    # Mobile + dynamic options
-
-    @router.get("/api/mobile/tasks")
-    async def get_mobile_tasks():
-        try:
-            if lab_core:
-                tasks = await lab_core.fetch_dynamic_options("mobile_task")
-                return {"tasks": tasks, "count": len(tasks)}
-            return {"tasks": [], "count": 0, "error": "LabCore not initialized"}
-        except Exception as e:
-            logger.error(f"Failed to get mobile tasks: {e}")
-            return {"tasks": [], "count": 0, "error": str(e)}
+    # /api/tecan/protocols, /api/tecan/plate-types and /api/mobile/tasks used
+    # to be here: one instrument's lists, each fetched by name by the pages.
+    # The servers now declare them (the plate types as json_keys_file, the
+    # mobile robot's tasks as a source_property), so they arrive with the
+    # parameter as `options`, and /api/dynamic-options/{ui_hint} serves any
+    # property-backed list without knowing whose it is.
 
     @router.get("/api/dynamic-options/{ui_hint}")
     async def get_dynamic_options(ui_hint: str):
@@ -466,14 +437,12 @@ def create_instruments_router(
 
         try:
             await core.discover()
-            opentrons = next(
-                (i for i in core.list_instruments() if "opentrons" in i.id.lower() or "opentrons" in i.name.lower()),
-                None,
-            )
-            if opentrons is None:
-                return {"success": False, "error": "Opentrons instrument not found"}
+            # Whoever exposes RefillTipRack, not whoever is called "opentrons".
+            target = next(iter(core.instruments_with_command("RefillTipRack")), None)
+            if target is None:
+                return {"success": False, "error": "No online instrument exposes RefillTipRack"}
 
-            result = await core.execute_command(opentrons.id, "RefillTipRack", {"RackSlot": rack_type})
+            result = await core.execute_command(target.id, "RefillTipRack", {"RackSlot": rack_type})
             if not result.success:
                 state.add_log("error", f"RefillTipRack error: {result.error}", "operator")
                 return {"success": False, "error": result.error}

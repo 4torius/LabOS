@@ -11,7 +11,7 @@ SiLA2-native plug-and-play discovery.  Two-phase strategy:
     from the running server via SiLAService — no hardcoded command knowledge.
 
   Phase 2 — Runtime (continuous):
-    mDNS/DNS-SD (_sila2._tcp.local.) discovers every SiLA2-compliant server on
+    mDNS/DNS-SD (_sila._tcp.local.) discovers every SiLA2-compliant server on
     the network segment automatically.  start_continuous_discovery() keeps the
     registry up-to-date as servers come and go.
 
@@ -44,6 +44,7 @@ try:
 except ImportError:
     ZEROCONF_AVAILABLE = False
 
+from src.catalog import ServerCatalog, parse_catalog
 from src.resolver import resolve
 from src.settings import get_settings
 
@@ -169,7 +170,12 @@ class PnPServer:
     # Source info
     server_dir: str = ""                    # Directory path if discovered from filesystem
 
-    # Library catalog (from LabOSLibraryProvider SiLA2 feature, populated at discovery)
+    # What the server declares about itself beyond its commands (library and
+    # result folders, display, parameter defaults, plate traceability), read
+    # from LabOSLibraryProvider.LibraryCatalog at discovery. See src/catalog.py.
+    catalog: ServerCatalog = field(default_factory=ServerCatalog)
+    # The library types alone, kept because callers and tests address them
+    # directly; always the same list as catalog.library_types.
     library_catalog: list = field(default_factory=list)
     discovered_via: str = ""                # "port_scan", "directory", "mdns"
     
@@ -376,7 +382,7 @@ class PnPDiscovery:
     SiLA2-native Plug & Play Discovery.
 
     Phase 1 — bootstrap from lab_config.yaml seeds (startup).
-    Phase 2 — mDNS/DNS-SD (_sila2._tcp.local.) continuous runtime discovery.
+    Phase 2 — mDNS/DNS-SD (_sila._tcp.local.) continuous runtime discovery.
     Server self-description via SiLAService is the only source of truth.
     """
 
@@ -528,7 +534,7 @@ class PnPDiscovery:
         """
         Discover SiLA2 servers via mDNS/DNS-SD (SiLA2 standard).
         
-        SiLA2 servers advertise themselves as _sila2._tcp.local. services.
+        SiLA2 servers advertise themselves as _sila._tcp.local. services.
         This is the preferred discovery method per SiLA2 specification.
         """
         if not ZEROCONF_AVAILABLE:
@@ -640,7 +646,10 @@ class PnPDiscovery:
                         continue
                     
                     server = PnPServer(
-                        name=properties.get("name", name),
+                        # The sila2 library announces the name as `server_name`
+                        # and uses the UUID as the service name; the SiLAService
+                        # query that follows replaces this with the real name.
+                        name=properties.get("server_name") or properties.get("name") or name,
                         host=addr,
                         port=port,
                         uuid=properties.get("uuid", ""),
@@ -772,7 +781,7 @@ class PnPDiscovery:
                     properties[key] = value
             
             server = PnPServer(
-                name=properties.get("name", server_name),
+                name=properties.get("server_name") or properties.get("name") or server_name,
                 host=addr,
                 port=port,
                 uuid=properties.get("uuid", ""),
@@ -801,13 +810,17 @@ class PnPDiscovery:
     async def _handle_mdns_service_removed(self, name: str):
         """Handle mDNS service removal."""
         try:
-            # Find and mark server as offline
-            server_key = self._make_server_key(name.split(".")[0])
-            if server_key in self.servers:
-                self.servers[server_key].server_online = False
-                self.servers[server_key].hardware_online = False
-                self.servers[server_key].hardware_status = "offline"
-                logger.info(f"mDNS: Server offline - {name}")
+            # The service name is the server's UUID, while the registry may
+            # hold it under a lab_config key ("tecan"). Match on either, or the
+            # withdrawal of a configured server was never noticed.
+            announced = name.split(".")[0]
+            server_key = self._make_server_key(announced)
+            for key, server in self.servers.items():
+                if key == server_key or (server.uuid and server.uuid == announced):
+                    server.server_online = False
+                    server.hardware_online = False
+                    server.hardware_status = "offline"
+                    logger.info(f"mDNS: Server offline - {server.name}")
         except Exception as e:
             logger.error(f"Error handling mDNS service remove: {e}")
 
@@ -896,18 +909,23 @@ class PnPDiscovery:
             if server.hardware_status in ("unknown", "offline"):
                 server.hardware_status = "idle"
 
-            # ── LabOS Library Catalog (LabOSLibraryProvider feature, optional) ──
+            # ── What the server declares about itself (LabOSLibraryProvider) ──
+            # Optional: a server without the feature simply declares nothing.
             try:
-                import json as _json
                 catalog_feature = getattr(client, 'LabOSLibraryProvider', None)
                 if catalog_feature is not None:
-                    catalog_json = str(catalog_feature.LibraryCatalog.get())
-                    server.library_catalog = _json.loads(catalog_json).get("library_types", [])
+                    catalog = parse_catalog(str(catalog_feature.LibraryCatalog.get()),
+                                            source=server.name)
+                    for problem in catalog.problems:
+                        logger.warning("Catalog of %s: %s", server.name, problem)
+                    server.catalog = catalog
+                    server.library_catalog = catalog.library_types
                     logger.debug(
-                        "Library catalog loaded for %s: %d type(s)", server.name, len(server.library_catalog)
+                        "Catalog loaded for %s: %d library type(s), %d result folder(s)",
+                        server.name, len(catalog.library_types), len(catalog.result_types),
                     )
-            except Exception:
-                pass  # Server does not implement LabOSLibraryProvider — fallback to lab_config.yaml
+            except Exception as exc:
+                logger.debug("No catalog from %s: %s", server.name, exc)
 
             logger.info(
                 "sila2 query OK: %s (%s) — %d feature(s)", server.name, server.server_type, len(sila_features)

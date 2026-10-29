@@ -108,11 +108,17 @@ ui_dropdowns:
   tiprack:
     folder: Library/Labware/TipRacks
     file_extension: .json
-  # mobile_task is dynamic (fetched from server at runtime) — kept here.
+  # mobile_task is read from the robot's AvailableTasks property. A server can
+  # declare this in its own library_catalog.json; the mobile robot's server
+  # runs on another machine and does not yet, so the declaration lives here.
+  # The last list read is kept in `folder` for when the robot is off.
   mobile_task:
     dynamic: true
     server: mobile
-    command: Get_AvailableTasks
+    source_property: AvailableTasks
+    value_field: TaskId
+    label_field: TaskName
+    folder: Library/MobileTasks
 webapp:
   nodered_url: http://localhost:1880
   timeouts:

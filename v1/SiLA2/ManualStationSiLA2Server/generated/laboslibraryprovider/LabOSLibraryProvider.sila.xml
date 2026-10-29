@@ -1,0 +1,14 @@
+<Feature xmlns="http://www.sila-standard.org" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Category="core" FeatureVersion="1.0" MaturityLevel="Draft" Originator="de.bicocca.labos" SiLA2Version="1.1" xsi:schemaLocation="http://www.sila-standard.org https://gitlab.com/SiLA2/sila_base/-/raw/master/schema/FeatureDefinition.xsd">
+  <Identifier>LabOSLibraryProvider</Identifier>
+  <DisplayName>LabOS Library Provider</DisplayName>
+  <Description>Declares what the orchestrator needs to know about this instrument beyond its commands: the Library files it reads, the Results folders it writes into (created when the server starts), parameters a workflow may omit, which commands prepare or measure a plate, and how it is shown. The LabOS orchestrator reads this property at discovery, so adding an instrument changes nothing in the orchestrator.</Description>
+  <Property>
+    <Identifier>LibraryCatalog</Identifier>
+    <DisplayName>Library Catalog</DisplayName>
+    <Description>JSON object. Every section is optional. display: {icon, color}. library_types: [{hint, display_name, folder, file_extension, parameter_names}] - files in Library/ a parameter picks from (or values, json_keys_file, source_property instead of folder). result_types: [{key, display_name, folder, file_extensions}] - folders under Results/ this instrument writes. parameter_defaults: {Command: {Parameter: value}}. traceability: {Command: {role: prepares_plate|measures_plate, plate_parameter, recipe_parameter, protocol_parameter}}. Folders are relative to the LabOS root.</Description>
+    <Observable>No</Observable>
+    <DataType>
+      <Basic>String</Basic>
+    </DataType>
+  </Property>
+</Feature>

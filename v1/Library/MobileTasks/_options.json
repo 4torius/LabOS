@@ -1,0 +1,65 @@
+[
+  {
+    "TaskId": "cupxdbwrdxtcbxrybaxekhfticuhekfc",
+    "TaskName": "go_to_Opentrons",
+    "SubtaskCount": 1,
+    "id": "cupxdbwrdxtcbxrybaxekhfticuhekfc",
+    "name": "go_to_Opentrons"
+  },
+  {
+    "TaskId": "dxvadjvibetfceaybdybsqsqcmzimdfj",
+    "TaskName": "place_on_OT",
+    "SubtaskCount": 2,
+    "id": "dxvadjvibetfceaybdybsqsqcmzimdfj",
+    "name": "place_on_OT"
+  },
+  {
+    "TaskId": "dygcadtafeigrdpnagztfdaececwotng",
+    "TaskName": "WorkingPose",
+    "SubtaskCount": 1,
+    "id": "dygcadtafeigrdpnagztfdaececwotng",
+    "name": "WorkingPose"
+  },
+  {
+    "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
+    "TaskName": "pick_from_dima",
+    "SubtaskCount": 1,
+    "id": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
+    "name": "pick_from_dima"
+  },
+  {
+    "TaskId": "nnegfohactaltbahtxfnejaaycafskaq",
+    "TaskName": "pick_from_tecan",
+    "SubtaskCount": 2,
+    "id": "nnegfohactaltbahtxfnejaaycafskaq",
+    "name": "pick_from_tecan"
+  },
+  {
+    "TaskId": "opfbbcdwkdfpvftuabototnjcedyqfbf",
+    "TaskName": "Docking",
+    "SubtaskCount": 2,
+    "id": "opfbbcdwkdfpvftuabototnjcedyqfbf",
+    "name": "Docking"
+  },
+  {
+    "TaskId": "qufptekmeyycpckgbvcpudozfdfkctba",
+    "TaskName": "pick_from_opentrons",
+    "SubtaskCount": 2,
+    "id": "qufptekmeyycpckgbvcpudozfdfkctba",
+    "name": "pick_from_opentrons"
+  },
+  {
+    "TaskId": "rxzeeofvewbamneadgvdafucvefidfgb",
+    "TaskName": "place_on_TC",
+    "SubtaskCount": 2,
+    "id": "rxzeeofvewbamneadgvdafucvefidfgb",
+    "name": "place_on_TC"
+  },
+  {
+    "TaskId": "xkeqmsaqecoaxpclaefiebursgddrbff",
+    "TaskName": "go_to_Tecan",
+    "SubtaskCount": 1,
+    "id": "xkeqmsaqecoaxpclaefiebursgddrbff",
+    "name": "go_to_Tecan"
+  }
+]

@@ -32,6 +32,10 @@ from sila2.server import SilaServer
 from generated.manualstation.manualstation_feature import ManualStationFeature
 from src.manual_station_impl import ManualStationImpl
 
+# LabOSLibraryProvider — declares this station's defaults and look to the orchestrator
+from generated.laboslibraryprovider import LabOSLibraryProviderFeature
+from src.library_provider_impl import LibraryProviderImpl
+
 
 class _SuppressSubscriptionManagerLogs(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
@@ -56,6 +60,16 @@ def _get_persistent_uuid(server_dir: str) -> UUID:
 
 
 def main() -> int:
+    # A redirected stdout on Windows is cp1252, and this server prints
+    # characters outside it; the first operator notification then raised
+    # UnicodeEncodeError out of SendNotification and failed the step.
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
     parser = argparse.ArgumentParser(
         description="ManualStation SiLA2 Server — operator task management"
     )
@@ -107,6 +121,7 @@ def main() -> int:
 
     impl = ManualStationImpl(sila_server, webapp_url=args.webapp_url)
     sila_server.set_feature_implementation(ManualStationFeature, impl)
+    sila_server.set_feature_implementation(LabOSLibraryProviderFeature, LibraryProviderImpl(sila_server))
 
     # ── Start ─────────────────────────────────────────────────────────────────
     enable_discovery = not args.no_discovery

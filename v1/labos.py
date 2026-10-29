@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
-"""LabOS command line.
+"""LabOS command line: setting the lab up, and testing it.
 
+  Setup
+    python labos.py new-server <Name> [--results Dir] [--library Dir]
+                                              scaffold, generate and register an instrument
+    python labos.py codegen <server>          regenerate bindings after an FDL edit
+    python labos.py doctor                    check the installation and every server's catalog
+
+  Testing
     python labos.py status                    what is running
     python labos.py instruments               what is on the network, and what it can do
+    python labos.py folders                   the Library and Results folders each server declares
+    python labos.py read <instrument> <prop>  read a property
+    python labos.py call <instrument> <command> [Param=value ...]
+                                              send one command, as the web interface would
     python labos.py validate <workflow>       check a workflow without running it
     python labos.py run <workflow>            run one, streaming progress
-    python labos.py read <instrument> <prop>  read a property
-    python labos.py new-server <Name>         scaffold a new instrument
-    python labos.py codegen <server>          regenerate bindings after an FDL edit
-    python labos.py doctor                    check the installation
 
 Why this exists: adding an instrument was a nine-step manual procedure —
 copy a folder, rename four files, edit three of them consistently, run codegen
@@ -145,6 +152,11 @@ def cmd_instruments(args: argparse.Namespace) -> int:
                 mark = " (observable)" if prop.observable else ""
                 print(f"    {prop.id:<22} {prop.data_type}{mark}")
 
+        if inst.results:
+            print(f"  {C.DIM}writes data to{C.RESET}")
+            for result in inst.results:
+                print(f"    {result['folder']:<22} {result['display_name']}")
+
         if inst.commands:
             print(f"  {C.DIM}commands{C.RESET}")
             for cmd in inst.commands:
@@ -192,6 +204,100 @@ def cmd_read(args: argparse.Namespace) -> int:
         except ValueError:
             pass
     print(json.dumps(value, indent=2) if not isinstance(value, str) else value)
+    return 0
+
+
+def cmd_folders(args: argparse.Namespace) -> int:
+    """Which folders each instrument declared, and whether they exist.
+
+    The Results page shows the same thing; this is for checking a new server
+    before opening a browser.
+    """
+    core = asyncio.run(_discover())
+    instruments = core.list_instruments()
+    if not instruments:
+        bad("No instrument discovered. Are the servers running? (python labos.py status)")
+        return 1
+    for inst in sorted(instruments, key=lambda i: i.name):
+        folders = inst.catalog.declared_folders()
+        heading(f"{inst.name}  [{inst.id}]")
+        for problem in inst.catalog.problems:
+            warn(problem)
+        if not folders:
+            info("declares no folders")
+            continue
+        for kind, folder in folders:
+            path = BASE_DIR / folder
+            (ok if path.is_dir() else bad)(f"{kind:<8} {folder}")
+    heading("Results/ as the web interface lists it")
+    for entry in core.list_result_folders():
+        who = ", ".join(entry["declared_by"]) or "undeclared"
+        info(f"{entry['name']:<22} {entry['file_count']:>4} file(s)   {who}")
+    return 0
+
+
+def _parse_assignments(pairs: List[str]) -> dict:
+    """Param=value pairs. Values are JSON when they parse as JSON, else text."""
+    parameters = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise ValueError(f"'{pair}' is not Param=value")
+        key, raw = pair.split("=", 1)
+        try:
+            parameters[key.strip()] = json.loads(raw)
+        except ValueError:
+            parameters[key.strip()] = raw
+    return parameters
+
+
+def cmd_call(args: argparse.Namespace) -> int:
+    """Send one command through the same path the web interface uses.
+
+    The quickest check that a new server does what its feature definition
+    says: parameter types, declared defaults and errors all behave exactly as
+    they will inside a workflow.
+    """
+    try:
+        parameters = _parse_assignments(args.parameters)
+    except ValueError as exc:
+        bad(str(exc))
+        return 1
+
+    core = asyncio.run(_discover())
+    match = core.resolve_instrument(args.instrument)
+    if not match:
+        bad(match.error)
+        return 1
+    instrument = match.target
+    command = next((c for c in instrument.commands if c.id.lower() == args.command.lower()), None)
+    if command is None:
+        bad(f"'{args.command}' is not a command of {instrument.name}. "
+            f"Available: {', '.join(c.id for c in instrument.commands) or 'none'}")
+        return 1
+
+    declared = instrument.catalog.defaults_for(command.id)
+    missing = [p.name for p in command.parameters
+               if p.name not in parameters and p.name not in declared]
+    if missing:
+        bad(f"{command.id} needs: {', '.join(missing)}")
+        for p in command.parameters:
+            info(f"{p.name:<22} {p.data_type:<8} {' '.join((p.description or '').split())[:70]}")
+        return 1
+
+    print(f"\n{C.BOLD}{instrument.name}.{command.id}{C.RESET}  {json.dumps(parameters)}")
+    if not args.yes:
+        warn("This sends a real command, and an instrument may move.")
+        if input(f"  Type '{command.id}' to continue: ").strip() != command.id:
+            info("Cancelled.")
+            return 130
+
+    result = asyncio.run(core.execute_command(instrument.id, command.id, parameters))
+    if not result.success:
+        bad(result.error)
+        return 1
+    ok(result.message)
+    if result.data not in (None, {}, ""):
+        print(json.dumps(result.data, indent=2, default=str))
     return 0
 
 
@@ -321,6 +427,11 @@ def cmd_new_server(args: argparse.Namespace) -> int:
     if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", name):
         bad("Name must be CamelCase, starting with a capital: Centrifuge, PlateSealer")
         return 1
+    try:
+        _initial_catalog(args)
+    except ValueError as exc:
+        bad(str(exc))
+        return 1
 
     settings = get_settings(BASE_DIR)
     key = args.key or re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
@@ -337,9 +448,12 @@ def cmd_new_server(args: argparse.Namespace) -> int:
 
     heading(f"Creating {name}SiLA2Server  (key '{key}', port {port})")
 
-    # 1 ── copy the template, minus its generated feature package
+    # 1 ── copy the template, minus its generated feature package and anything
+    #      a run of the template left behind. A copied .server_uuid would give
+    #      two servers one identity, and mDNS announces servers by that UUID.
     shutil.copytree(TEMPLATE_DIR, folder,
-                    ignore=shutil.ignore_patterns("__pycache__", "newinstrument"))
+                    ignore=shutil.ignore_patterns("__pycache__", "newinstrument",
+                                                  ".server_uuid", "generated_ca.pem", "logs"))
     ok(f"copied template  ->  SiLA2/{folder.name}/")
 
     # 2 ── rename and retarget the feature definition
@@ -378,17 +492,21 @@ def cmd_new_server(args: argparse.Namespace) -> int:
     text = config_path.read_text(encoding="utf-8")
     text = re.sub(r"port: \d+.*", f"port: {port}", text, count=1)
     text = text.replace('server_name: "New Instrument"', f'server_name: "{name}"')
+    text = re.sub(r'server_type: "Instrument"', f'server_type: "{name}"', text, count=1)
     text = text.replace('server_uuid: "new-instrument-001"', f'server_uuid: "{key}-001"')
     text = text.replace('description: "Template server for new instruments"',
                         f'description: "SiLA2 server for {name}"')
     config_path.write_text(text, encoding="utf-8")
     ok(f"config.yaml         ->  port {port}, server_name {name}")
 
-    # 6 ── library catalog: empty rather than the template's example, which
-    #      would otherwise advertise folders this instrument does not use.
+    # 6 ── catalog: only what was asked for, never the template's example
+    #      entries, which would advertise folders this instrument does not use.
+    catalog = _initial_catalog(args)
     (folder / "library_catalog.json").write_text(
-        json.dumps({"library_types": []}, indent=2) + "\n", encoding="utf-8")
-    ok("library_catalog.json -> empty (add entries when the instrument reads Library/ files)")
+        json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
+    declared = [e["folder"] for e in catalog["library_types"] + catalog["result_types"]]
+    ok("library_catalog.json -> " + (", ".join(declared) if declared
+                                     else "no folders (add them with --results/--library, or edit it)"))
 
     # 7 ── codegen
     if _codegen(folder, name, lower) != 0:
@@ -408,7 +526,42 @@ def cmd_new_server(args: argparse.Namespace) -> int:
     print()
     info(f"Then:  cd SiLA2/{folder.name} && python main.py")
     info(f"       python labos.py instruments        # it should appear")
+    info(f"       python labos.py folders            # and its folders exist")
+    info(f"       python labos.py call {key} <Command> Param=value")
+    info("The web interface shows it without a restart.")
     return 0
+
+
+def _folder_arg(value: str, top: str) -> str:
+    """`Cells` -> `Results/Cells`; a path already under `top` is kept."""
+    value = value.strip().replace("\\", "/").strip("/")
+    if not re.fullmatch(r"[A-Za-z0-9_\-/]+", value) or ".." in value.split("/"):
+        raise ValueError(f"'{value}' is not a usable folder name")
+    return value if value.split("/")[0] == top else f"{top}/{value}"
+
+
+def _initial_catalog(args: argparse.Namespace) -> dict:
+    """The catalog a new server starts with, from --results and --library."""
+    results = []
+    for value in getattr(args, "results", None) or []:
+        folder = _folder_arg(value, "Results")
+        leaf = folder.split("/")[-1]
+        results.append({"key": re.sub(r"[^A-Za-z0-9_-]", "_", leaf).lower(),
+                        "display_name": leaf, "folder": folder, "file_extensions": []})
+    library = []
+    for value in getattr(args, "library", None) or []:
+        folder = _folder_arg(value, "Library")
+        leaf = folder.split("/")[-1]
+        library.append({"hint": re.sub(r"[^A-Za-z0-9_]", "_", leaf).lower(),
+                        "display_name": leaf, "folder": folder,
+                        "file_extension": "", "parameter_names": []})
+    return {
+        "display": {"icon": "bi-cpu", "color": "secondary"},
+        "library_types": library,
+        "result_types": results,
+        "parameter_defaults": {},
+        "traceability": {},
+    }
 
 
 def _codegen(folder: Path, name: str, package: str) -> int:
@@ -576,6 +729,28 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         else:
             warn(f"{label}: {path} does not exist")
 
+    heading("Server catalogs")
+    from src.catalog import parse_catalog
+    template_provider = TEMPLATE_DIR / "src" / "library_provider_impl.py"
+    for server_dir in sorted((BASE_DIR / "SiLA2").glob("*SiLA2Server")):
+        catalog_path = server_dir / "library_catalog.json"
+        if not catalog_path.is_file():
+            warn(f"{server_dir.name}: no library_catalog.json - it declares nothing about itself")
+            continue
+        catalog = parse_catalog(catalog_path.read_text(encoding="utf-8"), server_dir.name)
+        for problem in catalog.problems:
+            bad(problem)
+            problems += 1
+        if not catalog.problems:
+            ok(f"{server_dir.name}: {len(catalog.library_types)} library type(s), "
+               f"{len(catalog.result_types)} result folder(s)")
+        provider = server_dir / "src" / "library_provider_impl.py"
+        if (provider.is_file() and template_provider.is_file()
+                and provider.read_bytes().replace(b"\r\n", b"\n")
+                != template_provider.read_bytes().replace(b"\r\n", b"\n")):
+            warn(f"{server_dir.name}: library_provider_impl.py differs from the template's; "
+                 f"copy {template_provider.relative_to(BASE_DIR)} over it")
+
     heading("Workflows")
     from src.workflow import SCHEMA_VERSION
     unversioned = []
@@ -627,6 +802,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("property")
     p.set_defaults(func=cmd_read)
 
+    sub.add_parser("folders", help="the Library and Results folders each server declares"
+                   ).set_defaults(func=cmd_folders)
+
+    p = sub.add_parser("call", help="send one command to one instrument (may move hardware)")
+    p.add_argument("instrument")
+    p.add_argument("command")
+    p.add_argument("parameters", nargs="*", metavar="Param=value",
+                   help="values are read as JSON when they parse, otherwise as text")
+    p.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
+    p.set_defaults(func=cmd_call)
+
     p = sub.add_parser("validate", help="check a workflow without running it")
     p.add_argument("workflow", help="file name, path, or workflow id")
     p.set_defaults(func=cmd_validate)
@@ -642,6 +828,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name", help="CamelCase instrument name, e.g. Centrifuge")
     p.add_argument("--port", type=int, help="defaults to the next free port in 50061-50099")
     p.add_argument("--key", help="lab_config.yaml key; defaults to snake_case of the name")
+    p.add_argument("--results", action="append", metavar="DIR",
+                   help="a Results/ folder the instrument writes into (repeatable), e.g. Cells")
+    p.add_argument("--library", action="append", metavar="DIR",
+                   help="a Library/ folder the instrument reads from (repeatable)")
     p.set_defaults(func=cmd_new_server)
 
     p = sub.add_parser("codegen", help="regenerate a server's bindings after an FDL edit")

@@ -54,16 +54,17 @@ def create_operator_router(
         action_id = data.get("action_id")
         if action_id is None:
             raise HTTPException(400, "Missing action_id")
-        try:
-            action_id = int(action_id)
-        except (ValueError, TypeError):
-            pass
         extra_data = data.get("extra_data", {})
 
+        # Ids are compared as text. Notifications carry numeric ids and
+        # interventions carry string ones; int() on every queued id raised
+        # ValueError as soon as an intervention was waiting in the queue, so
+        # confirming a manual task while a step awaited a decision failed.
+        wanted = str(action_id)
         action = None
         async with pending_operator_actions_lock:
-            action = next((a for a in pending_operator_actions if int(a.get("id", 0)) == action_id), None)
-            pending_operator_actions[:] = [a for a in pending_operator_actions if int(a.get("id", 0)) != action_id]
+            action = next((a for a in pending_operator_actions if str(a.get("id")) == wanted), None)
+            pending_operator_actions[:] = [a for a in pending_operator_actions if str(a.get("id")) != wanted]
 
         if not action:
             state.add_log("info", f"Acknowledge: action {action_id} not found (may be local-only)", "operator")

@@ -34,7 +34,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Awaitable
 logger = logging.getLogger(__name__)
 
 from src.discovery import PnPServer
-from src.client import PnPRegistry, CommandResult
+from src.catalog import MEASURES_PLATE, PREPARES_PLATE, ServerCatalog
+from src.client import PnPRegistry, CommandResult, map_parameters
 from src.resolver import resolve
 from src.settings import get_settings, normalize_timeout
 
@@ -266,9 +267,10 @@ class ValidationError:
 class WorkflowContext:
     """
     Context for automatic variable propagation between workflow steps.
-    
-    Auto-generates and propagates plate_id between Opentrons pipetting 
-    and Tecan analysis steps for full sample traceability.
+
+    Carries the plate identity from the step that prepares a plate to the
+    steps that measure it. Which commands do either is declared by each server
+    (`traceability` in its catalog), not known here.
     """
     plate_id: Optional[str] = None
     step_results: Dict[int, Dict[str, Any]] = field(default_factory=dict)
@@ -451,22 +453,21 @@ def find_dependency_cycles(steps: List["WorkflowStep"]) -> List[List[int]]:
 def is_locally_handled(instrument: str, action: str = "") -> bool:
     """True for steps that have no SiLA2 server behind them.
 
-    Delay, manual-operator and tip-refill steps are executed by the
-    orchestrator itself, so they must not be resolved against discovered
-    instruments and must not fail a pre-flight instrument check for being
-    absent. Shared with the webapp so both agree on what "local" means.
+    Only the builder's Delay block: waiting is something the orchestrator does
+    itself. Shared with the webapp so both agree on what "local" means.
+
+    Manual-operator and tip-refill steps used to be caught here too, by
+    matching "manual" in the instrument name and "refill" in the action name.
+    That made the Manual Station server something the workflows never called,
+    intercepted any future instrument whose name happened to contain "manual",
+    and asked the operator twice in a workflow that already had an explicit
+    operator step before its RefillTipRack. A person is a station: a manual
+    step goes to the Manual Station server like any other step goes to its
+    instrument.
     """
-    instrument_lower = (instrument or "").lower()
-    action_lower = (action or "").lower()
-    if "manual" in instrument_lower:
-        return True
-    if "delay" in instrument_lower or action_lower == "wait":
-        return True
-    if "refill" in instrument_lower:
-        return True
-    if action_lower in ("refilltiprack", "refill") or "refill" in action_lower:
-        return True
-    return False
+    instrument_lower = (instrument or "").strip().lower()
+    action_lower = (action or "").strip().lower()
+    return instrument_lower == "delay" or action_lower == "wait"
 
 
 class PnPWorkflowExecutor:
@@ -612,12 +613,26 @@ class PnPWorkflowExecutor:
         return report
 
     def _find_abort_command(self, instrument: str) -> Optional[str]:
-        """The instrument's own stop command, from its FDL. None if it has none."""
+        """The instrument's own stop command, from its FDL. None if it has none.
+
+        Only one that can be sent blind: every parameter it takes must have a
+        default its server declared. The Manual Station's CancelTask needs the
+        id of the task to cancel; picking it made every abort of a run waiting
+        on a person report "CancelTask FAILED - verify manually".
+        """
         server = self.registry.get_server_by_name(instrument)
         if server is None:
             return None
-        available = {cmd_id for _fid, cmd_id, _cmd in server.get_all_commands()}
-        return next((c for c in self.ABORT_COMMANDS if c in available), None)
+        defaults = self._catalog_of(server)
+        commands = {cmd_id: cmd for _fid, cmd_id, cmd in server.get_all_commands()}
+        for name in self.ABORT_COMMANDS:
+            command = commands.get(name)
+            if command is None:
+                continue
+            declared = defaults.defaults_for(name)
+            if all(p.identifier in declared for p in (command.parameters or [])):
+                return name
+        return None
 
     def request_pause(self):
         """Request workflow pause after the current step finishes."""
@@ -639,55 +654,28 @@ class PnPWorkflowExecutor:
         """Return True for steps the orchestrator executes itself."""
         return is_locally_handled(step.instrument, step.action)
 
-    def _normalize_params_for_validation(self, step: WorkflowStep, params: Dict[str, Any]) -> Dict[str, Any]:
+    @staticmethod
+    def _catalog_of(server: Any) -> ServerCatalog:
+        catalog = getattr(server, "catalog", None)
+        return catalog if isinstance(catalog, ServerCatalog) else ServerCatalog()
+
+    def _parameters_as_dispatched(self, server: Any, command: Any,
+                                  params: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+        """The parameters exactly as dispatch will send them, and what it drops.
+
+        One mapping for both, so a workflow that validates is the workflow
+        that runs. The server's declared defaults count as supplied, and so
+        does the plate parameter of a command that measures a plate, which
+        the run fills in from the plate prepared earlier.
         """
-        Normalize common aliases/defaults so validation matches real server behavior.
-        """
-        normalized = dict(params or {})
-        action = (step.action or "").lower()
+        catalog = self._catalog_of(server)
+        mapped, unmatched = map_parameters(
+            params or {}, command.parameters, catalog.defaults_for(command.identifier))
+        role = catalog.role_of(command.identifier)
+        if role and role.role == MEASURES_PLATE and role.plate_parameter:
+            mapped.setdefault(role.plate_parameter, "")
+        return mapped, unmatched
 
-        # Opentrons ExecuteRecipe accepts multiple aliases at runtime.
-        if action in ("executerecipe", "executerecipebyname"):
-            if "RecipeName" not in normalized:
-                for key in ("recipe", "Recipe", "recipe_name"):
-                    if key in normalized and normalized.get(key):
-                        normalized["RecipeName"] = normalized[key]
-                        break
-
-        # Tecan RunMeasurement: normalize parameter name aliases.
-        if action == "runmeasurement":
-            if "ProtocolFile" not in normalized:
-                for key in ("protocol", "Protocol", "protocol_file", "ProtocolPath", "ProtocolName", "analysis"):
-                    if key in normalized and normalized.get(key):
-                        normalized["ProtocolFile"] = normalized[key]
-                        break
-            # PlateID is auto-injected from Opentrons context at execution time;
-            # SampleSetID and PlateType default to empty string when not provided.
-            normalized.setdefault("PlateID", "")
-            normalized.setdefault("SampleSetID", "")
-            normalized.setdefault("PlateType", "")
-
-        # Manual station defaults (when executed via server path instead of local shortcut).
-        if action == "requestoperatortask":
-            aliases = {
-                "task_type": "TaskType",
-                "description": "TaskDescription",
-                "task_description": "TaskDescription",
-                "priority": "Priority",
-                "source_instrument": "SourceInstrument",
-                "timeout_seconds": "TimeoutSeconds",
-            }
-            for src_key, dst_key in aliases.items():
-                if src_key in normalized and dst_key not in normalized:
-                    normalized[dst_key] = normalized[src_key]
-
-            normalized.setdefault("TaskType", "manual_operation")
-            normalized.setdefault("Priority", "normal")
-            normalized.setdefault("SourceInstrument", "Workflow")
-            normalized.setdefault("TimeoutSeconds", 300)
-
-        return normalized
-    
     # =========================================================================
     #                           VALIDATION
     # =========================================================================
@@ -810,12 +798,13 @@ class PnPWorkflowExecutor:
                 ))
                 continue
 
-            normalized_params = self._normalize_params_for_validation(step, step.parameters)
-            
+            normalized_params, unmatched = self._parameters_as_dispatched(
+                server, command, step.parameters)
+
             # Check required parameters — only flag parameters that are completely
             # absent (key not in params at all). Empty string is a valid value for
-            # String-type params (e.g. PlateID auto-injected at runtime, SampleSetID
-            # optional), so we do not reject params where the value is "".
+            # String-type params (a plate id filled at run time, an optional
+            # sample set), so we do not reject params where the value is "".
             for param in command.parameters:
                 if param.required:
                     value = normalized_params.get(param.identifier)
@@ -829,8 +818,8 @@ class PnPWorkflowExecutor:
             declared = {p.identifier for p in command.parameters}
             if declared:
                 unknown = [
-                    key for key in normalized_params
-                    if key not in declared and key not in _WORKFLOW_ONLY_PARAM_KEYS
+                    key for key in unmatched
+                    if key not in _WORKFLOW_ONLY_PARAM_KEYS
                 ]
                 if unknown:
                     errors.append(ValidationError(
@@ -842,10 +831,13 @@ class PnPWorkflowExecutor:
                         ),
                     ))
 
-            # Well-capacity check for ExecuteRecipe steps
-            action_lower = (step.action or "").lower()
-            if action_lower in ("executerecipe", "executerecipebyname"):
-                cap_errors = self._validate_recipe_capacity(step, normalized_params)
+            # Well-capacity check for a step that runs a recipe from the
+            # library: the one whose server declares it prepares a plate.
+            role = self._catalog_of(server).role_of(command.identifier)
+            if role and role.role == PREPARES_PLATE:
+                recipe_key = role.recipe_parameter or "RecipeName"
+                cap_errors = self._validate_recipe_capacity(
+                    step, {"RecipeName": normalized_params.get(recipe_key, "")})
                 errors.extend(cap_errors)
 
         return errors
@@ -1096,13 +1088,31 @@ class PnPWorkflowExecutor:
                 continue
 
             if parallel and len(runnable) > 1:
-                for step in runnable:
-                    _notify(step, StepStatus.RUNNING,
-                            f"Starting {step.action} on {step.instrument}")
-                outcomes = await asyncio.gather(
-                    *[self._run_one(step, workflow, context) for step in runnable],
-                    return_exceptions=True,
-                )
+                # Different instruments at once; one instrument one step at a
+                # time. Two steps in a wave can share an instrument, and a
+                # SiLA2 server is not obliged to accept a second command while
+                # it is executing the first - a liquid handler certainly
+                # should not be asked to.
+                outcome_of: Dict[int, Any] = {}
+
+                async def _lane(steps: List[WorkflowStep]) -> None:
+                    for lane_step in steps:
+                        if self._abort_requested:
+                            outcome_of[lane_step.step_number] = None
+                            continue
+                        _notify(lane_step, StepStatus.RUNNING,
+                                f"Starting {lane_step.action} on {lane_step.instrument}")
+                        try:
+                            outcome_of[lane_step.step_number] = await self._run_one(
+                                lane_step, workflow, context)
+                        except asyncio.CancelledError:
+                            outcome_of[lane_step.step_number] = CommandResult(
+                                success=False, error="Aborted by operator")
+                        except Exception as exc:
+                            outcome_of[lane_step.step_number] = exc
+
+                await asyncio.gather(*[_lane(lane) for lane in self._lanes(runnable)])
+                outcomes = [outcome_of.get(step.step_number) for step in runnable]
             else:
                 outcomes = []
                 for step in runnable:
@@ -1190,6 +1200,21 @@ class PnPWorkflowExecutor:
 
         return completed, failed, skipped, step_results, errors
 
+    def _lanes(self, steps: List[WorkflowStep]) -> List[List[WorkflowStep]]:
+        """Split one wave into per-instrument lanes, keeping written order.
+
+        Steps are in the same lane when they resolve to the same server; a
+        step that resolves to none (a Delay, or a name validation would have
+        rejected) gets a lane of its own.
+        """
+        lanes: Dict[Any, List[WorkflowStep]] = {}
+        for step in steps:
+            server = (self.registry.get_server_by_name(step.instrument)
+                      if not is_locally_handled(step.instrument, step.action) else None)
+            key = ("server", id(server)) if server is not None else ("step", step.step_number)
+            lanes.setdefault(key, []).append(step)
+        return list(lanes.values())
+
     async def _run_one(
         self,
         step: WorkflowStep,
@@ -1199,17 +1224,21 @@ class PnPWorkflowExecutor:
         """Resolve a step's parameters against the run context, execute it, and
         feed the result back into the context.
 
-        Context propagation (a plate id generated by an Opentrons run being
-        picked up by a later Tecan read) used to exist only in the sequential
-        path, so the same workflow tracked plates or not depending on a config
-        flag. It now happens for both.
+        Context propagation (a plate id generated by a pipetting run being
+        picked up by a later read) used to exist only in the sequential path,
+        so the same workflow tracked plates or not depending on a config flag.
+        It now happens for both. Which step prepares a plate and which measures
+        one is what each server declares; it used to be decided by whether the
+        instrument's name contained "opentrons" or "tecan".
         """
         resolved = context.resolve_parameters(step.parameters)
+        server = self.registry.get_server_by_name(step.instrument) if step.instrument else None
+        role = self._catalog_of(server).role_of(step.action)
 
         # Carry a known plate id into a measurement that did not name one.
-        if "tecan" in step.instrument.lower() and step.action in ("RunMeasurement", "RunAnalysis"):
-            if not resolved.get("plate_id") and context.plate_id:
-                resolved["plate_id"] = context.plate_id
+        if role and role.role == MEASURES_PLATE and role.plate_parameter and context.plate_id:
+            if not resolved.get(role.plate_parameter):
+                resolved[role.plate_parameter] = context.plate_id
 
         original = step.parameters
         step.parameters = resolved
@@ -1229,10 +1258,8 @@ class PnPWorkflowExecutor:
             self._inflight.pop(step.step_number, None)
 
         if result.success:
-            if ("opentrons" in step.instrument.lower()
-                    and step.action in ("ExecuteRecipe", "RunRecipe", "run_recipe")
-                    and not context.plate_id):
-                recipe_name = resolved.get("RecipeName") or resolved.get("recipe") or ""
+            if role and role.role == PREPARES_PLATE and not context.plate_id:
+                recipe_name = str(resolved.get(role.recipe_parameter or "RecipeName") or "")
                 context.generate_plate_id(recipe_name)
                 logger.info(f"Auto-generated plate_id: {context.plate_id}")
 

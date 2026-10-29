@@ -359,17 +359,27 @@ def ensure_plate_for_measurement(plate_id: str, *, run_id: Optional[str] = None,
 #  Public tracking entry points
 # ─────────────────────────────────────────────────────────────────────────────
 
-def track_opentrons_recipe(
+def _role_is(role, expected: str) -> bool:
+    return role is not None and getattr(role, "role", None) == expected
+
+
+def track_plate_preparation(
     device_id: str, action: str, params: dict, result, *,
-    run_id: Optional[str], base_dir: Optional[Path], state=None,
+    role, run_id: Optional[str], base_dir: Optional[Path], state=None,
 ) -> Optional[str]:
-    """Called after a successful Opentrons command. If it was a recipe
-    execution, creates the plates/wells DB records and returns the new
-    plate_id (or None if this wasn't a recipe-execution command)."""
-    if "opentrons" not in device_id.lower() or action not in ("ExecuteRecipe", "RunRecipe", "run_recipe"):
+    """Called after a successful command. If its server declared that the
+    command prepares a plate (`traceability` in its catalog), creates the
+    plates/wells DB records and returns the new plate_id; otherwise None.
+
+    This used to be decided by "opentrons" appearing in the instrument's name,
+    so a second liquid handler - or the same one renamed - recorded nothing.
+    """
+    if not _role_is(role, "prepares_plate"):
         return None
 
-    recipe_name = params.get("RecipeName") or params.get("recipe_name") or params.get("recipe", "")
+    recipe_key = getattr(role, "recipe_parameter", "") or "RecipeName"
+    recipe_name = (params.get(recipe_key) or params.get("RecipeName")
+                   or params.get("recipe_name") or params.get("recipe", ""))
     recipe_slug = re.sub(r'[^a-z0-9]', '', recipe_name.lower())[:12] if recipe_name else "unknown"
     plate_id = f"PLT-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{recipe_slug}"
 
@@ -400,26 +410,38 @@ def track_opentrons_recipe(
     return plate_id
 
 
-def track_tecan_measurement(
+def track_plate_measurement(
     device_id: str, action: str, params: dict, result, *,
-    run_id: Optional[str], current_plate_id: Optional[str], base_dir: Optional[Path], state=None,
+    role, run_id: Optional[str], current_plate_id: Optional[str], base_dir: Optional[Path],
+    state=None,
 ) -> Optional[str]:
-    """Called after a successful Tecan command. If it was a measurement,
-    resolves the effective plate_id (see _ANIML_TIMESTAMP_SUFFIX_RE), ensures
-    a plate row exists for it (bug: manual measurements never reached the DB
-    before), writes an instrument_measurements row eagerly (fixes
-    animl_path always being NULL and the measurement_id race — see
-    database.save_run()'s docstring), and stores per-well values. Returns
-    the plate_id used, or None if this wasn't a measurement command."""
-    if "tecan" not in device_id.lower() or action not in ("RunMeasurement", "RunAnalysis"):
+    """Called after a successful command. If its server declared that the
+    command measures a plate, resolves the effective plate_id (see
+    _ANIML_TIMESTAMP_SUFFIX_RE), ensures a plate row exists for it (bug:
+    manual measurements never reached the DB before), writes an
+    instrument_measurements row eagerly (fixes animl_path always being NULL
+    and the measurement_id race — see database.save_run()'s docstring), and
+    stores per-well values from the AnIML result. Returns the plate_id used,
+    or None if the command does not measure a plate.
+
+    Gated on the declared role rather than on "tecan" in the instrument's
+    name: any reader that returns an AnIML result can declare itself.
+    """
+    if not _role_is(role, "measures_plate"):
         return None
 
     result_data = result.data if isinstance(result.data, dict) else {}
     animl_path = result_data.get("animl_file_path", "") or result_data.get("AnIMLFilePath", "")
+    if not animl_path:
+        # A SiLA2 response field comes back keyed by its own identifier;
+        # take whichever one carries an .animl path.
+        animl_path = next((str(v) for v in result_data.values()
+                           if isinstance(v, str) and v.lower().endswith(".animl")), "")
 
+    plate_key = getattr(role, "plate_parameter", "") or "PlateID"
     plate_id = (
-        params.get("PlateID") or params.get("plate_id") or params.get("plateId")
-        or current_plate_id
+        params.get(plate_key) or params.get("PlateID") or params.get("plate_id")
+        or params.get("plateId") or current_plate_id
     )
     if not plate_id and animl_path:
         # Caller left PlateID empty — recover the id the Tecan bridge actually
@@ -436,7 +458,8 @@ def track_tecan_measurement(
     if _db is None or not animl_path:
         return plate_id
 
-    protocol_name = params.get("ProtocolFile") or params.get("protocol", "")
+    protocol_key = getattr(role, "protocol_parameter", "") or "ProtocolFile"
+    protocol_name = params.get(protocol_key) or params.get("protocol", "")
     return ingest_animl_measurement(
         plate_id, animl_path,
         device_id=device_id, action=action, protocol_name=protocol_name,
@@ -450,7 +473,7 @@ def ingest_animl_measurement(
     protocol_name: str = "", run_id: Optional[str] = None, state=None,
 ) -> Optional[str]:
     """Core "parse the measurement and write it into the chemical DB against
-    this plate" logic — shared by track_tecan_measurement (a live SiLA2
+    this plate" logic — shared by track_plate_measurement (a live SiLA2
     result just came back) and attach_existing_measurement (a user picked an
     already-existing .animl file for a plate that was never live-measured
     through this webapp, e.g. read on another PC or from an older run).
@@ -585,7 +608,7 @@ def attach_existing_measurement(
     resolves outside results_dir/AnIML (same guard as the file-serving
     routes in webapp/app.py) or if _db isn't available. Returns plate_id on
     success — per-well ingestion failures are logged, not raised (matching
-    ingest_animl_measurement/track_tecan_measurement's existing behavior:
+    ingest_animl_measurement/track_plate_measurement's existing behavior:
     a plate row and the measurement row must still end up linked even if a
     later step in the same try block has a problem).
     """
