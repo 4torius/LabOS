@@ -511,6 +511,10 @@ class PnPWorkflowExecutor:
         #: that still carries `parallel_execution: false` is read as a cap of 1
         #: rather than silently ignored - see settings._concurrency_cap.
         self._max_concurrency = _settings.workflow.max_concurrency
+        #: The ledger of the run in progress, so what is held right now can be
+        #: read while it is held - by the Settings panel, and by anything
+        #: planning around the instruments. None between runs.
+        self._ledger: Optional[ResourceLedger] = None
 
     def set_step_executor(self, fn: Callable):
         """Override step execution. fn must be: async (step: WorkflowStep, context: WorkflowContext) -> CommandResult."""
@@ -1085,6 +1089,7 @@ class PnPWorkflowExecutor:
 
         topology = self._topology()
         ledger = ResourceLedger(max_concurrency=max_concurrency)
+        self._ledger = ledger
         completed = failed = skipped = 0
         step_results: Dict[int, CommandResult] = {}
         errors: List[str] = []
@@ -1252,6 +1257,7 @@ class PnPWorkflowExecutor:
                 errors.append(reason)
                 _notify(step, StepStatus.SKIPPED, reason)
 
+        self._ledger = None
         return completed, failed, skipped, step_results, errors
 
     def _topology(self) -> ResourceTopology:

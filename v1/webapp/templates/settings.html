@@ -218,6 +218,12 @@
             </button>
         </li>
         <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-resources" type="button"
+                    onclick="loadResources()">
+                <i class="bi bi-shield-check me-1"></i> Resources
+            </button>
+        </li>
+        <li class="nav-item">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-network" type="button">
                 <i class="bi bi-wifi me-1"></i> Network
             </button>
@@ -676,6 +682,34 @@
             </div>
         </div>
         
+        <!-- Resources Tab -->
+        <!-- Read-only for what a server declares about itself: two sources that
+             can disagree about a safety rule is the failure the resource model
+             exists to avoid. The config layers are edited in lab_config.yaml
+             through the System tab's editor. See docs/RESOURCE_MODEL.md. -->
+        <div class="tab-pane fade" id="tab-resources">
+            <div class="card settings-card mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-shield-check"></i> What must not run at the same time</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="loadResources()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small">
+                        Each instrument declares the physical things it owns, and any
+                        instrument that reaches into one of them claims it by name. Two
+                        steps whose claims share a resource never run at the same time —
+                        which is what stops a recipe starting while a robot arm is inside
+                        the deck. Declared by the servers themselves, so this page shows
+                        it rather than setting it.
+                    </p>
+                    <div id="resources-alerts"></div>
+                    <div id="resources-body" class="text-muted small">Loading…</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Network Tab -->
         <div class="tab-pane fade" id="tab-network">
             <div class="row">
@@ -1322,6 +1356,96 @@ async function refreshMobileStatus() {
     } catch (e) {
         statusDiv.className = 'mt-3 alert alert-danger';
         statusDiv.innerHTML = `<i class="bi bi-x-circle"></i> Error: ${e.message}`;
+    }
+}
+
+// ── Resources ───────────────────────────────────────────────────────────────
+// A resource model is invisible while it works, so the only way anybody knows
+// it is protecting something is a page that shows it. Unresolved claims are the
+// loud part: a claim naming a resource nobody provides means no exclusion, and
+// a workflow touching that instrument is refused before anything moves.
+
+async function loadResources() {
+    const body = document.getElementById('resources-body');
+    const alerts = document.getElementById('resources-alerts');
+    if (!body) return;
+    body.innerHTML = 'Loading…';
+    alerts.innerHTML = '';
+    try {
+        const data = await (await fetch('/api/resources')).json();
+        const esc = LabOS.escapeHtml;
+        const names = data.instrument_names || {};
+        const who = id => esc(names[id] || id);
+
+        (data.unresolved || []).forEach(u => {
+            alerts.innerHTML += `<div class="alert alert-danger py-2">
+                <i class="bi bi-exclamation-octagon-fill"></i>
+                <strong>Unresolved claim.</strong> ${esc(u.message)}
+                <div class="small mt-1">Any workflow using ${who(u.instrument)} is
+                refused until this is fixed — in that server's
+                <code>library_catalog.json</code>, or as a
+                <code>resources.aliases</code> entry in <code>lab_config.yaml</code>.</div>
+            </div>`;
+        });
+        (data.problems || []).forEach(problem => {
+            alerts.innerHTML += `<div class="alert alert-warning py-2 small">
+                <i class="bi bi-exclamation-triangle"></i> ${esc(problem)}</div>`;
+        });
+        (data.undeclared || []).forEach(id => {
+            alerts.innerHTML += `<div class="alert alert-info py-2 small">
+                <i class="bi bi-info-circle"></i> <strong>${who(id)}</strong> declares
+                nothing it occupies, so its steps run one at a time against every other
+                instrument that also declares nothing. Declaring is what allows
+                overlap.</div>`;
+        });
+
+        const claimants = data.claimants || {};
+        const providers = data.providers || {};
+        const held = data.held || {};
+        const ids = Object.keys(providers).sort();
+        if (!ids.length) {
+            body.innerHTML = '<span class="text-muted">No instrument declares a resource yet.</span>';
+            return;
+        }
+
+        let rows = '';
+        ids.forEach(id => {
+            const owner = providers[id];
+            const reaching = (claimants[id] || []).filter(c => !c.startsWith(owner + '.'));
+            const holder = held[id];
+            const kind = id.split(':')[0];
+            rows += `<tr>
+                <td><span class="badge bg-secondary">${esc(kind)}</span>
+                    <code>${esc(id)}</code></td>
+                <td>${who(owner)}</td>
+                <td>${reaching.length
+                        ? reaching.map(c => `<code>${esc(c)}</code>`).join('<br>')
+                        : '<span class="text-muted">—</span>'}</td>
+                <td>${holder
+                        ? `<span class="badge bg-warning text-dark">held by ${esc(holder)}</span>`
+                        : '<span class="text-muted">free</span>'}</td>
+            </tr>`;
+        });
+
+        const aliases = Object.entries(data.aliases || {});
+        body.innerHTML = `
+            <table class="table table-sm align-middle">
+                <thead><tr>
+                    <th>Resource</th><th>Owned by</th>
+                    <th>Also claimed by</th><th>Now</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+            ${aliases.length ? `<div class="small text-muted">
+                <strong>Aliases</strong> (from <code>lab_config.yaml</code>):
+                ${aliases.map(([a, t]) => `<code>${esc(a)}</code> → <code>${esc(t)}</code>`).join(', ')}
+            </div>` : ''}
+            <div class="small ${data.ok ? 'text-success' : 'text-danger'} mt-2">
+                <i class="bi bi-${data.ok ? 'check-circle' : 'x-circle'}"></i>
+                ${data.ok ? 'Every claim resolves.' : 'Some claims do not resolve — see above.'}
+            </div>`;
+    } catch (e) {
+        body.innerHTML = `<span class="text-danger">Could not load: ${LabOS.escapeHtml(e.message)}</span>`;
     }
 }
 </script>

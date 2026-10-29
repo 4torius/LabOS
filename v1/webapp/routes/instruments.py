@@ -36,6 +36,41 @@ def create_instruments_router(
 ) -> APIRouter:
     router = APIRouter(tags=["instruments"])
 
+    # Resources
+
+    @router.get("/api/resources")
+    async def get_resources():
+        """The resolved resource topology: who owns what, who reaches into it.
+
+        One query, two consumers: the Settings panel renders it, and an
+        external scheduler needs exactly this to plan around the instruments
+        (see docs/RESOURCE_MODEL.md). It is read-only — what a server declares
+        about itself is not editable from here, because two sources that can
+        disagree about a safety rule is the failure the model avoids. The
+        config layers are edited through /api/config.
+        """
+        from src.resources import ResourceDeclaration, build_topology
+        from src.settings import get_settings
+
+        instruments = lab_core.list_instruments() if lab_core else []
+        declarations = {
+            inst.id: (getattr(inst.catalog, "resources", None) or ResourceDeclaration())
+            for inst in instruments
+        }
+        topology = build_topology(declarations, get_settings(BASE_DIR).resources)
+
+        payload = topology.to_dict()
+        # Which instrument a resource belongs to is more useful in the UI as a
+        # display name than as an internal id.
+        names = {inst.id: inst.name for inst in instruments}
+        payload["instrument_names"] = names
+        payload["held"] = {}
+        executor = getattr(lab_core, "_workflow_executor", None) if lab_core else None
+        ledger = getattr(executor, "_ledger", None)
+        if ledger is not None:
+            payload["held"] = ledger.held
+        return payload
+
     # Devices
 
     @router.get("/api/devices")

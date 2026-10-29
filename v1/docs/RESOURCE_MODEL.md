@@ -285,12 +285,30 @@ only an internal extension.
 | Phase | What | Status |
 |---|---|---|
 | 0 | This document | ✅ |
-| 1 | `src/resources.py` — parsing, three-layer resolution, fail-closed cross-check | |
-| 2 | Enforcement in `_execute_waves`; `parallel_execution` retired | |
-| 3 | `GET /api/resources`; Settings panel (read-only topology, editable config layers) | |
-| 4 | `Test_Bicocca` annotated with its real dependencies | |
-| 5 | Template server + authoring guide | |
+| 1 | `src/resources.py` — parsing, three-layer resolution, fail-closed cross-check | ✅ |
+| 2 | Enforcement in `_execute_waves`; `parallel_execution` retired | ✅ |
+| 3 | `GET /api/resources`; `labos.py resources`; Settings panel | ✅ |
+| 4 | `Test_Bicocca` annotated with its real dependencies | ✅ |
+| 5 | Template server + authoring guide | ✅ |
 | 6 | `holds` / `release_on` for claims held across steps | deferred |
+
+Two things the real declarations taught us, now part of the model:
+
+**`control: true`.** The implicit per-instrument claim would have queued
+`EmergencyStop`, `AbortRun` and `PauseRun` behind the very run they exist to
+interrupt. A command marked `control` occupies nothing at all, not even its own
+instrument. It is a flag rather than an empty `claims` list because an empty
+list is far too easy to arrive at by accident for something that switches a
+safety rule off; declaring both is contradictory and reported.
+
+**Declare the parameter name the workflow really sends.** `Test_Bicocca` sends
+`TaskId`, not `TaskName`. A `by_parameter` block keyed on `TaskName` alone
+would have matched nothing, every transport would have claimed only the robot,
+and the cross-instrument exclusion would not have engaged — silently. Both
+spellings are declared; an unmatched key contributes nothing, so listing both
+costs nothing. This is the failure mode `provides` was introduced to kill, met
+again from a different direction, and it is worth remembering that the model
+only protects what somebody actually named correctly.
 
 See [ADDING_NEW_INSTRUMENT.md](ADDING_NEW_INSTRUMENT.md) for how to declare
 resources on a new instrument, and `SiLA2/_NewInstrumentTemplate/` for a
