@@ -52,6 +52,7 @@ try:
     from src.settings import get_settings
     from src.catalog import (ServerCatalog, ensure_folders, is_infrastructure_feature,
                              parse_catalog, feature_name as _feature_name)
+    from src.options import HintRegistry, build_registry as build_hint_registry
     from src.deck import DECK_HINTS, options as deck_options
     from src.resolver import Resolution, resolve
     from src.discovery import PnPDiscovery, PnPServer, PnPCommand
@@ -71,6 +72,7 @@ except ImportError:
     from settings import get_settings
     from catalog import (ServerCatalog, ensure_folders, is_infrastructure_feature,
                          parse_catalog, feature_name as _feature_name)
+    from options import HintRegistry, build_registry as build_hint_registry
     from deck import DECK_HINTS, options as deck_options
     from resolver import Resolution, resolve
     from discovery import PnPDiscovery, PnPServer, PnPCommand
@@ -380,6 +382,8 @@ class LabCore:
         # LabOSLibraryProvider catalog into this map as instruments are
         # discovered, and must not write into the shared frozen snapshot.
         self._ui_dropdowns = dict(settings.ui_dropdowns)
+        self._hint_registry_cache: Optional["HintRegistry"] = None
+        self._hint_registry_signature: Optional[tuple] = None
         self._discovery_cache_ttl = settings.discovery.scan_interval
 
     def _command_timeout(self) -> Optional[float]:
@@ -416,102 +420,23 @@ class LabCore:
         if ui_hint in DECK_HINTS:
             return [o["value"] for o in deck_options(self._hal_dir(), ui_hint)]
 
-        # Catalog-backed hints — handled natively before generic folder scan
-        import json as _json
-        if ui_hint == "plate":
-            plates_dir = self.base_dir / "Library" / "Labware" / "Plates"
-            try:
-                return sorted(
-                    _json.loads(f.read_text(encoding="utf-8-sig"))["id"]
-                    for f in plates_dir.glob("*.plate.json")
-                )
-            except Exception:
-                return []
-        if ui_hint == "labware":
-            # Every load name this lab actually has a definition for. The
-            # dashboard used to offer six invented ones (tiprack_1000ul,
-            # wellplate_96, …) that match nothing Opentrons knows, so choosing
-            # any of them failed the run.
-            names = set()
-            labware_root = self.base_dir / "Library" / "Labware"
-            for plate in labware_root.glob("Plates/*.plate.json"):
-                try:
-                    names.add(_json.loads(plate.read_text(encoding="utf-8-sig"))["id"])
-                except Exception:
-                    continue
-            for reservoir in labware_root.glob("Reservoirs/*.json"):
-                try:
-                    data = _json.loads(reservoir.read_text(encoding="utf-8-sig"))
-                    load_name = (data.get("parameters") or {}).get("loadName") or data.get("id")
-                    if load_name:
-                        names.add(load_name)
-                except Exception:
-                    continue
-            tiprack_index = labware_root / "TipRacks" / "index.json"
-            if tiprack_index.exists():
-                try:
-                    names.update(_json.loads(
-                        tiprack_index.read_text(encoding="utf-8-sig")).get("load_names", []))
-                except Exception:
-                    pass
-            return sorted(names)
+        # Everything declarative goes through one reader, layered exactly as
+        # resources are: the server wins for what it declares, the config
+        # speaks for servers that cannot, and the config owns the hints that
+        # belong to no instrument. See src/options.py — this used to be four
+        # `if ui_hint == "..."` branches with the folder walks written out
+        # here, each sitting next to a config entry for the same hint.
+        dropdown_config = self._ui_dropdowns.get(ui_hint) or {}
+        if dropdown_config.get("dynamic") or dropdown_config.get("source_property"):
+            # Property-backed: the values are on a server, not on disk. The
+            # entry's `folder` is the offline snapshot, not a source.
+            return [o["id"] for o in self._dynamic_option_items(ui_hint)]
 
-        if ui_hint == "tiprack":
-            idx = self.base_dir / "Library" / "Labware" / "TipRacks" / "index.json"
-            if idx.exists():
-                return _json.loads(idx.read_text(encoding="utf-8-sig")).get("load_names", [])
-            return []
-        if ui_hint == "pipette":
-            idx = self.base_dir / "Library" / "Labware" / "Pipettes" / "index.json"
-            if idx.exists():
-                data = _json.loads(idx.read_text(encoding="utf-8-sig"))
-                seen: set = set()
-                result = []
-                for d in data.get("definitions", []):
-                    key = f"{d['channel']}/{d['model']}"
-                    if key not in seen:
-                        seen.add(key)
-                        result.append(key)
-                return result
-            return []
-
-        # Check if ui_hint is configured in lab_config.yaml
-        dropdown_config = self._ui_dropdowns.get(ui_hint)
-
-        if dropdown_config:
-            # Read from a property the server names (see fetch_dynamic_options).
-            # This path is synchronous, so it offers what was last read, or the
-            # snapshot kept on disk for when the server is not answering.
-            if dropdown_config.get("dynamic") or dropdown_config.get("source_property"):
+        spec = self._hint_registry().get(ui_hint)
+        if spec is not None:
+            if spec.dynamic:
                 return [o["id"] for o in self._dynamic_option_items(ui_hint)]
-
-            # Static options
-            if "options" in dropdown_config:
-                return dropdown_config["options"]
-
-            # The keys of a JSON file in Library/ - e.g. a plate catalog whose
-            # entries are the values a parameter accepts.
-            if dropdown_config.get("json_keys_file"):
-                return self._json_keys(dropdown_config["json_keys_file"])
-            
-            # Read from folder
-            if "folder" in dropdown_config:
-                folder_path = self.base_dir / dropdown_config["folder"]
-                extension = dropdown_config.get("file_extension", "")
-                
-                if folder_path.exists():
-                    options = []
-                    for item in folder_path.iterdir():
-                        if item.is_file():
-                            if not extension or item.suffix == extension:
-                                options.append(item.stem)
-                    return sorted(options)
-        
-        # There used to be a table here mapping "recipe", "analysis",
-        # "hal_config" and "liquid_class" to folders, for servers that did not
-        # say. Every server that uses them declares them in its catalog, and a
-        # table in the core is exactly the per-instrument knowledge the core is
-        # not supposed to hold.
+            return spec.resolve(self.base_dir)
 
         # Location: discovered instruments
         if ui_hint == "location":
@@ -519,6 +444,24 @@ class LabCore:
 
         return []
     
+    def _hint_registry(self) -> "HintRegistry":
+        """Which hint comes from where, rebuilt when the instrument set changes.
+
+        Not cached across discovery: an instrument appearing brings its pickers
+        with it, which is the whole point of a server declaring them.
+        """
+        signature = tuple(sorted(self._instruments))
+        if self._hint_registry_cache is None or self._hint_registry_signature != signature:
+            self._hint_registry_cache = build_hint_registry(
+                {i.id: i.catalog.library_types for i in self._instruments.values()},
+                (get_settings(self.base_dir).raw.get("library_types") or {}).get("declare"),
+                self._ui_dropdowns,
+            )
+            self._hint_registry_signature = signature
+            for problem in self._hint_registry_cache.problems:
+                logger.warning("dropdown declaration: %s", problem)
+        return self._hint_registry_cache
+
     def _hal_dir(self) -> Path:
         return get_settings(self.base_dir).hardware_config_dir
 

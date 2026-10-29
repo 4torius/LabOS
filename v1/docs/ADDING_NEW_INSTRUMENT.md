@@ -171,7 +171,7 @@ written. Every section is optional.
 | Section | What it does |
 |---|---|
 | `display` | Bootstrap icon (`bi-…`) and colour (`primary`, `success`, `warning`, `info`, `danger`, `secondary`, `dark`) for the dashboard card and the toolbox block |
-| `library_types` | a parameter named in `parameter_names` becomes a picker over that folder. Instead of `folder`: `values` (+ `value_labels`) for a fixed list, `json_keys_file` for the keys of a Library JSON file, or `source_property` (+ `value_field`, `label_field`, and `folder` for the offline snapshot) for a list the server itself holds |
+| `library_types` | a parameter named in `parameter_names` becomes a picker over that folder. Several sources can be unioned with a `sources` list, and besides `folder` a source may be `glob` + `field` (one value read out of every matching JSON file), `file` + `list_key`, or `file` + `items_key` + `key_template` — see `src/options.py`. Instead of `folder`: `values` (+ `value_labels`) for a fixed list, `json_keys_file` for the keys of a Library JSON file, or `source_property` (+ `value_field`, `label_field`, and `folder` for the offline snapshot) for a list the server itself holds |
 | `result_types` | a folder under `Results/` the instrument writes. Created when the server starts, created again by the orchestrator at discovery (which is what matters for a server on another computer), and listed as a tab on the Results page |
 | `parameter_defaults` | parameters a workflow step may leave out; dispatch fills them in. The step's own value always wins |
 | `resources` | what each command physically occupies, so two steps that would collide never run together. Its own section below — **read it before you write it** |

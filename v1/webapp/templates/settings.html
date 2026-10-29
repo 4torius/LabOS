@@ -219,7 +219,7 @@
         </li>
         <li class="nav-item">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-resources" type="button"
-                    onclick="loadResources()">
+                    onclick="loadResources(); loadDropdownSources()">
                 <i class="bi bi-shield-check me-1"></i> Resources
             </button>
         </li>
@@ -691,7 +691,7 @@
             <div class="card settings-card mb-3">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span><i class="bi bi-shield-check"></i> What must not run at the same time</span>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="loadResources()">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="loadResources(); loadDropdownSources()">
                         <i class="bi bi-arrow-clockwise"></i> Refresh
                     </button>
                 </div>
@@ -706,6 +706,22 @@
                     </p>
                     <div id="resources-alerts"></div>
                     <div id="resources-body" class="text-muted small">Loading…</div>
+                </div>
+            </div>
+            <div class="card settings-card mb-3">
+                <div class="card-header">
+                    <i class="bi bi-list-ul"></i> Where pickers get their values
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small">
+                        The same rule as above, for a different kind of fact: a server
+                        declares the files it reads, the deployment declares what no
+                        server can speak for, and the lab's own inventory — plates, tip
+                        racks, pipettes — belongs to the lab rather than to any one
+                        instrument. An empty dropdown looks the same whether a server
+                        never declared it or a folder is empty; this says which.
+                    </p>
+                    <div id="dropdowns-body" class="text-muted small">Loading…</div>
                 </div>
             </div>
         </div>
@@ -1444,6 +1460,52 @@ async function loadResources() {
                 <i class="bi bi-${data.ok ? 'check-circle' : 'x-circle'}"></i>
                 ${data.ok ? 'Every claim resolves.' : 'Some claims do not resolve — see above.'}
             </div>`;
+    } catch (e) {
+        body.innerHTML = `<span class="text-danger">Could not load: ${LabOS.escapeHtml(e.message)}</span>`;
+    }
+}
+
+async function loadDropdownSources() {
+    const body = document.getElementById('dropdowns-body');
+    if (!body) return;
+    try {
+        const data = await (await fetch('/api/dropdowns')).json();
+        const esc = LabOS.escapeHtml;
+        const hints = data.hints || {};
+        const names = Object.keys(hints).sort();
+        if (!names.length) {
+            body.innerHTML = '<span class="text-muted">No picker is declared.</span>';
+            return;
+        }
+        let rows = '';
+        names.forEach(name => {
+            const h = hints[name];
+            const origin = h.origin.startsWith('server:')
+                ? `<span class="badge bg-primary">${esc(h.origin.slice(7))}</span>`
+                : '<span class="badge bg-secondary">lab config</span>';
+            const where = h.dynamic
+                ? `<code>${esc(h.source_property)}</code> on the server`
+                : (h.sources || []).map(s =>
+                    `<code>${esc(s.glob || s.file || s.folder || s.json_keys_file ||
+                                 (s.values ? s.values.length + ' fixed values' : '?'))}</code>`
+                  ).join('<br>') || '<span class="text-muted">—</span>';
+            rows += `<tr>
+                <td><code>${esc(name)}</code><div class="text-muted">${esc(h.display_name)}</div></td>
+                <td>${origin}</td>
+                <td>${where}</td>
+                <td>${h.count === 0
+                        ? '<span class="badge bg-warning text-dark">empty</span>'
+                        : esc(String(h.count))}</td>
+            </tr>`;
+        });
+        body.innerHTML = `
+            <table class="table table-sm align-middle">
+                <thead><tr><th>Picker</th><th>Declared by</th><th>From</th><th>Values</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+            ${(data.problems || []).map(p =>
+                `<div class="alert alert-warning py-2 small mb-0">
+                    <i class="bi bi-exclamation-triangle"></i> ${esc(p)}</div>`).join('')}`;
     } catch (e) {
         body.innerHTML = `<span class="text-danger">Could not load: ${LabOS.escapeHtml(e.message)}</span>`;
     }

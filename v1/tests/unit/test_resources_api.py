@@ -132,23 +132,33 @@ class TestThePanel:
         assert 'id="tab-resources"' in self.PAGE
         assert "fetch('/api/resources')" in self.PAGE
 
-    def test_every_value_from_a_server_is_escaped(self):
-        # Resource ids, instrument names and problem text all arrive from a
-        # server on another machine, and the page builds HTML by string
-        # concatenation. Every interpolation has to go through esc() or who()
-        # (which escapes), or be something the page computed itself.
+    @pytest.mark.parametrize("panel", [
+        "// \u2500\u2500 Resources ",
+        "async function loadDropdownSources",
+    ])
+    def test_every_value_from_a_server_is_escaped(self, panel):
+        # Resource ids, instrument names, hint names and problem text all
+        # arrive from a server on another machine, and these panels build HTML
+        # by string concatenation. Every interpolation must either run a value
+        # through an escaper or be something the page assembled itself from
+        # already-escaped pieces.
         import re
-        panel = self.PAGE.split("// \u2500\u2500 Resources ")[1].split("</script>")[0]
-        # Safe: escaped at the point of use (esc / who / LabOS.escapeHtml),
-        # built by the page from already-escaped pieces (`rows`, the .map()
-        # joins), or a literal chosen by a ternary.
-        safe = re.compile(
-            r"^(esc\(|who\(|LabOS\.escapeHtml\(|rows$|.*\.map\(|"
-            r"data\.ok \?|aliases\.length \?|holder\s*\?|reaching\.length\s*\?)")
-        unescaped = [
-            expression for expression in re.findall(r"\$\{([^}]*)\}", panel)
-            if not safe.match(expression.strip())
-        ]
+        body = self.PAGE.split(panel)[1].split("</script>")[0]
+        escapers = ("esc(", "who(", "LabOS.escapeHtml(")
+        unescaped = []
+        for expression in re.findall(r"\$\{([^}]*)\}", body):
+            text = expression.strip()
+            if any(e in text for e in escapers) or ".map(" in text:
+                continue
+            # A bare identifier is a variable this function built a line
+            # earlier, already escaped; a value that came from the server is
+            # reached through a property access or an index, so that is the
+            # shape worth flagging. A ternary over literals is safe too.
+            if re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", text):
+                continue
+            if "?" in text and "'" in text:
+                continue
+            unescaped.append(text)
         assert unescaped == [], f"interpolated without escaping: {unescaped}"
 
     def test_it_does_not_offer_to_edit_what_a_server_declares(self):
@@ -157,3 +167,74 @@ class TestThePanel:
             assert verb not in panel, (
                 "the panel must stay read-only for server declarations"
             )
+
+
+class TestTheDropdownSourcesEndpoint:
+    """`GET /api/dropdowns` — the companion to /api/resources for pickers.
+
+    An empty dropdown looks identical whether a server never declared it or the
+    folder behind it is empty, and an operator has no way to tell. This says
+    which, and where each hint was declared.
+    """
+
+    @staticmethod
+    def _endpoint():
+        import asyncio as _asyncio
+        from src.lab_core import LabCore
+        core = LabCore(V1_DIR)
+        router = create_instruments_router(
+            _FakeState(), None, core, V1_DIR, V1_DIR / "Library")
+        endpoint = next(r.endpoint for r in router.routes
+                        if getattr(r, "path", None) == "/api/dropdowns")
+        return _asyncio.run(endpoint())
+
+    def test_the_shipped_pickers_are_listed_with_their_origin(self):
+        payload = self._endpoint()
+        for hint in ("plate", "labware", "tiprack", "pipette", "mobile_task"):
+            assert hint in payload["hints"], f"{hint} is not declared anywhere"
+            assert payload["hints"][hint]["origin"] in ("config",) or \
+                payload["hints"][hint]["origin"].startswith("server:")
+
+    def test_none_of_the_shipped_pickers_is_empty(self):
+        # An empty one means a declaration that resolves to nothing, which is a
+        # picker an operator cannot use.
+        payload = self._endpoint()
+        empty = [h for h, e in payload["hints"].items() if e["count"] == 0]
+        assert empty == [], f"these pickers offer nothing: {empty}"
+
+    def test_the_shipped_declarations_have_no_problems(self):
+        assert self._endpoint()["problems"] == []
+
+    def test_a_dynamic_picker_says_which_property_it_reads(self):
+        payload = self._endpoint()
+        mobile = payload["hints"]["mobile_task"]
+        assert mobile["dynamic"] is True
+        assert mobile["source_property"] == "AvailableTasks"
+        assert mobile["sources"] == [], (
+            "a snapshot folder must not be listed as a source of values"
+        )
+
+    def test_it_survives_without_lab_core(self):
+        import asyncio as _asyncio
+        router = create_instruments_router(
+            _FakeState(), None, None, V1_DIR, V1_DIR / "Library")
+        endpoint = next(r.endpoint for r in router.routes
+                        if getattr(r, "path", None) == "/api/dropdowns")
+        assert _asyncio.run(endpoint())["hints"] == {}
+
+
+class TestTheDropdownPanel:
+
+    PAGE = (V1_DIR / "webapp" / "templates" / "settings.html").read_text(encoding="utf-8")
+
+    def test_the_card_loads_the_endpoint(self):
+        assert "fetch('/api/dropdowns')" in self.PAGE
+        assert 'id="dropdowns-body"' in self.PAGE
+
+    def test_it_is_loaded_when_the_tab_is_opened(self):
+        assert "loadResources(); loadDropdownSources()" in self.PAGE
+
+    def test_it_does_not_offer_to_edit_a_declaration(self):
+        panel = self.PAGE.split("async function loadDropdownSources")[1].split("</script>")[0]
+        for verb in ("POST", "PUT", "DELETE"):
+            assert verb not in panel

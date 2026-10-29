@@ -101,30 +101,70 @@ error_handling:
   max_retries: 3
   enable_human_intervention: true
 ui_dropdowns:
-  # recipe, analysis, hal_config, liquid_class, mobile_task are declared by each
-  # server via LabOSLibraryProvider.LibraryCatalog — no static entries needed here.
+  # Hints that belong to no single instrument. This is their rightful home, not
+  # a fallback: `plate`, `tiprack` and `pipette` are properties of THIS LAB'S
+  # INVENTORY, and the Opentrons does not own the list of plate definitions the
+  # lab possesses. A server declares what a server can know (recipe, analysis,
+  # hal_config, liquid_class — see each server's library_catalog.json); this is
+  # what no server can speak for. See src/options.py.
+  #
+  # The four entries below used to be `if ui_hint == "..."` branches inside
+  # lab_core._get_options_for_hint, with the folder walks written out in
+  # Python, each sitting next to a config entry for the same hint — two sources
+  # that could disagree. They are data now.
 
-  # Labware catalogs use index.json with special parsing — kept here.
-  pipette:
-    folder: Library/Labware/Pipettes
-    file_extension: .json
   plate:
-    folder: Library/Labware/Plates
-    file_extension: .json
+    display_name: Plate
+    sources:
+    - glob: Library/Labware/Plates/*.plate.json
+      field: id
+    parameter_names: [PlateType, PlateID]
+
+  # Every load name this lab has a definition for. The dashboard used to offer
+  # six invented ones (tiprack_1000ul, wellplate_96, …) matching nothing
+  # Opentrons knows, so choosing any of them failed the run.
+  labware:
+    display_name: Labware
+    sources:
+    - glob: Library/Labware/Plates/*.plate.json
+      field: id
+    - glob: Library/Labware/Reservoirs/*.json
+      fields: [parameters.loadName, id]
+    - file: Library/Labware/TipRacks/index.json
+      list_key: load_names
+    parameter_names: [LoadName]
+
   tiprack:
-    folder: Library/Labware/TipRacks
-    file_extension: .json
-  # mobile_task is read from the robot's AvailableTasks property. A server can
-  # declare this in its own library_catalog.json; the mobile robot's server
-  # runs on another machine and does not yet, so the declaration lives here.
-  # The last list read is kept in `folder` for when the robot is off.
+    display_name: Tip rack
+    sources:
+    - file: Library/Labware/TipRacks/index.json
+      list_key: load_names
+
+  pipette:
+    display_name: Pipette
+    sources:
+    - file: Library/Labware/Pipettes/index.json
+      items_key: definitions
+      key_template: '{channel}/{model}'
+
+  # Read from the robot's AvailableTasks property. The robot's server could
+  # declare this itself; its catalog is a file inside a container whose source
+  # is not in this repository, so the declaration lives here for now.
+  #
+  # `folder` here is NOT a source of values — it is the snapshot of the last
+  # list read, used when the robot is off. For a dynamic hint the two are
+  # different roles that happen to share a key name, so it stays at the top
+  # level rather than going under `sources`: declaring it as a source made the
+  # folder's own file names (including `_options`) show up as pickable tasks.
   mobile_task:
+    display_name: Mobile task
     dynamic: true
     server: mobile
     source_property: AvailableTasks
     value_field: TaskId
     label_field: TaskName
     folder: Library/MobileTasks
+
 webapp:
   nodered_url: http://localhost:1880
   timeouts:

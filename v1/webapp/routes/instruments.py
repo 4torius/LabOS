@@ -71,6 +71,25 @@ def create_instruments_router(
             payload["held"] = ledger.held
         return payload
 
+    @router.get("/api/dropdowns")
+    async def get_dropdown_sources():
+        """Which picker gets its values from where.
+
+        The companion to /api/resources, for the other kind of declared fact.
+        An operator seeing an empty dropdown has no way to tell a server that
+        has not declared it from a folder that is empty; this says which.
+        Read-only for the same reason: a server is the authority on itself.
+        """
+        if lab_core is None:
+            return {"hints": {}, "problems": ["LabCore unavailable"]}
+        registry = lab_core._hint_registry()
+        payload = registry.to_dict()
+        for hint, spec in registry.hints.items():
+            entry = payload["hints"][hint]
+            entry["count"] = (len(lab_core._dynamic_option_items(hint))
+                              if spec.dynamic else len(spec.resolve(lab_core.base_dir)))
+        return payload
+
     # Devices
 
     @router.get("/api/devices")
