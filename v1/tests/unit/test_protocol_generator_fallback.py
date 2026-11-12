@@ -200,3 +200,20 @@ class TestLiquidFallback:
         assert not any(c[0] == "detect_liquid_presence" for c in ctx.pipette.calls)
         distribute_calls = [c[1] for c in ctx.pipette.calls if c[0] == "distribute"]
         assert distribute_calls[0]["source"] == "Source_1:A1"
+
+
+class TestPickUpTipRack:
+    def test_pick_up_tip_uses_the_rack_the_step_names(self, tmp_path):
+        """A PickUpTip with a TipRack must take its tip from THAT rack - a
+        bare pick_up_tip() lets Opentrons choose among every loaded rack,
+        which is how a 10 uL step ended up on a 1000 uL tip."""
+        ctx = FakeCtx()
+        recipe = _base_recipe([
+            {"Command": "PickUpTip", "PipetteMount": "left", "TipRack": "MyTips"},
+        ])
+        _run_recipe(recipe, ctx, tmp_path)
+
+        picks = [c for c in ctx.pipette.calls if c[0] == "pick_up_tip"]
+        assert len(picks) == 1
+        rack = picks[0][1][0]
+        assert isinstance(rack, FakeLabware) and rack.name == "MyTips"

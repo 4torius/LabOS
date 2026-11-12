@@ -531,6 +531,11 @@ def run(ctx: protocol_api.ProtocolContext):
             if "Well" in step:
                 rack = get_loc(step.get("TipRack"))
                 pip.pick_up_tip(rack[step["Well"]])
+            elif step.get("TipRack"):
+                # A bare pick_up_tip() takes the next tip from ANY rack in the
+                # pipette's tip_racks list, ignoring the size the recipe asked
+                # for - passing the rack picks its next free tip instead.
+                pip.pick_up_tip(get_loc(step["TipRack"]))
             else:
                 pip.pick_up_tip()
 
