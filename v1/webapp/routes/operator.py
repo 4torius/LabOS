@@ -19,6 +19,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 #: long enough to cross a LAN to the mobile robot.
 EMERGENCY_STOP_TIMEOUT_S = 3.0
 
+from src.emergency import plan_stop, verdict  # noqa: E402
+
 
 def create_operator_router(
     state,
@@ -179,18 +181,18 @@ def create_operator_router(
                 "message": "Emergency stop could NOT be delivered. Stop the instruments manually.",
             }
 
-        candidate_commands = ("EmergencyStop", "Stop", "Abort", "Cancel", "Halt")
+        # The run first: whatever is executing must not answer the stop by
+        # retrying the step that was just stopped, or by starting the next one.
+        from src.workflow import halt_running_workflows
+        running = halt_running_workflows()
+        if running:
+            state.add_log("warning", "Active workflow halted by emergency stop", "system")
 
-        targets = []
-        skipped_names = []
-        for instrument in lab_core.list_instruments():
-            command_ids = {cmd.id for cmd in instrument.commands}
-            cmd_to_run = next((cmd for cmd in candidate_commands if cmd in command_ids), None)
-            if cmd_to_run:
-                targets.append((instrument, cmd_to_run))
-            else:
-                skipped_names.append(instrument.name)
-                state.add_log("info", f"No emergency command exposed by {instrument.name}", "system")
+        plan = plan_stop(lab_core.list_instruments())
+        for name, why in plan.unreachable:
+            state.add_log("error", f"Emergency stop cannot reach {name}: {why}", "system")
+        for name, why in plan.not_applicable:
+            state.add_log("info", f"Nothing to stop on {name}: {why}", "system")
 
         async def _stop(instrument, command_id):
             try:
@@ -206,7 +208,12 @@ def create_operator_router(
                 return instrument.name, command_id, True, None
             return instrument.name, command_id, False, getattr(result, "error", None) or "unknown error"
 
-        outcomes = await asyncio.gather(*(_stop(i, c) for i, c in targets))
+        outcomes = await asyncio.gather(*(_stop(i, c) for i, c in plan.targets))
+
+        # Only now stop waiting on the steps in flight: the instruments have
+        # been told first.
+        for executor in running:
+            executor.cancel_inflight()
 
         successful = 0
         failures = []
@@ -218,32 +225,9 @@ def create_operator_router(
                 failures.append(f"{name}: {error}")
                 state.add_log("error", f"Emergency command failed on {name}: {error}", "system")
 
-        attempted = len(targets)
-        if attempted and successful == attempted:
-            status = "stopped"
-            message = f"All {attempted} instrument(s) acknowledged the stop."
-        elif successful:
-            status = "partial"
-            message = (f"{successful} of {attempted} instrument(s) acknowledged the stop. "
-                       "VERIFY THE OTHERS MANUALLY.")
-        elif attempted:
-            status = "failed"
-            message = "No instrument acknowledged the stop. Use the hardware emergency stop."
-        else:
-            # Instruments may be present but expose no stop command at all.
-            status = "failed"
-            message = ("No discovered instrument exposes a stop command — nothing was stopped. "
-                       "Use the hardware emergency stop.")
-
-        return {
-            "status": status,
-            "attempted": attempted,
-            "successful": successful,
-            "skipped": len(skipped_names),
-            "skipped_instruments": skipped_names,
-            "failures": failures,
-            "message": message,
-        }
+        report = verdict(plan, successful, failures)
+        report["workflow_halted"] = bool(running)
+        return report
 
     return router
 

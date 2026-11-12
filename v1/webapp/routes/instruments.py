@@ -49,15 +49,16 @@ def create_instruments_router(
         disagree about a safety rule is the failure the model avoids. The
         config layers are edited through /api/config.
         """
-        from src.resources import ResourceDeclaration, build_topology
+        from src.resources import topology_of
         from src.settings import get_settings
 
         instruments = lab_core.list_instruments() if lab_core else []
-        declarations = {
-            inst.id: (getattr(inst.catalog, "resources", None) or ResourceDeclaration())
-            for inst in instruments
-        }
-        topology = build_topology(declarations, get_settings(BASE_DIR).resources)
+        # The same function the executor builds its topology with, keyed the
+        # same way, so this page cannot show an exclusion that is not applied.
+        topology = topology_of(
+            ((inst.id, inst.name, getattr(inst.catalog, "resources", None))
+             for inst in instruments),
+            get_settings(BASE_DIR).resources)
 
         payload = topology.to_dict()
         # Which instrument a resource belongs to is more useful in the UI as a
@@ -65,10 +66,23 @@ def create_instruments_router(
         names = {inst.id: inst.name for inst in instruments}
         payload["instrument_names"] = names
         payload["held"] = {}
+        # Positions a plate was left in by a step that has already finished:
+        # resource -> the step that left it there.
+        payload["kept"] = {}
+        # A run started from the web interface has an executor of its own, not
+        # LabCore's, so asking LabCore's alone showed nothing held during
+        # exactly the runs an operator is watching.
+        from src.workflow import running_ledgers
         executor = getattr(lab_core, "_workflow_executor", None) if lab_core else None
-        ledger = getattr(executor, "_ledger", None)
-        if ledger is not None:
-            payload["held"] = ledger.held
+        ledgers = list(running_ledgers())
+        own = getattr(executor, "_ledger", None)
+        if own is not None and own not in ledgers:
+            ledgers.append(own)
+        for ledger in ledgers:
+            payload["held"].update(ledger.held)
+            kept = getattr(ledger, "kept", None)
+            if callable(kept):
+                payload["kept"].update(kept())
         return payload
 
     @router.get("/api/dropdowns")

@@ -1,5 +1,5 @@
 {
-  "_comment": "Everything the orchestrator needs to know about this instrument beyond its commands. Delete the sections you do not need. library_types: files it reads (a parameter becomes a picker). result_types: folders under Results/ it writes (created when the server starts, listed on the Results page). parameter_defaults: parameters a workflow may omit. traceability: commands that prepare (prepares_plate) or measure (measures_plate) a plate. resources: what each command physically occupies, so the orchestrator knows what must not run at the same time — READ docs/ADDING_NEW_INSTRUMENT.md before editing that one. See v1/src/catalog.py and v1/src/resources.py.",
+  "_comment": "Everything the orchestrator needs to know about this instrument beyond its commands. Delete the sections you do not need. library_types: files it reads (a parameter becomes a picker). result_types: folders under Results/ it writes (created when the server starts, listed on the Results page). parameter_defaults: parameters a workflow may omit. traceability: commands that prepare (prepares_plate) or measure (measures_plate) a plate. resources: what each command physically occupies, so the orchestrator knows what must not run at the same time — READ docs/ADDING_NEW_INSTRUMENT.md before editing that one. emergency_stop: the command an emergency stop sends this instrument - name it, or the stop reports your instrument as one it could not reach (use {\"not_applicable\": \"why\"} only if there is truly nothing to stop). See v1/src/catalog.py and v1/src/resources.py.",
   "display": {
     "icon": "bi-cpu",
     "color": "secondary"
@@ -28,7 +28,7 @@
   "parameter_defaults": {},
   "traceability": {},
   "resources": {
-    "_comment": "Delete this section and the orchestrator serialises every step of this instrument against every other instrument that also declares nothing — safe, but nothing of yours will ever overlap with anything. Declaring is how concurrency is earned. provides: the physical things THIS instrument owns. Give an id to anything another instrument can reach into (a deck, a tray, a carousel) so a robot can claim it by name; keep instrument:<key> as the instrument itself. commands: what each command occupies while it runs. Two steps whose claims share an id never run together. control: true marks a command that occupies NOTHING and must run while the instrument is busy — a stop, a pause, a status read. Get this wrong and your abort will queue behind the run it is meant to abort. holds: for a resource that stays occupied AFTER the command finishes, until another command releases it — a plate left in a tray. Only add one if a later step always releases it; validation refuses a workflow where nothing does. by_parameter: use it when what a command occupies depends on an argument rather than on the command (one ExecuteTask that goes to different stations). Full guide and worked examples: docs/ADDING_NEW_INSTRUMENT.md.",
+    "_comment": "Delete this section and the orchestrator serialises every step of this instrument against every other instrument that also declares nothing — safe, but nothing of yours will ever overlap with anything. Declaring is how concurrency is earned. provides: the physical things THIS instrument owns. Give an id to anything another instrument can reach into (a deck, a tray, a carousel) so a robot can claim it by name; keep instrument:<key> as the instrument itself. commands: what each command occupies while it runs. Two steps whose claims share an id never run together. control: true marks a command that occupies NOTHING and must run while the instrument is busy — a stop, a pause, a status read. Get this wrong and your abort will queue behind the run it is meant to abort. holds: for a resource that stays occupied AFTER the command finishes, until another command OF THIS SERVER releases it — a plate left in a tray. A step that needs it meanwhile waits; validation refuses a workflow in which nothing could ever release it first. When the plate is put in and taken out by somebody else (a robot), that is where it is declared instead, with acquires / releases. exhaustive: true on a command says its by_parameter tables list every value, so an unlisted one is refused instead of being believed to occupy nothing. by_parameter: use it when what a command occupies depends on an argument rather than on the command (one ExecuteTask that goes to different stations). Full guide and worked examples: docs/ADDING_NEW_INSTRUMENT.md.",
     "provides": [
       "instrument:newinstrument",
       "tray:newinstrument"
@@ -61,5 +61,8 @@
         "control": true
       }
     }
+  },
+  "emergency_stop": {
+    "command": "Stop"
   }
 }

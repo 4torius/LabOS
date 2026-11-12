@@ -74,11 +74,28 @@ def instrument_resource(instrument_id: str) -> str:
 
 @dataclass(frozen=True)
 class CommandResources:
-    """The resources one command claims, possibly depending on a parameter.
+    """The resources one command occupies, possibly depending on a parameter.
+
+    Three different things, kept apart because they end at different moments:
+
+    * `claims` - occupied **while the command runs** and given back when it
+      returns. The arm inside the deck during `place_on_OT`.
+    * `acquires` - taken when the command runs and **kept after it returns**,
+      until some later step releases it. The plate sitting in the reader once
+      the robot has put it there.
+    * `releases` - what this command gives back when it succeeds. The robot
+      picking that plate up again.
 
     `by_parameter` carries the robot case: every transport is `ExecuteTask`, and
-    what it occupies depends on *which task* — so the indirection sits where the
-    variability actually is.
+    what it occupies depends on *which task* - so the indirection sits where the
+    variability actually is. A value maps either to a plain list (claims) or to
+    an object with `claims` / `acquires` / `releases`.
+
+    `exhaustive` says the `by_parameter` tables list **every** value there is.
+    A step whose value is not listed is then refused at validation instead of
+    being believed to occupy nothing: a task taught on the robot after the
+    declaration was written is exactly the case where "not listed" does not
+    mean "harmless".
 
     `control` marks a command that occupies nothing and must run *while* the
     instrument is busy: a stop, a pause, a status read. Without it the implicit
@@ -92,56 +109,120 @@ class CommandResources:
     claims: Tuple[str, ...] = ()
     by_parameter: Mapping[str, Mapping[str, Tuple[str, ...]]] = field(default_factory=dict)
     control: bool = False
-    #: resource id -> the command that gives it back. A resource in here is
-    #: taken when this command runs and kept *after* it finishes, until a step
-    #: running the named command releases it. The plate sitting in the reader
-    #: between PlateIn and PlateOut: occupied for the duration of three steps,
-    #: held by none of them.
+    #: Legacy spelling of acquire/release: resource id -> the command **of the
+    #: same server** that gives it back. Parsed into `acquires` here and
+    #: `releases` on the named command; kept so the declaration can be shown
+    #: as it was written.
     holds: Mapping[str, str] = field(default_factory=dict)
+    acquires: Tuple[str, ...] = ()
+    releases: Tuple[str, ...] = ()
+    acquires_by_parameter: Mapping[str, Mapping[str, Tuple[str, ...]]] = field(default_factory=dict)
+    releases_by_parameter: Mapping[str, Mapping[str, Tuple[str, ...]]] = field(default_factory=dict)
+    exhaustive: bool = False
 
-    def resolve(self, parameters: Optional[Mapping[str, Any]] = None) -> FrozenSet[str]:
-        """Every resource this command occupies for the given parameters."""
-        found: Set[str] = set(self.claims)
+    @staticmethod
+    def _value_of(parameter: str, params: Mapping[str, Any]) -> Any:
+        value = params.get(parameter)
+        if value is None:
+            # Case-insensitive second try: workflow JSON is written by hand
+            # and `taskname` for `TaskName` is a common slip.
+            lowered = {str(k).lower(): v for k, v in params.items()}
+            value = lowered.get(parameter.lower())
+        return value
+
+    def _resolve(self, base: Tuple[str, ...],
+                 table: Mapping[str, Mapping[str, Tuple[str, ...]]],
+                 parameters: Optional[Mapping[str, Any]]) -> FrozenSet[str]:
+        found: Set[str] = set(base)
         params = parameters or {}
-        for parameter, mapping in self.by_parameter.items():
-            value = params.get(parameter)
-            if value is None:
-                # Case-insensitive second try: workflow JSON is written by hand
-                # and `taskname` for `TaskName` is a common slip.
-                lowered = {str(k).lower(): v for k, v in params.items()}
-                value = lowered.get(parameter.lower())
+        for parameter, mapping in table.items():
+            value = self._value_of(parameter, params)
             if value is None:
                 continue
             found.update(mapping.get(str(value), ()))
         return frozenset(found)
 
+    def resolve(self, parameters: Optional[Mapping[str, Any]] = None) -> FrozenSet[str]:
+        """What this command occupies while it runs, for the given parameters."""
+        return self._resolve(self.claims, self.by_parameter, parameters)
+
+    def resolve_acquires(self, parameters: Optional[Mapping[str, Any]] = None) -> FrozenSet[str]:
+        """What this command keeps after it returns."""
+        return self._resolve(self.acquires, self.acquires_by_parameter, parameters)
+
+    def resolve_releases(self, parameters: Optional[Mapping[str, Any]] = None) -> FrozenSet[str]:
+        """What this command gives back when it succeeds."""
+        return self._resolve(self.releases, self.releases_by_parameter, parameters)
+
+    def parameter_tables(self) -> Dict[str, Set[str]]:
+        """parameter -> every value any of the three tables lists for it."""
+        listed: Dict[str, Set[str]] = {}
+        for table in (self.by_parameter, self.acquires_by_parameter, self.releases_by_parameter):
+            for parameter, mapping in table.items():
+                listed.setdefault(parameter, set()).update(mapping)
+        return listed
+
+    def unlisted(self, parameters: Optional[Mapping[str, Any]] = None) -> List[Tuple[str, str]]:
+        """(parameter, value) pairs an `exhaustive` declaration does not cover.
+
+        Empty unless the command is `exhaustive`. A step that gives none of the
+        declared parameters is reported too: the declaration then says nothing
+        about it, and "says nothing" must not read as "occupies nothing".
+        """
+        if not self.exhaustive:
+            return []
+        params = parameters or {}
+        given = {
+            parameter: self._value_of(parameter, params)
+            for parameter in self.parameter_tables()
+        }
+        given = {k: v for k, v in given.items() if v is not None and str(v) != ""}
+        tables = self.parameter_tables()
+        if tables and not given:
+            # None of the parameters the declaration is written in was given
+            # at all. Whatever this step does, the declaration does not say.
+            return [("/".join(sorted(tables)), "(not given)")]
+        # Two spellings of one fact (TaskId and TaskName) are both declared;
+        # a step is covered as soon as one of the values it gives is listed.
+        if any(str(value) in tables[parameter] for parameter, value in given.items()):
+            return []
+        return [(parameter, str(value)) for parameter, value in given.items()]
+
     def held_resources(self) -> FrozenSet[str]:
-        return frozenset(self.holds)
+        return frozenset(self.holds) | frozenset(self.acquires)
 
     def resolve_all(self) -> FrozenSet[str]:
-        """Every resource this command could claim, for any parameter value.
+        """Every resource this command could touch, for any parameter value.
 
         Distinct from `resolve`, which answers what one *step* occupies. The
         executor needs `resolve`; the discovery cross-check and the Settings
         panel need this one, because a claim that only appears for one task
         value still has to name a resource somebody provides.
         """
-        found: Set[str] = set(self.claims)
-        for mapping in self.by_parameter.values():
-            for ids in mapping.values():
-                found.update(ids)
+        found: Set[str] = set(self.claims) | set(self.acquires) | set(self.releases)
+        for table in (self.by_parameter, self.acquires_by_parameter, self.releases_by_parameter):
+            for mapping in table.values():
+                for ids in mapping.values():
+                    found.update(ids)
         found.update(self.holds)
         return frozenset(found)
 
     def to_dict(self) -> Dict[str, Any]:
+        def _table(table):
+            return {
+                parameter: {value: list(ids) for value, ids in mapping.items()}
+                for parameter, mapping in table.items()
+            }
         return {
             "claims": list(self.claims),
-            "by_parameter": {
-                parameter: {value: list(ids) for value, ids in mapping.items()}
-                for parameter, mapping in self.by_parameter.items()
-            },
+            "by_parameter": _table(self.by_parameter),
             "control": self.control,
             "holds": dict(self.holds),
+            "acquires": list(self.acquires),
+            "releases": list(self.releases),
+            "acquires_by_parameter": _table(self.acquires_by_parameter),
+            "releases_by_parameter": _table(self.releases_by_parameter),
+            "exhaustive": self.exhaustive,
         }
 
 
@@ -161,10 +242,7 @@ class ResourceDeclaration:
         """Every resource id mentioned anywhere, for cross-checking."""
         found: Set[str] = set()
         for command in self.commands.values():
-            found.update(command.claims)
-            for mapping in command.by_parameter.values():
-                for ids in mapping.values():
-                    found.update(ids)
+            found.update(command.resolve_all())
         return frozenset(found)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -219,72 +297,124 @@ def parse_declaration(raw: Any, source: str = "") -> ResourceDeclaration:
         declaration.problems.append(f"{label}resources.commands must be an object")
         return declaration
 
+    #: command -> resources it releases because another command `holds` them
+    released_by: Dict[str, List[str]] = {}
+    parsed: Dict[str, Dict[str, Any]] = {}
+
     for name, spec in commands.items():
         if not isinstance(spec, Mapping):
             declaration.problems.append(
                 f"{label}resources.commands.{name} must be an object")
             continue
-        claims = _resource_ids(
-            spec.get("claims"), label, f"resources.commands.{name}.claims",
-            declaration.problems)
+        where = f"resources.commands.{name}"
+        claims = _resource_ids(spec.get("claims"), label, f"{where}.claims",
+                               declaration.problems)
+        acquires = _resource_ids(spec.get("acquires"), label, f"{where}.acquires",
+                                 declaration.problems)
+        releases = _resource_ids(spec.get("releases"), label, f"{where}.releases",
+                                 declaration.problems)
 
-        by_parameter: Dict[str, Dict[str, Tuple[str, ...]]] = {}
+        tables: Dict[str, Dict[str, Dict[str, Tuple[str, ...]]]] = {
+            "claims": {}, "acquires": {}, "releases": {}}
         raw_by_parameter = spec.get("by_parameter") or {}
         if not isinstance(raw_by_parameter, Mapping):
-            declaration.problems.append(
-                f"{label}resources.commands.{name}.by_parameter must be an object")
+            declaration.problems.append(f"{label}{where}.by_parameter must be an object")
             raw_by_parameter = {}
         for parameter, mapping in raw_by_parameter.items():
             if not isinstance(mapping, Mapping):
                 declaration.problems.append(
-                    f"{label}resources.commands.{name}.by_parameter.{parameter} "
+                    f"{label}{where}.by_parameter.{parameter} "
                     "must map a parameter value to a list of resource ids")
                 continue
-            values: Dict[str, Tuple[str, ...]] = {}
-            for value, ids in mapping.items():
-                resolved = _resource_ids(
-                    ids, label,
-                    f"resources.commands.{name}.by_parameter.{parameter}.{value}",
-                    declaration.problems)
-                if resolved:
-                    values[str(value)] = resolved
-            if values:
-                by_parameter[str(parameter)] = values
+            for value, entry in mapping.items():
+                here = f"{where}.by_parameter.{parameter}.{value}"
+                # A plain list is the claims; an object says which of the
+                # three it means. An empty entry is still an entry: it is how
+                # a task is declared to occupy nothing beyond the robot, which
+                # an `exhaustive` declaration has to be able to say.
+                if isinstance(entry, Mapping):
+                    unknown = sorted(set(entry) - {"claims", "acquires", "releases"})
+                    if unknown:
+                        declaration.problems.append(
+                            f"{label}{here} has unknown key(s) {', '.join(map(str, unknown))} "
+                            "(expected claims, acquires, releases)")
+                    parts = {kind: _resource_ids(entry.get(kind), label, f"{here}.{kind}",
+                                                 declaration.problems)
+                             for kind in ("claims", "acquires", "releases")}
+                else:
+                    parts = {"claims": _resource_ids(entry, label, here, declaration.problems),
+                             "acquires": (), "releases": ()}
+                tables["claims"].setdefault(str(parameter), {})[str(value)] = parts["claims"]
+                for kind in ("acquires", "releases"):
+                    if parts[kind]:
+                        tables[kind].setdefault(str(parameter), {})[str(value)] = parts[kind]
 
         holds: Dict[str, str] = {}
         raw_holds = spec.get("holds") or {}
         if not isinstance(raw_holds, Mapping):
             declaration.problems.append(
-                f"{label}resources.commands.{name}.holds must map a resource id "
+                f"{label}{where}.holds must map a resource id "
                 "to the command that releases it")
             raw_holds = {}
         for resource, releaser in raw_holds.items():
             if not isinstance(resource, str) or not RESOURCE_RE.match(resource.strip()):
                 declaration.problems.append(
-                    f"{label}resources.commands.{name}.holds has an unusable "
+                    f"{label}{where}.holds has an unusable "
                     f"resource id {resource!r}")
                 continue
             if not isinstance(releaser, str) or not releaser.strip():
                 declaration.problems.append(
-                    f"{label}resources.commands.{name}.holds.{resource} must name "
+                    f"{label}{where}.holds.{resource} must name "
                     "the command that releases it")
                 continue
             if releaser.strip() == str(name):
                 declaration.problems.append(
-                    f"{label}resources.commands.{name}.holds.{resource} is released "
+                    f"{label}{where}.holds.{resource} is released "
                     "by itself, which would never free it")
                 continue
             holds[resource.strip()] = releaser.strip()
 
         control = bool(spec.get("control", False))
-        if control and (claims or by_parameter or holds):
+        occupies = (claims or acquires or releases or holds
+                    or any(ids for table in tables.values()
+                           for mapping in table.values() for ids in mapping.values()))
+        if control and occupies:
             declaration.problems.append(
-                f"{label}resources.commands.{name} is marked control but also "
+                f"{label}{where} is marked control but also "
                 "claims or holds resources; a control command occupies nothing")
-            claims, by_parameter, holds = (), {}, {}
+            claims, acquires, releases, holds = (), (), (), {}
+            tables = {"claims": {}, "acquires": {}, "releases": {}}
 
-        declaration.commands[str(name)] = CommandResources(
-            claims=claims, by_parameter=by_parameter, control=control, holds=holds)
+        # `holds: {X: Cmd}` is "this command acquires X, and Cmd on this same
+        # server releases it". Scoping the releaser to the declaring server is
+        # the point: matched by name alone, an UnloadPlate on a second reader
+        # would free the first reader's tray.
+        for resource, releaser in holds.items():
+            if resource not in acquires:
+                acquires = acquires + (resource,)
+            released_by.setdefault(releaser, []).append(resource)
+
+        parsed[str(name)] = dict(
+            claims=claims, by_parameter=tables["claims"], control=control, holds=holds,
+            acquires=acquires, releases=releases,
+            acquires_by_parameter=tables["acquires"],
+            releases_by_parameter=tables["releases"],
+            exhaustive=bool(spec.get("exhaustive", False)),
+        )
+
+    for releaser, resources in released_by.items():
+        target = parsed.setdefault(releaser, dict(
+            claims=(), by_parameter={}, control=False, holds={}, acquires=(), releases=(),
+            acquires_by_parameter={}, releases_by_parameter={}, exhaustive=False))
+        if target["control"]:
+            declaration.problems.append(
+                f"{label}resources.commands.{releaser} is marked control but is named "
+                "as the command that releases a held resource")
+            continue
+        target["releases"] = tuple(dict.fromkeys(tuple(target["releases"]) + tuple(resources)))
+
+    for name, fields in parsed.items():
+        declaration.commands[name] = CommandResources(**fields)
 
     return declaration
 
@@ -420,6 +550,33 @@ class ResourceTopology:
             found.update(self._resolve_alias(r) for r in spec.resolve(parameters))
         return frozenset(found)
 
+    def _spec(self, instrument_id: str, command: str) -> Optional[CommandResources]:
+        declaration = self.declarations.get(instrument_id)
+        spec = declaration.commands.get(command) if declaration is not None else None
+        return None if (spec is None or spec.control) else spec
+
+    def acquires_for(self, instrument_id: str, command: str,
+                     parameters: Optional[Mapping[str, Any]] = None) -> FrozenSet[str]:
+        """What a step keeps after it has finished, until something releases it."""
+        spec = self._spec(instrument_id, command)
+        if spec is None:
+            return frozenset()
+        return frozenset(self._resolve_alias(r) for r in spec.resolve_acquires(parameters))
+
+    def releases_for(self, instrument_id: str, command: str,
+                     parameters: Optional[Mapping[str, Any]] = None) -> FrozenSet[str]:
+        """What a step gives back when it succeeds."""
+        spec = self._spec(instrument_id, command)
+        if spec is None:
+            return frozenset()
+        return frozenset(self._resolve_alias(r) for r in spec.resolve_releases(parameters))
+
+    def unlisted_for(self, instrument_id: str, command: str,
+                     parameters: Optional[Mapping[str, Any]] = None) -> List[Tuple[str, str]]:
+        """Parameter values an exhaustive declaration does not cover."""
+        spec = self._spec(instrument_id, command)
+        return spec.unlisted(parameters) if spec is not None else []
+
     def conflicts(self, left: Iterable[str], right: Iterable[str]) -> bool:
         """Whether two steps contend. Today: a shared resource.
 
@@ -463,22 +620,58 @@ class ResourceTopology:
         return self.aliases.get(bare, self.aliases.get(resource, resource))
 
 
+def _plain(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(text or "").lower())
+
+
 def build_topology(declarations: Mapping[str, ResourceDeclaration],
-                   config: Optional[ResourceConfig] = None) -> ResourceTopology:
+                   config: Optional[ResourceConfig] = None,
+                   names: Optional[Mapping[str, str]] = None) -> ResourceTopology:
     """Merge the three layers into one resolved topology.
 
     `declarations` maps instrument id to what that server declared (empty
     `ResourceDeclaration` for a server that said nothing). Resolution order:
     the server wins for what it declares, the config supplements where the
     server is silent, aliases apply to claims afterwards.
+
+    The instrument id is the **registry key** - `mobile`, `tecan` - which is
+    what a workflow writes and what `lab_config.yaml` uses under `servers:`.
+    It is not the name the server announces (`GoFaGo Mobile Robot`): keyed on
+    that, `resources.declare.mobile` matched nothing at the bench and the
+    robot's claims silently never applied. `names` (id -> announced name) lets
+    a `declare` entry written against the announced name still find its
+    instrument, and a `declare` entry that finds none is now said out loud.
     """
     config = config or ResourceConfig()
+    names = dict(names or {})
     topology = ResourceTopology(aliases=dict(config.aliases))
     topology.problems.extend(config.problems)
 
+    # Which instrument each `declare` entry speaks for: by id, then by the
+    # announced name, then by either with punctuation and case ignored.
+    supplements: Dict[str, ResourceDeclaration] = {}
+    for key, supplement in config.declare.items():
+        target = None
+        if key in declarations:
+            target = key
+        else:
+            by_name = [i for i in declarations if names.get(i) == key]
+            loose = [i for i in declarations
+                     if _plain(key) in (_plain(i), _plain(names.get(i, "")))]
+            candidates = by_name or loose
+            if len(candidates) == 1:
+                target = candidates[0]
+        if target is None:
+            known = ", ".join(sorted(declarations)) or "none"
+            topology.problems.append(
+                f"resources.declare.{key} matches no discovered instrument "
+                f"(known: {known}) - what it declares is NOT applied")
+            continue
+        supplements[target] = supplement
+
     merged: Dict[str, ResourceDeclaration] = {}
     for instrument_id, declared in declarations.items():
-        supplement = config.declare.get(instrument_id)
+        supplement = supplements.get(instrument_id)
         if declared.declared:
             merged[instrument_id] = declared
             if supplement is not None:
@@ -545,29 +738,71 @@ def build_topology(declarations: Mapping[str, ResourceDeclaration],
     return topology
 
 
+def topology_of(instruments: Iterable[Tuple[str, str, Optional[ResourceDeclaration]]],
+                config: Optional[ResourceConfig] = None) -> ResourceTopology:
+    """The topology of a set of discovered instruments.
+
+    `instruments` yields `(id, announced name, declaration)`. This is the one
+    way the executor, the API and the CLI build a topology, so the Settings
+    panel cannot show an exclusion the executor does not apply - which is what
+    happened while each of them keyed it differently.
+    """
+    declarations: Dict[str, ResourceDeclaration] = {}
+    names: Dict[str, str] = {}
+    for instrument_id, name, declaration in instruments:
+        declarations[str(instrument_id)] = declaration or ResourceDeclaration()
+        names[str(instrument_id)] = str(name or instrument_id)
+    return build_topology(declarations, config, names=names)
+
+
 # ── Runtime: who holds what ───────────────────────────────────────────────────
 
+class ResourceDeadlock(RuntimeError):
+    """Every step still alive is waiting for a resource none of them will free."""
+
+
+class ResourceWaitInterrupted(RuntimeError):
+    """A wait for resources was called off: the run is being aborted."""
+
+
 class ResourceLedger:
-    """Grants and releases resource claims for the duration of a step.
+    """Grants and releases resource claims.
 
     A step acquires **all** of its claims as one atomic set and releases them
     when it finishes, so it never holds one while waiting for another and a
-    cycle cannot form: step-scoped claims cannot deadlock, whatever the
-    workflow looks like. That property is why claims held *across* steps
-    (`holds` / `release_on`, for the plate sitting in the reader between
-    `PlateIn` and `PlateOut`) are a later phase rather than part of this one.
+    cycle cannot form among step-scoped claims.
 
-    Fair by arrival: waiters are woken in the order they asked, so a step
-    needing a busy resource cannot be starved by a stream of steps needing a
-    free one.
+    A resource a command *acquires* outlives its step: `persist` moves it from
+    the step to the ledger's own keeping, and it stays there until a step that
+    declares it in `takeover` (a step that *releases* it) takes it back.
+    Resources kept that way **can** deadlock - two plates each waiting for the
+    position the other is in - so the ledger can be given `all_blocked`, a
+    callable answering "is every live step now waiting here?". When it says
+    yes, every waiter fails with `ResourceDeadlock` naming what it was waiting
+    for, instead of the run hanging for ever with nothing on screen.
+
+    Fair by arrival: waiters are woken in the order they asked.
     """
+
+    #: Prefix of the holder name a kept resource is filed under.
+    KEPT = "kept:"
 
     def __init__(self, max_concurrency: Optional[int] = None):
         self._held: Dict[str, str] = {}          # resource id -> holder
         self._holders: Dict[str, FrozenSet[str]] = {}   # holder -> its resources
-        self._waiters: List[asyncio.Future] = []
+        #: Holders that are running steps. Only these count against
+        #: `max_concurrency`: a kept resource is not a step in progress, and
+        #: counting it made a cap of 1 unsatisfiable the moment anything was
+        #: kept - the run stopped for ever after the first hold.
+        self._steps: Set[str] = set()
+        #: kept resource -> who left it there, for messages
+        self._origin: Dict[str, str] = {}
+        self._waiters: List[Tuple[asyncio.Future, str, FrozenSet[str], FrozenSet[str]]] = []
         self._lock = asyncio.Lock()
         self._max_concurrency = max_concurrency if (max_concurrency or 0) > 0 else None
+        self.all_blocked: Optional[Any] = None
+
+    # ── introspection ────────────────────────────────────────────────────────
 
     @property
     def held(self) -> Dict[str, str]:
@@ -577,37 +812,160 @@ class ResourceLedger:
     def holder_of(self, resource: str) -> Optional[str]:
         return self._held.get(resource)
 
-    async def acquire(self, holder: str, claims: Iterable[str]) -> None:
-        """Block until every claim is free, then take them all."""
+    def holdings(self) -> Dict[str, FrozenSet[str]]:
+        """holder -> what it holds."""
+        return dict(self._holders)
+
+    def kept(self) -> Dict[str, str]:
+        """resource -> who left it occupied, for everything kept across steps."""
+        return {
+            resource: self._origin.get(resource, holder)
+            for resource, holder in self._held.items()
+            if holder not in self._steps
+        }
+
+    @property
+    def waiting(self) -> int:
+        return len(self._waiters)
+
+    # ── taking ───────────────────────────────────────────────────────────────
+
+    def _needed(self, wanted: FrozenSet[str], takeover: FrozenSet[str]) -> FrozenSet[str]:
+        """`wanted`, plus whatever in `takeover` is currently occupied.
+
+        A releasing step does not need the resource it releases to be busy -
+        picking up a plate the operator loaded by hand is fine - but if it *is*
+        occupied, the step has to be the one holding it while it works.
+        """
+        return wanted | frozenset(r for r in takeover if r in self._held)
+
+    def _blocked_by(self, holder: str, wanted: FrozenSet[str],
+                    takeover: FrozenSet[str]) -> List[str]:
+        blocking: List[str] = []
+        if (self._max_concurrency is not None and holder not in self._steps
+                and len(self._steps) >= self._max_concurrency):
+            blocking.append(f"the limit of {self._max_concurrency} step(s) at a time")
+        for resource in sorted(self._needed(wanted, takeover)):
+            current = self._held.get(resource)
+            if current is None or current == holder:
+                continue
+            if current not in self._steps and resource in takeover:
+                continue   # kept, and this step is one that releases it
+            if current in self._steps:
+                blocking.append(f"'{resource}' (in use by {current})")
+            else:
+                blocking.append(
+                    f"'{resource}' (occupied since {self._origin.get(resource, current)}, "
+                    "and nothing has released it)")
+        return blocking
+
+    async def acquire(self, holder: str, claims: Iterable[str],
+                      takeover: Iterable[str] = ()) -> FrozenSet[str]:
+        """Block until every claim is free, then take them all.
+
+        `takeover` names resources this step releases: one of those that is
+        being *kept* is handed to the step rather than waited for. Returns the
+        resources taken over that way, so the caller can put them back if the
+        step fails and the plate is, in fact, still there.
+        """
         wanted = frozenset(claims)
+        may_take = frozenset(takeover)
         while True:
             async with self._lock:
-                if self._can_take(wanted):
-                    for resource in wanted:
+                if not self._blocked_by(holder, wanted, may_take):
+                    taken: Set[str] = set()
+                    for resource in self._needed(wanted, may_take):
+                        previous = self._held.get(resource)
+                        if previous is not None and previous != holder:
+                            taken.add(resource)
+                            left = self._holders.get(previous, frozenset()) - {resource}
+                            if left:
+                                self._holders[previous] = left
+                            else:
+                                self._holders.pop(previous, None)
                         self._held[resource] = holder
-                    self._holders[holder] = wanted
-                    return
+                    self._holders[holder] = (self._holders.get(holder, frozenset())
+                                             | self._needed(wanted, may_take))
+                    self._steps.add(holder)
+                    return frozenset(taken)
                 waiter: asyncio.Future = asyncio.get_running_loop().create_future()
-                self._waiters.append(waiter)
+                self._waiters.append((waiter, holder, wanted, may_take))
+                check = self.all_blocked
+                if check is not None and check(len(self._waiters)):
+                    self._fail_waiters_locked(deadlock=True)
             try:
                 await waiter
             except asyncio.CancelledError:
                 async with self._lock:
-                    if waiter in self._waiters:
-                        self._waiters.remove(waiter)
+                    self._waiters = [w for w in self._waiters if w[0] is not waiter]
                 raise
+
+    def _fail_waiters_locked(self, *, deadlock: bool, reason: str = "") -> None:
+        waiters, self._waiters = self._waiters, []
+        for waiter, holder, wanted, may_take in waiters:
+            if waiter.done():
+                continue
+            if deadlock:
+                blocking = self._blocked_by(holder, wanted, may_take)
+                waiter.set_exception(ResourceDeadlock(
+                    f"{holder} cannot start: it is waiting for "
+                    f"{', '.join(blocking) or 'a resource'} and no step still "
+                    "running can free it"))
+            else:
+                waiter.set_exception(ResourceWaitInterrupted(reason or "interrupted"))
+
+    def check_deadlock(self, live: int) -> bool:
+        """Fail every waiter if all `live` steps are waiting here."""
+        if self._waiters and len(self._waiters) >= live:
+            self._fail_waiters_locked(deadlock=True)
+            return True
+        return False
+
+    def interrupt(self, reason: str = "the run is being aborted") -> int:
+        """Call off every wait. Returns how many steps were waiting.
+
+        An abort has to reach a step that is queued for a resource, not only
+        one that is executing: cancelling the running step frees *its* claims,
+        but nothing frees a kept resource, so a step queued behind one would
+        otherwise sit there and the run would never end.
+        """
+        count = len(self._waiters)
+        self._fail_waiters_locked(deadlock=False, reason=reason)
+        return count
+
+    # ── keeping and giving back ──────────────────────────────────────────────
+
+    async def persist(self, holder: str, resources: Iterable[str],
+                      origin: str = "") -> None:
+        """Keep `resources` occupied after `holder` has finished.
+
+        The move happens under the ledger lock, so there is no instant in which
+        the position is free with a plate still on it.
+        """
+        wanted = frozenset(resources)
+        if not wanted:
+            return
+        async with self._lock:
+            for resource in wanted:
+                keeper = f"{self.KEPT}{resource}"
+                previous = self._held.get(resource)
+                if previous is not None and previous != keeper:
+                    left = self._holders.get(previous, frozenset()) - {resource}
+                    if left:
+                        self._holders[previous] = left
+                    else:
+                        self._holders.pop(previous, None)
+                self._held[resource] = keeper
+                self._holders[keeper] = frozenset({resource})
+                if origin or resource not in self._origin:
+                    self._origin[resource] = origin or holder
 
     async def transfer(self, from_holder: str, to_holder: str,
                        resources: Iterable[str]) -> None:
         """Move resources from one holder to another without letting go.
 
-        This is how a step-scoped claim becomes a held one. Releasing and
-        re-acquiring would open a window where the tray is free and a waiting
-        step could take it — with a plate still in the reader. The move happens
-        under the ledger lock, so there is no such window.
-
-        Resources `from_holder` does not hold are taken outright; that is the
-        case of a command that holds something it did not claim for itself.
+        Resources `from_holder` does not hold are taken outright. `to_holder`
+        is not a running step and does not count against `max_concurrency`.
         """
         wanted = frozenset(resources)
         if not wanted:
@@ -615,16 +973,14 @@ class ResourceLedger:
         async with self._lock:
             for resource in wanted:
                 self._held[resource] = to_holder
+                self._origin.setdefault(resource, from_holder)
             kept = self._holders.get(from_holder, frozenset()) - wanted
             if kept:
                 self._holders[from_holder] = kept
             else:
                 self._holders.pop(from_holder, None)
             self._holders[to_holder] = self._holders.get(to_holder, frozenset()) | wanted
-
-    def holdings(self) -> Dict[str, FrozenSet[str]]:
-        """holder -> what it holds, for the API and for release-by-prefix."""
-        return dict(self._holders)
+            self._steps.discard(to_holder)
 
     async def release(self, holder: str) -> None:
         """Give back everything `holder` took, and wake whoever is waiting."""
@@ -632,12 +988,16 @@ class ResourceLedger:
             for resource in self._holders.pop(holder, frozenset()):
                 if self._held.get(resource) == holder:
                     del self._held[resource]
+                    self._origin.pop(resource, None)
+            self._steps.discard(holder)
             waiters, self._waiters = self._waiters, []
-        for waiter in waiters:
+        for waiter, _holder, _wanted, _may_take in waiters:
             if not waiter.done():
                 waiter.set_result(None)
 
+    async def release_kept(self, resource: str) -> None:
+        """Free one kept resource - at the end of a run, when nothing did."""
+        await self.release(self._held.get(resource, f"{self.KEPT}{resource}"))
+
     def _can_take(self, wanted: FrozenSet[str]) -> bool:
-        if self._max_concurrency is not None and len(self._holders) >= self._max_concurrency:
-            return False
-        return not any(resource in self._held for resource in wanted)
+        return not self._blocked_by("", frozenset(wanted), frozenset())

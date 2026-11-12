@@ -29,6 +29,7 @@ SHIPPED = {
     "opentrons": "SiLA2/OpentronsSiLA2Server/library_catalog.json",
     "tecan": "SiLA2/TecanM200SiLA2Server/library_catalog.json",
     "manual_station": "SiLA2/ManualStationSiLA2Server/library_catalog.json",
+    "mobile": "SiLA2/MobileSiLA2Server/library_catalog.json",
 }
 
 
@@ -38,12 +39,8 @@ def topology():
     for key, relative in SHIPPED.items():
         raw = (V1_DIR / relative).read_text(encoding="utf-8-sig")
         declarations[key] = parse_catalog(raw, source=key).resources
-    # The mobile robot's server lives on the remote host and its catalog cannot
-    # be edited from here, so it is declared in lab_config.yaml. Registering it
-    # with an empty declaration is what the executor does for a server that
-    # said nothing, which is what makes the config layer apply.
-    from src.resources import ResourceDeclaration
-    declarations["mobile"] = ResourceDeclaration()
+    # The mobile robot's server runs on the robot PC, but its code - and so its
+    # catalog - is in this repository like the others'.
 
     config = yaml.safe_load((V1_DIR / "lab_config.yaml").read_text(encoding="utf-8"))
     return build_topology(declarations, parse_config(config.get("resources")))
@@ -78,6 +75,8 @@ class TestTheShippedDeclarationsAreCoherent:
             "deck:opentrons": "opentrons",
             "instrument:tecan": "tecan",
             "tray:tecan": "tecan",
+            "slot:opentrons": "opentrons",
+            "slot:tecan": "tecan",
             "instrument:manual_station": "manual_station",
             "operator:bench": "manual_station",
             "instrument:mobile": "mobile",
@@ -140,3 +139,52 @@ class TestControlCommandsStayInterrupting:
             f"{instrument}.{control} occupies something, so it would queue "
             f"behind {busy} — a stop that waits is not a stop"
         )
+
+
+class TestAPlateStaysWhereTheRobotPutIt:
+    """A plate in an instrument is a state, not something one step occupies.
+
+    It begins when the robot puts the plate down and ends when the robot picks
+    it up - not at the Tecan's PlateIn, which only moves the tray and is also
+    called to close it empty.
+    """
+
+    @pytest.mark.parametrize("place,pick,slot", [
+        ("place_on_OT", "pick_from_opentrons", "slot:opentrons"),
+        ("place_on_TC", "pick_from_tecan", "slot:tecan"),
+    ])
+    def test_placing_acquires_and_picking_releases(self, topology, place, pick, slot):
+        assert topology.acquires_for("mobile", "ExecuteTask", {"TaskName": place}) == {slot}
+        assert topology.releases_for("mobile", "ExecuteTask", {"TaskName": pick}) == {slot}
+
+    def test_platein_keeps_nothing(self, topology):
+        assert topology.acquires_for("tecan", "PlateIn") == frozenset()
+        assert topology.releases_for("tecan", "PlateOut") == frozenset()
+
+    def test_a_task_nobody_declared_is_not_assumed_harmless(self, topology):
+        assert topology.unlisted_for(
+            "mobile", "ExecuteTask", {"TaskName": "place_on_incubator"})
+        assert topology.unlisted_for(
+            "mobile", "ExecuteTask", {"TaskId": "an-id-the-server-did-not-expand"})
+        assert not topology.unlisted_for(
+            "mobile", "ExecuteTask", {"TaskName": "go_to_Tecan"})
+
+
+class TestEveryInstrumentSaysHowItIsStopped:
+
+    def test_the_robot_names_its_stop(self):
+        raw = (V1_DIR / SHIPPED["mobile"]).read_text(encoding="utf-8-sig")
+        assert parse_catalog(raw).stop_command == "CancelTask"
+
+    def test_the_liquid_handler_names_its_stop(self):
+        raw = (V1_DIR / SHIPPED["opentrons"]).read_text(encoding="utf-8-sig")
+        assert parse_catalog(raw).stop_command == "EmergencyStop"
+
+    def test_the_bench_has_nothing_to_stop(self):
+        raw = (V1_DIR / SHIPPED["manual_station"]).read_text(encoding="utf-8-sig")
+        assert parse_catalog(raw).stop_not_applicable
+
+    def test_the_reader_admits_it_cannot_be_stopped(self):
+        # No stop command in its FDL; an emergency stop must report it.
+        catalog = parse_catalog((V1_DIR / SHIPPED["tecan"]).read_text(encoding="utf-8-sig"))
+        assert not catalog.stop_command and not catalog.stop_not_applicable

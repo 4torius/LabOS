@@ -126,7 +126,7 @@ class TestTheTrayStaysOccupied:
         executor.registry.execute = AsyncMock(side_effect=_watch)
 
         await _run(executor, _reader_sequence())
-        assert seen.get("tray:tecan", "").startswith("hold-1"), (
+        assert seen.get("tray:tecan", "").startswith("kept:"), (
             "the tray was free while a plate was sitting in the reader"
         )
 
@@ -153,45 +153,201 @@ class TestTheTrayStaysOccupied:
 
 
 class TestValidationRejectsADeadlock:
+    """A step that needs a kept resource waits for it, like any other claim.
+
+    What is refused is the case where nothing able to free it can run before
+    that step does - decidable from the workflow alone.
+    """
 
     @pytest.mark.asyncio
-    async def test_a_hold_nothing_releases_is_refused(self):
+    async def test_a_step_after_a_hold_nothing_releases_is_refused(self):
+        executor, _ = _executor()
+        workflow = Workflow(name="W", steps=[
+            _step(1, "tecan", "PlateIn"),
+            _step(2, "mobile", "ExecuteTask", {"TaskName": "place_on_TC"},
+                  depends_on=[1]),
+        ])
+        errors = await executor.validate_workflow(workflow)
+        holds = [e for e in errors if e.field == "holds"]
+        assert holds, "a step waiting on a tray nothing empties must be refused"
+        assert holds[0].step_number == 2
+        assert "tray:tecan" in holds[0].message
+
+    @pytest.mark.asyncio
+    async def test_a_releaser_that_needs_the_waiting_step_first_is_refused(self):
+        # The robot must place before PlateOut may run, and cannot place until
+        # PlateOut has run: neither can go first.
+        executor, _ = _executor()
+        workflow = Workflow(name="W", steps=[
+            _step(1, "tecan", "PlateIn"),
+            _step(2, "mobile", "ExecuteTask", {"TaskName": "place_on_TC"},
+                  depends_on=[1]),
+            _step(3, "tecan", "PlateOut", depends_on=[2]),
+        ])
+        errors = await executor.validate_workflow(workflow)
+        holds = [e for e in errors if e.field == "holds"]
+        assert holds and "neither can go first" in holds[0].message
+
+    @pytest.mark.asyncio
+    async def test_a_hold_nobody_else_needs_is_allowed(self):
+        # The operator takes the plate out by hand after the run: nothing in
+        # the workflow releases the tray, and nothing in it is waiting for it.
         executor, _ = _executor()
         workflow = Workflow(name="W", steps=[
             _step(1, "tecan", "PlateIn"),
             _step(2, "tecan", "RunMeasurement", depends_on=[1]),
         ])
         errors = await executor.validate_workflow(workflow)
-        holds = [e for e in errors if e.field == "holds"]
-        assert holds, "a tray held for the rest of the run must be refused"
-        assert "PlateOut" in holds[0].message
+        assert [e for e in errors if e.field == "holds"] == []
 
     @pytest.mark.asyncio
-    async def test_a_releaser_that_does_not_follow_the_holder_is_refused(self):
-        # A PlateOut that is not ordered after the PlateIn does not release it.
+    async def test_but_the_run_says_the_tray_was_left_occupied(self):
         executor, _ = _executor()
-        workflow = Workflow(name="W", steps=[
-            _step(1, "tecan", "PlateOut"),
-            _step(2, "tecan", "PlateIn", depends_on=[1]),
+        _, _, _, _, errors = await _run(executor, [
+            _step(1, "tecan", "PlateIn"),
+            _step(2, "tecan", "RunMeasurement", depends_on=[1]),
         ])
-        errors = await executor.validate_workflow(workflow)
-        assert [e for e in errors if e.field == "holds"]
+        assert any("tray:tecan was still occupied" in e for e in errors)
 
     @pytest.mark.asyncio
-    async def test_a_step_needing_the_tray_out_of_order_is_refused(self):
-        # The robot places a plate on the tray without depending on the
-        # PlateOut that empties it: at runtime it would wait forever.
-        executor, _ = _executor()
-        workflow = Workflow(name="W", steps=[
+    async def test_a_step_not_ordered_after_the_releaser_waits_for_it(self):
+        # The robot's place depends only on PlateIn. It used to be refused for
+        # not depending on PlateOut; it does not need to - it waits for the
+        # tray like for any other claim, and PlateOut can run without it.
+        executor, witnessed = _executor()
+        steps = [
             _step(1, "tecan", "PlateIn"),
             _step(2, "tecan", "PlateOut", depends_on=[1]),
             _step(3, "mobile", "ExecuteTask", {"TaskName": "place_on_TC"},
-                  depends_on=[1]),   # should depend on 2
+                  depends_on=[1]),
+        ]
+        assert [e for e in await executor.validate_workflow(
+            Workflow(name="W", steps=steps)) if e.field == "holds"] == []
+        order = []
+
+        async def _record(instrument, action, parameters, timeout=None):
+            order.append(action)
+            await asyncio.sleep(0.01)
+            return CommandResult(success=True, data={})
+        executor.registry.execute = AsyncMock(side_effect=_record)
+        done = await asyncio.wait_for(_run(executor, steps), timeout=5)
+        assert done[0] == 3
+        assert order == ["PlateIn", "PlateOut", "ExecuteTask"]
+
+
+class TestADeadlockAtRunTimeEndsTheRun:
+    """Validation cannot see every deadlock; the scheduler must not hang on one."""
+
+    @pytest.mark.asyncio
+    async def test_a_step_nothing_can_unblock_fails_instead_of_hanging(self):
+        executor, _ = _executor()
+        completed, failed, _, results, errors = await asyncio.wait_for(_run(executor, [
+            _step(1, "tecan", "PlateIn"),
+            _step(2, "mobile", "ExecuteTask", {"TaskName": "place_on_TC"},
+                  depends_on=[1]),
+        ]), timeout=5)
+        assert (completed, failed) == (1, 1)
+        assert "tray:tecan" in results[2].error
+        assert "occupied since step 1" in results[2].error
+
+    @pytest.mark.asyncio
+    async def test_two_plates_each_waiting_for_the_others_position(self):
+        swap = {"resources": {
+            "provides": ["instrument:arm", "slot:a", "slot:b"],
+            "commands": {"Move": {"by_parameter": {"To": {
+                "a": {"acquires": ["slot:a"]},
+                "b": {"acquires": ["slot:b"]},
+                "a_to_b": {"acquires": ["slot:b"], "releases": ["slot:a"]},
+                "b_to_a": {"acquires": ["slot:a"], "releases": ["slot:b"]},
+            }}}},
+        }}
+        executor, _ = _executor({"arm": swap})
+        completed, failed, _, results, _ = await asyncio.wait_for(_run(executor, [
+            _step(1, "arm", "Move", {"To": "a"}),
+            _step(2, "arm", "Move", {"To": "b"}),
+            _step(3, "arm", "Move", {"To": "a_to_b"}, depends_on=[1, 2]),
+            _step(4, "arm", "Move", {"To": "b_to_a"}, depends_on=[1, 2]),
+        ]), timeout=5)
+        assert completed == 2
+        assert "cannot start" in results[3].error
+
+
+class TestAHoldUnderAOneStepLimit:
+    """`parallel_execution: false` is a limit of one step at a time.
+
+    A kept resource used to count as a step in progress, so the first hold
+    filled the limit and nothing could start again - not even after an abort.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_reader_sequence_completes(self):
+        executor, _ = _executor()
+        workflow = Workflow(name="W", steps=_reader_sequence())
+        workflow.start_time = datetime.datetime.now()
+        done = await asyncio.wait_for(
+            executor._execute_waves(workflow, WorkflowContext(), max_concurrency=1),
+            timeout=5)
+        assert done[:2] == (4, 0)
+
+    @pytest.mark.asyncio
+    async def test_a_kept_resource_does_not_count_against_the_limit(self):
+        ledger = ResourceLedger(max_concurrency=1)
+        await ledger.acquire("step-1", {"tray:tecan"})
+        await ledger.persist("step-1", {"tray:tecan"}, origin="step 1")
+        await ledger.release("step-1")
+        await asyncio.wait_for(ledger.acquire("step-2", {"instrument:tecan"}), timeout=1)
+        assert ledger.kept() == {"tray:tecan": "step 1"}
+
+
+class TestOnlyTheSameInstrumentReleases:
+    """`holds: {tray: UnloadPlate}` means UnloadPlate *on that server*."""
+
+    @pytest.mark.asyncio
+    async def test_the_same_command_on_another_reader_frees_nothing(self):
+        reader = lambda name: {"resources": {
+            "provides": [f"instrument:{name}", f"tray:{name}"],
+            "commands": {
+                "LoadPlate": {"claims": [f"tray:{name}"],
+                              "holds": {f"tray:{name}": "UnloadPlate"}},
+                "UnloadPlate": {"claims": [f"tray:{name}"]},
+            }}}
+        executor, _ = _executor({"reader_a": reader("reader_a"),
+                                 "reader_b": reader("reader_b")})
+        seen = {}
+
+        async def _watch(instrument, action, parameters, timeout=None):
+            if instrument == "reader_a" and action == "UnloadPlate":
+                seen.update(executor._ledger.held)
+            return CommandResult(success=True, data={})
+        executor.registry.execute = AsyncMock(side_effect=_watch)
+        await _run(executor, [
+            _step(1, "reader_a", "LoadPlate"),
+            _step(2, "reader_b", "UnloadPlate", depends_on=[1]),
+            _step(3, "reader_a", "UnloadPlate", depends_on=[2]),
         ])
-        errors = await executor.validate_workflow(workflow)
-        holds = [e for e in errors if e.field == "holds"]
-        assert holds, "a step waiting on a held resource forever must be refused"
-        assert any("DependsOn" in e.message for e in holds)
+        # reader_b's UnloadPlate ran in between and reader_a's tray was still
+        # reader_a's to release.
+        assert seen.get("tray:reader_a") == "step-3"
+
+
+class TestAFailedReleaseLeavesItOccupied:
+
+    @pytest.mark.asyncio
+    async def test_a_pick_that_fails_does_not_free_the_position(self):
+        executor, _ = _executor()
+
+        async def _fail_out(instrument, action, parameters, timeout=None):
+            return CommandResult(success=action != "PlateOut", data={},
+                                 error=None if action != "PlateOut" else "jammed")
+        executor.registry.execute = AsyncMock(side_effect=_fail_out)
+        _, _, _, _, errors = await _run(executor, [
+            _step(1, "tecan", "PlateIn"),
+            _step(2, "tecan", "PlateOut", depends_on=[1]),
+        ])
+        assert any("tray:tecan was still occupied" in e and "step 1" in e for e in errors)
+
+
+class TestTheCorrectOrdering:
 
     @pytest.mark.asyncio
     async def test_the_correct_ordering_validates(self):
@@ -270,7 +426,7 @@ class TestDeclaringHolds:
             "provides": ["instrument:tecan"],
             "commands": {"PlateIn": {"holds": {"tray:ghost": "PlateOut"}}},
         })})
-        assert [u.resource for u in topology.unresolved] == ["tray:ghost"]
+        assert {u.resource for u in topology.unresolved} == {"tray:ghost"}
 
 
 class TestAStepBeforeTheHoldIsNotAtRisk:
@@ -309,17 +465,3 @@ class TestAStepBeforeTheHoldIsNotAtRisk:
         ])
         errors = await executor.validate_workflow(workflow)
         assert [e for e in errors if e.field == "holds"] == []
-
-    @pytest.mark.asyncio
-    async def test_a_concurrent_step_is_still_caught(self):
-        # Narrowing the rule must not have let the real deadlock through: this
-        # step neither precedes the holder nor follows the releaser.
-        executor, _ = _executor()
-        workflow = Workflow(name="W", steps=[
-            _step(1, "tecan", "PlateIn"),
-            _step(2, "tecan", "PlateOut", depends_on=[1]),
-            _step(3, "mobile", "ExecuteTask", {"TaskName": "place_on_TC"},
-                  depends_on=[1]),
-        ])
-        errors = await executor.validate_workflow(workflow)
-        assert [e for e in errors if e.field == "holds"]

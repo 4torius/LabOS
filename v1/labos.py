@@ -386,7 +386,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         executor.add_progress_callback(on_progress)
         workflow = Workflow.from_dict(data)
         result = await executor.execute(workflow, validate=True,
-                                        parallel=args.parallel)
+                                        max_concurrency=args.max_concurrency)
 
         print()
         if result.success:
@@ -691,7 +691,7 @@ def _shipped_topology():
     import yaml
 
     from src.catalog import parse_catalog
-    from src.resources import ResourceDeclaration, build_topology, parse_config
+    from src.resources import ResourceDeclaration, parse_config, topology_of
 
     declarations, problems = {}, []
     config = {}
@@ -729,7 +729,11 @@ def _shipped_topology():
     for key in (config.get("servers") or {}):
         declarations.setdefault(key, ResourceDeclaration())
 
-    return build_topology(declarations, parse_config(config.get("resources"))), problems
+    names = {key: (spec or {}).get("name") or key
+             for key, spec in (config.get("servers") or {}).items()}
+    return topology_of(
+        ((key, names.get(key, key), declaration) for key, declaration in declarations.items()),
+        parse_config(config.get("resources"))), problems
 
 
 def cmd_resources(args: argparse.Namespace) -> int:
@@ -923,7 +927,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("workflow")
     p.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
     p.add_argument("--parallel", action="store_true",
-                   help="dispatch independent steps concurrently")
+                   help="retired, no effect: what may overlap is decided by what "
+                        "each step occupies (see `labos.py resources`)")
+    p.add_argument("--max-concurrency", type=int, default=None, metavar="N",
+                   help="at most N steps at once for this run, instead of "
+                        "workflow.max_concurrency in lab_config.yaml (1 = one at a time)")
     p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("new-server", help="scaffold, generate and register a new instrument")

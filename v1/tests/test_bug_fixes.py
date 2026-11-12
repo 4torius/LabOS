@@ -107,11 +107,53 @@ class TestRetryCountFromConfig:
             },
         )
 
+        executor._retry_on_failure = True
         step = _make_step(retry_count=None)  # None → should do 2 retries = 3 attempts
         await executor._execute_step_with_retry(step)
 
         # max_retries=2 → max_attempts=3
         assert registry.execute.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_retry_on_failure_off_means_one_attempt(self):
+        """`workflow.retry_on_failure: false` was parsed and never read.
+
+        A failed step was re-sent max_retries times regardless - on hardware,
+        a recipe restarted from its first dispense.
+        """
+        registry = _make_registry()
+        registry.execute = AsyncMock(return_value=_cmd_fail("always fails"))
+        executor = _make_executor(
+            registry=registry,
+            error_config={
+                "max_retries": 3, "retry_strategy": "constant",
+                "base_delay_seconds": 0.0, "max_delay_seconds": 0.0,
+                "enable_human_intervention": False,
+            },
+        )
+        executor._retry_on_failure = False
+        await executor._execute_step_with_retry(_make_step(retry_count=None))
+        assert registry.execute.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_a_step_is_not_re_sent_into_a_run_being_stopped(self):
+        registry = _make_registry()
+        executor = _make_executor(
+            registry=registry,
+            error_config={
+                "max_retries": 3, "retry_strategy": "constant",
+                "base_delay_seconds": 0.0, "max_delay_seconds": 0.0,
+                "enable_human_intervention": False,
+            },
+        )
+        executor._retry_on_failure = True
+
+        async def _fail_and_stop(*args, **kwargs):
+            executor._abort_requested = True
+            return _cmd_fail("stopped")
+        registry.execute = AsyncMock(side_effect=_fail_and_stop)
+        await executor._execute_step_with_retry(_make_step(retry_count=None))
+        assert registry.execute.call_count == 1
 
     @pytest.mark.asyncio
     async def test_explicit_zero_retry_count_overrides_config(self):

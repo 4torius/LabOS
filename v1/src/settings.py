@@ -26,6 +26,7 @@ timeout in this module is already normalized to `Optional[float]`, where
 
 from __future__ import annotations
 
+import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -377,6 +378,21 @@ _cache: Dict[Path, Settings] = {}
 _cache_lock = threading.Lock()
 
 
+def config_path(root: Path) -> Path:
+    """The configuration file in force: `lab_config.yaml`, unless overridden.
+
+    `LABOS_CONFIG` names another file - absolute, or relative to the project
+    root. It exists for the simulated lab (docs/SIMULATED_LAB.md), which has to
+    point the same orchestrator at stand-in servers on localhost without
+    anybody editing the real lab's configuration to do it.
+    """
+    override = os.environ.get("LABOS_CONFIG", "").strip()
+    if not override:
+        return root / "lab_config.yaml"
+    path = Path(override)
+    return path if path.is_absolute() else root / path
+
+
 def get_settings(base_dir: Optional[Path] = None, *, strict: bool = False) -> Settings:
     """Return the cached Settings for `base_dir` (the v1/ project root).
 
@@ -391,7 +407,7 @@ def get_settings(base_dir: Optional[Path] = None, *, strict: bool = False) -> Se
             return cached
 
     config, validation = load_lab_config(
-        root / "lab_config.yaml", apply_defaults=True, strict=strict
+        config_path(root), apply_defaults=True, strict=strict
     )
     settings = build_settings(config, root, validation)
 

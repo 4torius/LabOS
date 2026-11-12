@@ -86,10 +86,11 @@
     }
   },
   "resources": {
-    "_comment": "What this server's commands physically occupy. deck:opentrons is this deck as a space: the mobile robot's place_on_OT / pick_from_OT tasks claim the same id, which is what stops a recipe starting with an arm inside it. control:true marks a command that must run WHILE the robot is busy. See v1/docs/RESOURCE_MODEL.md.",
+    "_comment": "What this server's commands physically occupy. deck:opentrons is this deck as a space: the mobile robot's place_on_OT / pick_from_opentrons tasks claim the same id, which is what stops a recipe starting with an arm inside it. slot:opentrons is the plate position on the deck as a state: the robot acquires it when it puts a plate there and releases it when it takes the plate away, so it stays occupied in between, across steps. control:true marks a command that must run WHILE the robot is busy. See v1/docs/RESOURCE_MODEL.md.",
     "provides": [
       "instrument:opentrons",
-      "deck:opentrons"
+      "deck:opentrons",
+      "slot:opentrons"
     ],
     "commands": {
       "ExecuteRecipe": {
@@ -167,5 +168,8 @@
         "control": true
       }
     }
+  },
+  "emergency_stop": {
+    "command": "EmergencyStop"
   }
 }

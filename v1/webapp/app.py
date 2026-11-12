@@ -43,7 +43,7 @@ except ImportError:
 
 from webapp.models import DeviceState, AppState
 from src.config_schema import load_lab_config, validate_lab_config, _deep_merge
-from src.settings import get_settings, reload_settings
+from src.settings import config_path as _active_config_path, get_settings, reload_settings
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +188,7 @@ def create_app() -> "FastAPI":
     async def lifespan(app: FastAPI):
         state.add_log("info", "LabOS WebApp started")
         try:
-            _, validation = load_lab_config(BASE_DIR / "lab_config.yaml", apply_defaults=True, strict=True)
+            _, validation = load_lab_config(_active_config_path(BASE_DIR), apply_defaults=True, strict=True)
             for warning in validation.warnings:
                 state.add_log("warning", f"Config warning: {warning}", "system")
         except Exception as e:
@@ -519,7 +519,7 @@ def create_app() -> "FastAPI":
 
     @app.get("/api/config")
     async def get_config():
-        config_path = BASE_DIR / "lab_config.yaml"
+        config_path = _active_config_path(BASE_DIR)
         if not config_path.exists():
             raise HTTPException(404, "Config file not found")
         config, validation = load_lab_config(config_path, apply_defaults=False, strict=False)
@@ -533,7 +533,7 @@ def create_app() -> "FastAPI":
     async def save_config(request: Request):
         try:
             new_config = await request.json()
-            config_path = BASE_DIR / "lab_config.yaml"
+            config_path = _active_config_path(BASE_DIR)
             existing, _ = load_lab_config(config_path, apply_defaults=False, strict=False)
             for section in ['servers', 'system', 'discovery', 'workflow', 'error_handling', 'webapp', 'paths', 'ui_dropdowns', 'resources']:
                 if section in new_config:

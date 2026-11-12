@@ -24,6 +24,7 @@ Design:
 import asyncio
 import json
 import logging
+import weakref
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -37,8 +38,8 @@ from src.discovery import PnPServer
 from src.catalog import MEASURES_PLATE, PREPARES_PLATE, ServerCatalog
 from src.client import PnPRegistry, CommandResult, map_parameters
 from src.resolver import resolve
-from src.resources import (ResourceDeclaration, ResourceLedger, ResourceTopology,
-                           build_topology, instrument_resource)
+from src.resources import (ResourceDeadlock, ResourceLedger, ResourceTopology,
+                           ResourceWaitInterrupted, instrument_resource, topology_of)
 from src.settings import get_settings, normalize_timeout
 
 
@@ -515,6 +516,30 @@ def is_locally_handled(instrument: str, action: str = "") -> bool:
     return instrument_lower == "delay" or action_lower == "wait"
 
 
+#: Executors with a run in progress. The emergency stop has to reach whatever
+#: is running however it was started - the web app, LabCore, the CLI - and
+#: those do not share an owner it could ask.
+_RUNNING: "weakref.WeakSet[PnPWorkflowExecutor]" = weakref.WeakSet()
+
+
+def halt_running_workflows() -> List["PnPWorkflowExecutor"]:
+    """Stop every run in progress from starting or re-sending anything.
+
+    Returns the executors that were running, so the caller can
+    `cancel_inflight()` them once the instruments have been told to stop.
+    """
+    running = list(_RUNNING)
+    for executor in running:
+        executor.emergency_halt()
+    return running
+
+
+def running_ledgers() -> List[ResourceLedger]:
+    """The ledger of every run in progress, whoever started it."""
+    return [executor._ledger for executor in list(_RUNNING)
+            if executor._ledger is not None]
+
+
 class PnPWorkflowExecutor:
     """
     Generic workflow executor using PnP architecture.
@@ -550,6 +575,13 @@ class PnPWorkflowExecutor:
         _settings = get_settings(self.base_dir)
         self._error_config = _settings.error_handling
         self._default_step_timeout = _settings.workflow.default_timeout
+        #: `workflow.retry_on_failure`. It was parsed and never read: with it
+        #: false a failed step was still re-sent `error_handling.max_retries`
+        #: times before anybody was asked. On hardware that is a recipe
+        #: restarted from its first dispense, or an arm sent again into the
+        #: move that just failed. Off means off; a step that is safe to repeat
+        #: says so with its own RetryCount.
+        self._retry_on_failure = _settings.workflow.retry_on_failure
         #: Cap on steps in flight, on top of resource exclusion. A deployment
         #: that still carries `parallel_execution: false` is read as a cap of 1
         #: rather than silently ignored - see settings._concurrency_cap.
@@ -620,6 +652,11 @@ class PnPWorkflowExecutor:
         # Release any pause so the abort check is reached.
         if self._resume_event:
             self._resume_event.set()
+        # ...and any step queued for a resource. Cancelling the running step
+        # frees its own claims, but nothing frees a position a plate is still
+        # sitting in, so a step queued behind one would wait for ever.
+        if self._ledger is not None:
+            self._ledger.interrupt("the run is being aborted")
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -627,6 +664,29 @@ class PnPWorkflowExecutor:
             # run at the next step boundary.
             return
         loop.create_task(self._perform_abort())
+
+    def emergency_halt(self) -> None:
+        """Stop starting, retrying and waiting - without talking to anything.
+
+        The emergency stop sends every instrument its stop itself. What it
+        needs from the executor is that the run does not carry on regardless:
+        the step that was just stopped comes back as a failure, and a failure
+        used to be answered by sending the same command again a second later.
+        """
+        self._abort_requested = True
+        if self._resume_event:
+            self._resume_event.set()
+        if self._ledger is not None:
+            self._ledger.interrupt("emergency stop")
+
+    def cancel_inflight(self) -> int:
+        """Stop awaiting the steps in flight. Call after the stops were sent."""
+        cancelled = 0
+        for _step, task in list(self._inflight.values()):
+            if task is not None and not task.done():
+                task.cancel()
+                cancelled += 1
+        return cancelled
 
     async def _perform_abort(self) -> List[str]:
         """Tell every instrument mid-step to stop, then stop waiting on it."""
@@ -893,58 +953,79 @@ class PnPWorkflowExecutor:
                     step, {"RecipeName": normalized_params.get(recipe_key, "")})
                 errors.extend(cap_errors)
 
-        # A resource held across steps can deadlock, which is the whole reason
-        # this was a later phase than step-scoped claims. Both ways it can go
-        # wrong are decidable from the workflow alone, so they are rejected
-        # here rather than discovered by a robot arm waiting forever.
-        topology_for_holds = self._topology()
-        reachable = _transitive_dependencies(workflow.steps)
+        topology = self._topology()
+        ancestors = _transitive_dependencies(workflow.steps)
+        occupancy = {step.step_number: self._occupancy(step, topology)
+                     for step in workflow.steps}
+        key_of_step: Dict[int, str] = {}
         for step in workflow.steps:
-            for resource, releaser in self._holds_of(step, topology_for_holds).items():
-                releasing = [
-                    other for other in workflow.steps
-                    if other.action == releaser
-                    and step.step_number in reachable.get(other.step_number, set())
-                ]
-                if not releasing:
+            if is_locally_handled(step.instrument, step.action):
+                continue
+            server = self.registry.get_server_by_name(step.instrument)
+            if server is not None:
+                key_of_step[step.step_number] = self._key_of(server)
+
+        # A declaration that says it lists every value must be believed when a
+        # value is missing from it: a task taught on the robot yesterday is not
+        # known to occupy nothing just because nobody has written it down yet.
+        for step in workflow.steps:
+            key = key_of_step.get(step.step_number)
+            if key is None:
+                continue
+            for parameter, value in topology.unlisted_for(key, step.action, step.parameters):
+                errors.append(ValidationError(
+                    step_number=step.step_number,
+                    field=f"Parameters.{parameter}",
+                    message=(
+                        f"'{key}' declares what each {parameter} of {step.action} "
+                        f"occupies, and '{value}' is not in that declaration, so "
+                        f"LabOS cannot know what this step would be in the way of. "
+                        f"Declare it under resources.commands.{step.action}.by_parameter "
+                        f"in that server's library_catalog.json - with an empty "
+                        f"entry if it occupies nothing beyond the instrument itself."
+                    ),
+                ))
+
+        # A resource kept across steps is the one thing here that can deadlock.
+        # A step that needs it simply waits, like any other claim - unless
+        # nothing that could free it is able to run before that step does.
+        # That case is decidable from the workflow alone, so it is refused here
+        # rather than found by a robot arm that never moves. (Two plates each
+        # waiting for the position the other is in is *not* decidable here; the
+        # scheduler notices that one when it happens and fails the steps.)
+        for other in workflow.steps:
+            o = other.step_number
+            claims, acquires, releases = occupancy[o]
+            for resource in sorted((claims | acquires) - releases):
+                for keeper in workflow.steps:
+                    k = keeper.step_number
+                    if k == o or resource not in occupancy[k][1]:
+                        continue
+                    if o in ancestors.get(k, set()):
+                        continue      # this step runs before the resource is kept
+                    releasers = [
+                        r.step_number for r in workflow.steps
+                        if r.step_number != o
+                        and resource in occupancy[r.step_number][2]
+                        and k in ancestors.get(r.step_number, set())
+                    ]
+                    if any(o not in ancestors.get(r, set()) for r in releasers):
+                        continue      # something can free it without this step
+                    if releasers:
+                        why = (f"the step that releases it "
+                               f"({', '.join(map(str, releasers))}) depends on this "
+                               f"one, so neither can go first")
+                    else:
+                        why = (f"no step after step {k} releases it. Add the step "
+                               f"that frees it, or make step {k} depend on this one")
                     errors.append(ValidationError(
-                        step_number=step.step_number,
+                        step_number=o,
                         field="holds",
                         message=(
-                            f"{step.action} keeps '{resource}' until a step runs "
-                            f"{releaser}, and no later step does. The resource would "
-                            f"stay held for the rest of the run — add a {releaser} "
-                            f"step that depends on step {step.step_number}."
+                            f"{other.action} needs '{resource}', which step {k} "
+                            f"({keeper.action}) leaves occupied, and {why}."
                         ),
                     ))
-                    continue
-                released_by = {other.step_number for other in releasing}
-                # Only a step that could still be waiting once the hold exists
-                # can deadlock on it. A step the holder itself depends on runs
-                # strictly earlier and is never at risk — missing that rejected
-                # valid workflows, including the one this lab actually runs,
-                # where the tray is used twice in a row.
-                before_the_hold = reachable.get(step.step_number, set())
-                for other in workflow.steps:
-                    if other.step_number == step.step_number or other.step_number in released_by:
-                        continue
-                    if other.step_number in before_the_hold:
-                        continue
-                    if resource not in self._claims_of(other, topology_for_holds):
-                        continue
-                    deps = reachable.get(other.step_number, set())
-                    if not (released_by & deps):
-                        errors.append(ValidationError(
-                            step_number=other.step_number,
-                            field="holds",
-                            message=(
-                                f"{other.action} needs '{resource}', which step "
-                                f"{step.step_number} keeps until {releaser} runs, and "
-                                f"this step does not depend on the {releaser} step — "
-                                f"it would wait for a resource nothing will free for "
-                                f"it. Add DependsOn for the {releaser} step."
-                            ),
-                        ))
 
         # A claim naming a resource nobody provides fails closed. Letting it
         # through would silently mean "no exclusion", which is the one outcome
@@ -952,15 +1033,8 @@ class PnPWorkflowExecutor:
         # engage without saying so is worse than none, because it is trusted
         # meanwhile. The instruments this workflow touches are enough - an
         # unresolved claim elsewhere in the lab is the Settings panel's problem.
-        topology = self._topology()
         if topology.unresolved:
-            touched = set()
-            for step in workflow.steps:
-                if is_locally_handled(step.instrument, step.action):
-                    continue
-                server = self.registry.get_server_by_name(step.instrument)
-                if server is not None:
-                    touched.add(server.name)
+            touched = set(key_of_step.values())
             for unresolved in topology.unresolved:
                 if unresolved.instrument not in touched:
                     continue
@@ -1066,6 +1140,7 @@ class PnPWorkflowExecutor:
         workflow: Workflow,
         validate: bool = True,
         parallel: Optional[bool] = None,
+        max_concurrency: Optional[int] = None,
     ) -> WorkflowResult:
         """Execute a workflow.
 
@@ -1077,6 +1152,8 @@ class PnPWorkflowExecutor:
                 not by configuration - see docs/RESOURCE_MODEL.md. Passing
                 `False` still forces strictly one step at a time, which is
                 what `workflow.max_concurrency: 1` is for.
+            max_concurrency: A cap for this run only, instead of the one in
+                lab_config.yaml.
 
         Returns:
             WorkflowResult with execution summary
@@ -1118,10 +1195,17 @@ class PnPWorkflowExecutor:
         
         # `parallel=False` from an old caller means "one at a time", which is
         # a concurrency limit rather than a different execution mode.
-        limit = 1 if parallel is False else self._max_concurrency
-        completed, failed, skipped, step_results, errors = await self._execute_waves(
-            workflow, context, max_concurrency=limit)
-        
+        if max_concurrency is not None:
+            limit: Optional[int] = max_concurrency if max_concurrency > 0 else None
+        else:
+            limit = 1 if parallel is False else self._max_concurrency
+        _RUNNING.add(self)
+        try:
+            completed, failed, skipped, step_results, errors = await self._execute_waves(
+                workflow, context, max_concurrency=limit)
+        finally:
+            _RUNNING.discard(self)
+
         # Finalize
         workflow.end_time = datetime.now()
         workflow.status = StepStatus.SUCCESS if failed == 0 else StepStatus.FAILED
@@ -1145,7 +1229,7 @@ class PnPWorkflowExecutor:
     async def _execute_parallel(self, workflow: Workflow, context: WorkflowContext) -> tuple:
         """Dependency order, overlapping whatever the instruments allow.
 
-        Not a second implementation: both names reach the same wave runner, and
+        Not a second implementation: both names reach the same scheduler, and
         what may overlap is decided by resource claims rather than by which of
         these was called. Kept because callers and tests refer to them.
         """
@@ -1158,23 +1242,28 @@ class PnPWorkflowExecutor:
         max_concurrency: Optional[int] = None,
         parallel: Optional[bool] = None,
     ) -> tuple:
-        """Execute a workflow in topological waves.
+        """Run a workflow: each step as soon as its own dependencies are done.
 
-        Both execution modes share this one ordering. They used to be separate
-        implementations, and the sequential one simply iterated the steps in
-        file order: a step whose dependency appeared *later* in the file was
-        marked SKIPPED rather than reordered, so a perfectly valid workflow
-        silently lost steps depending on the order they happened to be written
-        in. Wave 0 is every step with no dependencies, wave 1 is everything
-        whose dependencies are all in wave 0, and so on; within a wave, file
-        order is preserved so two independent steps still run in the order the
-        author wrote them.
+        The name is historical. This used to run the workflow in topological
+        *waves* - everything with no dependencies, then everything depending
+        only on those, and so on - and waited for a whole wave before starting
+        the next. With one plate that is invisible. With two it is not: plate
+        B's read could not start until plate A's unrelated, slower step in the
+        same wave had finished, so two independent chains advanced in lockstep
+        and a `DeadlineSeconds` was missed by construction, not by contention.
 
-        Within a wave, what may overlap is decided by what each step
-        physically occupies: a step takes its resource claims before it runs
-        and gives them back after, so steps that contend serialise and steps
-        that do not run together. `max_concurrency` is a cap on top of that,
-        not the rule - `1` forces strictly one step at a time.
+        A step now starts when *its* dependencies have settled. What may then
+        overlap is decided by what each step physically occupies: a step takes
+        its resource claims before it runs and gives them back after, so steps
+        that contend serialise and steps that do not run together. Steps that
+        become ready together are started in the order they were written, and
+        the ledger grants in the order it was asked, so contending steps keep
+        the author's order. `max_concurrency` is a cap on top of that, not the
+        rule - `1` forces strictly one step at a time.
+
+        After a failure that halts the run nothing new is started; what is
+        already moving is left to finish, because a command sent to hardware
+        cannot be un-sent by forgetting about it.
         """
         # `parallel` is the retired flag, kept as a translation so callers and
         # tests written against the two old modes keep asserting the same
@@ -1186,17 +1275,24 @@ class PnPWorkflowExecutor:
         topology = self._topology()
         ledger = ResourceLedger(max_concurrency=max_concurrency)
         self._ledger = ledger
-        #: hold holder -> (resource, the command that releases it). Validation
-        #: rejects a workflow that would leave one of these outstanding, so
-        #: anything still here at the end means the run stopped early.
-        active_holds: Dict[str, Tuple[str, str]] = {}
         completed = failed = skipped = 0
         step_results: Dict[int, CommandResult] = {}
         errors: List[str] = []
 
-        waves = topological_waves(workflow.steps)
-        done: Set[int] = set()
-        broken: Set[int] = set()
+        order = {s.step_number: i for i, s in enumerate(workflow.steps)}
+        known = set(order)
+        done: Set[int] = set()        # ran and succeeded (or the operator skipped it)
+        broken: Set[int] = set()      # failed, or skipped because of a failure
+        settled: Set[int] = set()     # has an outcome, whichever it was
+        launched: Set[int] = set()
+        tasks: Dict[asyncio.Task, WorkflowStep] = {}
+        outcome_of: Dict[int, Any] = {}
+        halt: List[str] = []          # the reason the run stopped starting steps
+        HALTED = object()
+
+        # Every live step waiting on the ledger means none of them can ever be
+        # granted: only a finishing step frees anything.
+        ledger.all_blocked = lambda waiting: bool(tasks) and waiting >= len(tasks)
 
         def _elapsed() -> float:
             if not workflow.start_time:
@@ -1220,157 +1316,192 @@ class PnPWorkflowExecutor:
             step.status = StepStatus.SKIPPED
             skipped += 1
             broken.add(step.step_number)
+            settled.add(step.step_number)
             errors.append(reason)
             _notify(step, StepStatus.SKIPPED, reason)
 
-        halt_reason: Optional[str] = None
-        for wave in waves:
-            if halt_reason or self._abort_requested:
-                break
+        async def _guarded(step: WorkflowStep) -> None:
+            number = step.step_number
+            holder = f"step-{number}"
+            # Pause before taking anything: a paused run must not sit on a
+            # deck it is not using. The same reasoning applies to a timed
+            # wait, so NotBeforeSeconds is also honoured before any claim.
+            if self._pause_requested and self._resume_event and not self._abort_requested:
+                await self._resume_event.wait()
+            await self._await_not_before(step, workflow)
+            if self._abort_requested:
+                outcome_of[number] = None
+                return
+            if halt:
+                outcome_of[number] = HALTED
+                return
+            claims, acquires, releases = self._occupancy(step, topology)
+            try:
+                taken_over = await ledger.acquire(holder, claims | acquires, takeover=releases)
+            except ResourceWaitInterrupted:
+                outcome_of[number] = None
+                return
+            except ResourceDeadlock as exc:
+                outcome_of[number] = CommandResult(success=False, error=str(exc))
+                return
+            except asyncio.CancelledError:
+                outcome_of[number] = CommandResult(
+                    success=False, error="Aborted by operator")
+                return
+            result: Any = None
+            try:
+                if self._abort_requested:
+                    outcome_of[number] = None
+                    return
+                if halt:
+                    outcome_of[number] = HALTED
+                    return
+                overrun = self._deadline_overrun(step, workflow)
+                if overrun is not None:
+                    # Recorded and said out loud, never silently tolerated:
+                    # the step still runs, because the measurement is still
+                    # worth having, but it is worth having with a caveat.
+                    message = (f"Step {number} started {overrun:.0f}s past its "
+                               f"DeadlineSeconds of {step.deadline_seconds:.0f}s")
+                    logger.warning(message)
+                    errors.append(message)
+                    _notify(step, StepStatus.RUNNING, message)
+                _notify(step, StepStatus.RUNNING,
+                        f"Starting {step.action} on {step.instrument}")
+                result = await self._run_one(step, workflow, context)
+                if overrun is not None and getattr(result, "data", None) is not None:
+                    result.data["deadline_exceeded_by_seconds"] = round(overrun, 3)
+                outcome_of[number] = result
+            except asyncio.CancelledError:
+                result = CommandResult(success=False, error="Aborted by operator")
+                outcome_of[number] = result
+            except Exception as exc:  # pragma: no cover - defensive
+                result = exc
+                outcome_of[number] = exc
+            finally:
+                # What stays occupied once this step is over, decided before
+                # its own claims are let go so that a position is never
+                # briefly free with a plate still on it.
+                #   it happened   -> what it acquires stays; what it releases is free
+                #   it never ran  -> nothing changed: what it took over goes back
+                #   it failed     -> nobody knows where the plate is: both stay
+                ran = isinstance(result, CommandResult)
+                waved_past = (ran and result.success and isinstance(result.data, dict)
+                              and bool(result.data.get("skipped")))
+                happened = ran and result.success and not waved_past
+                never_ran = result is None or waved_past
+                if not self._abort_requested:
+                    keep_new = frozenset() if never_ran else acquires - taken_over
+                    give_back = frozenset() if happened else taken_over
+                    if keep_new:
+                        await ledger.persist(
+                            holder, keep_new,
+                            origin=f"step {number} ({step.action} on {step.instrument})")
+                    if give_back:
+                        await ledger.persist(holder, give_back)
+                await ledger.release(holder)
 
-            runnable: List[WorkflowStep] = []
-            for step in wave:
-                unmet = [d for d in step.depends_on if d in broken or d not in done]
-                if unmet:
+        def _launch_ready() -> None:
+            """Start every step whose dependencies have all settled."""
+            progressed = True
+            while progressed:      # skipping a step settles it, which may ready others
+                progressed = False
+                for step in workflow.steps:
+                    number = step.step_number
+                    if number in launched or number in settled:
+                        continue
+                    if not all(d in settled or d not in known for d in step.depends_on):
+                        continue
+                    launched.add(number)
+                    unmet = [d for d in step.depends_on if d in broken or d not in done]
                     # A dependency failed or was skipped. "stop"/"skip" both mean
                     # this step must not run; "continue" is the author explicitly
                     # saying the step does not really need its predecessor.
-                    if step.on_failure == "continue":
-                        runnable.append(step)
-                    else:
-                        _skip(step, f"Step {step.step_number} skipped: "
+                    if unmet and step.on_failure != "continue":
+                        _skip(step, f"Step {number} skipped: "
                                     f"dependencies not satisfied ({unmet})")
-                else:
-                    runnable.append(step)
-
-            if not runnable:
-                continue
-
-            # One dispatch path. Whether two steps in this wave overlap is
-            # decided by what they physically occupy, not by a config flag:
-            # a step waits for its claims, so steps that contend serialise and
-            # steps that do not run together. `workflow.parallel_execution`
-            # used to choose between two implementations here - see
-            # docs/RESOURCE_MODEL.md for why it had to go.
-            outcome_of: Dict[int, Any] = {}
-
-            async def _guarded(step: WorkflowStep) -> None:
-                holder = f"step-{step.step_number}"
-                # Pause before taking anything: a paused run must not sit on a
-                # deck it is not using. The same reasoning applies to a timed
-                # wait, so NotBeforeSeconds is also honoured before any claim.
-                if self._pause_requested and self._resume_event and not self._abort_requested:
-                    await self._resume_event.wait()
-                await self._await_not_before(step, workflow)
-                if self._abort_requested:
-                    outcome_of[step.step_number] = None
-                    return
-                # A step whose command releases something held across steps has
-                # to free it before asking for it, or it waits for itself: the
-                # PlateOut that empties the tray also needs the tray.
-                for hold_holder, (resource, releaser) in list(active_holds.items()):
-                    if releaser == step.action:
-                        await ledger.release(hold_holder)
-                        active_holds.pop(hold_holder, None)
-                try:
-                    await ledger.acquire(holder, self._claims_of(step, topology))
-                except asyncio.CancelledError:
-                    outcome_of[step.step_number] = CommandResult(
-                        success=False, error="Aborted by operator")
-                    return
-                try:
-                    if self._abort_requested:
-                        outcome_of[step.step_number] = None
-                        return
-                    overrun = self._deadline_overrun(step, workflow)
-                    if overrun is not None:
-                        # Recorded and said out loud, never silently tolerated:
-                        # the step still runs, because the measurement is still
-                        # worth having, but it is worth having with a caveat.
-                        message = (f"Step {step.step_number} started {overrun:.0f}s past its "
-                                   f"DeadlineSeconds of {step.deadline_seconds:.0f}s")
-                        logger.warning(message)
-                        errors.append(message)
-                        _notify(step, StepStatus.RUNNING, message)
-                    _notify(step, StepStatus.RUNNING,
-                            f"Starting {step.action} on {step.instrument}")
-                    result = await self._run_one(step, workflow, context)
-                    if overrun is not None and getattr(result, "data", None) is not None:
-                        result.data["deadline_exceeded_by_seconds"] = round(overrun, 3)
-                    outcome_of[step.step_number] = result
-                except asyncio.CancelledError:
-                    outcome_of[step.step_number] = CommandResult(
-                        success=False, error="Aborted by operator")
-                except Exception as exc:  # pragma: no cover - defensive
-                    outcome_of[step.step_number] = exc
-                finally:
-                    # Hand over anything this command keeps *before* letting the
-                    # step's own claims go, so the tray is never briefly free
-                    # with a plate still in the reader.
-                    held = self._holds_of(step, topology)
-                    if held and not self._abort_requested:
-                        for resource, releaser in held.items():
-                            hold_holder = f"hold-{step.step_number}-{resource}"
-                            await ledger.transfer(holder, hold_holder, {resource})
-                            active_holds[hold_holder] = (resource, releaser)
-                    await ledger.release(holder)
-
-            # Tasks are created in written order, and the ledger wakes waiters
-            # in the order they asked, so steps that contend keep the order the
-            # author wrote them in.
-            await asyncio.gather(*[_guarded(step) for step in runnable])
-            outcomes = [outcome_of.get(step.step_number) for step in runnable]
-
-            for step, outcome in zip(runnable, outcomes):
-                if outcome is None:  # aborted before it started
-                    _skip(step, f"Step {step.step_number} skipped: workflow aborted")
-                    continue
-                if isinstance(outcome, BaseException):
-                    outcome = CommandResult(success=False, error=str(outcome))
-
-                step_results[step.step_number] = outcome
-
-                if outcome.success:
-                    # A step the operator chose to skip comes back successful so
-                    # that the rest of the workflow can carry on - that is what
-                    # they decided. It is still not a step that ran, and a run
-                    # summary reading "2 completed, 0 skipped" over a step
-                    # somebody waved past is the opposite of a record.
-                    operator_skipped = (
-                        isinstance(outcome.data, dict) and outcome.data.get("skipped")
-                    )
-                    done.add(step.step_number)
-                    if operator_skipped:
-                        skipped += 1
-                        step.status = StepStatus.SKIPPED
-                        reason = (outcome.data.get("reason") or "operator decision")
-                        errors.append(f"Step {step.step_number} skipped: {reason}")
-                        _notify(step, StepStatus.SKIPPED,
-                                f"Skipped {step.action} on {step.instrument}: {reason}")
+                        progressed = True
                         continue
-                    completed += 1
-                    step.status = StepStatus.SUCCESS
-                    _notify(step, StepStatus.SUCCESS,
-                            f"Completed {step.action} on {step.instrument}")
-                    continue
+                    tasks[asyncio.ensure_future(_guarded(step))] = step
 
-                step.status = StepStatus.FAILED
-                broken.add(step.step_number)
-                error_text = outcome.error or "unknown error"
-                errors.append(f"Step {step.step_number}: {error_text}")
-                _notify(step, StepStatus.FAILED,
-                        f"Failed {step.action} on {step.instrument}: {error_text}")
+        def _settle(step: WorkflowStep, outcome: Any) -> None:
+            nonlocal completed, failed, skipped
+            number = step.step_number
+            if outcome is None:  # aborted before it started
+                _skip(step, f"Step {number} skipped: workflow aborted")
+                return
+            if outcome is HALTED:
+                _skip(step, f"Step {number} skipped: {halt[0]}")
+                return
+            if isinstance(outcome, BaseException):
+                outcome = CommandResult(success=False, error=str(outcome))
 
-                if step.on_failure == "skip":
+            step_results[number] = outcome
+            settled.add(number)
+
+            if outcome.success:
+                # A step the operator chose to skip comes back successful so
+                # that the rest of the workflow can carry on - that is what
+                # they decided. It is still not a step that ran, and a run
+                # summary reading "2 completed, 0 skipped" over a step
+                # somebody waved past is the opposite of a record.
+                operator_skipped = (
+                    isinstance(outcome.data, dict) and outcome.data.get("skipped")
+                )
+                done.add(step.step_number)
+                if operator_skipped:
                     skipped += 1
-                elif step.on_failure == "continue":
-                    failed += 1
-                else:  # "stop"
-                    failed += 1
-                    halt_reason = (
-                        f"workflow halted after step {step.step_number} "
+                    step.status = StepStatus.SKIPPED
+                    reason = (outcome.data.get("reason") or "operator decision")
+                    errors.append(f"Step {number} skipped: {reason}")
+                    _notify(step, StepStatus.SKIPPED,
+                            f"Skipped {step.action} on {step.instrument}: {reason}")
+                    return
+                completed += 1
+                step.status = StepStatus.SUCCESS
+                _notify(step, StepStatus.SUCCESS,
+                        f"Completed {step.action} on {step.instrument}")
+                return
+
+            step.status = StepStatus.FAILED
+            broken.add(number)
+            error_text = outcome.error or "unknown error"
+            errors.append(f"Step {number}: {error_text}")
+            _notify(step, StepStatus.FAILED,
+                    f"Failed {step.action} on {step.instrument}: {error_text}")
+
+            if step.on_failure == "skip":
+                skipped += 1
+            elif step.on_failure == "continue":
+                failed += 1
+            else:  # "stop"
+                failed += 1
+                if not halt:
+                    halt.append(
+                        f"workflow halted after step {number} "
                         f"({step.action} on {step.instrument}) failed"
                     )
+
+        if not self._abort_requested:
+            _launch_ready()
+        while tasks:
+            finished, _pending = await asyncio.wait(
+                list(tasks), return_when=asyncio.FIRST_COMPLETED)
+            for task in sorted(finished, key=lambda t: order[tasks[t].step_number]):
+                step = tasks.pop(task)
+                if task.cancelled():
+                    outcome: Any = CommandResult(success=False, error="Aborted by operator")
+                elif task.exception() is not None:  # pragma: no cover - defensive
+                    outcome = task.exception()
+                else:
+                    outcome = outcome_of.get(step.step_number)
+                _settle(step, outcome)
+            if not halt and not self._abort_requested:
+                _launch_ready()
+            # A step that finished may have left the rest all waiting on
+            # something only it could have freed.
+            if tasks:
+                ledger.check_deadlock(len(tasks))
 
         # Anything never reached: aborted, or downstream of a halting failure.
         # Always say why. A step marked "skipped" with no reason attached is one
@@ -1378,7 +1509,7 @@ class PnPWorkflowExecutor:
         if self._abort_requested:
             not_reached = "workflow aborted by operator"
         else:
-            not_reached = halt_reason or "not reached"
+            not_reached = (halt[0] if halt else "") or "not reached"
         for step in workflow.steps:
             if step.status == StepStatus.PENDING:
                 step.status = StepStatus.SKIPPED
@@ -1387,10 +1518,10 @@ class PnPWorkflowExecutor:
                 errors.append(reason)
                 _notify(step, StepStatus.SKIPPED, reason)
 
-        for hold_holder, (resource, releaser) in list(active_holds.items()):
-            await ledger.release(hold_holder)
-            message = (f"{resource} was still held at the end of the run: no step ran "
-                       f"{releaser} to release it")
+        for resource, origin in sorted(ledger.kept().items()):
+            await ledger.release_kept(resource)
+            message = (f"{resource} was still occupied at the end of the run "
+                       f"(since {origin}): no step released it")
             logger.warning(message)
             errors.append(message)
         self._ledger = None
@@ -1442,51 +1573,71 @@ class PnPWorkflowExecutor:
         late = (datetime.now() - origin).total_seconds() - step.deadline_seconds
         return late if late > 0 else None
 
-    def _holds_of(self, step: WorkflowStep, topology: ResourceTopology) -> Dict[str, str]:
-        """resource -> releasing command, for what this step keeps after it ends."""
-        if is_locally_handled(step.instrument, step.action):
-            return {}
-        server = self.registry.get_server_by_name(step.instrument)
-        if server is None:
-            return {}
-        declaration = topology.declarations.get(server.name)
-        spec = declaration.commands.get(step.action) if declaration is not None else None
-        if spec is None or not spec.holds:
-            return {}
-        return {topology._resolve_alias(r): c for r, c in spec.holds.items()}
+    def _instrument_entries(self) -> List[Tuple[str, Any]]:
+        """(registry key, server) for every discovered instrument.
+
+        The key - `mobile`, `tecan` - is what a workflow writes, what
+        `lab_config.yaml` uses, and what a resource id is built from. A
+        registry with no keyed map (a test double) falls back to the name.
+        """
+        servers = getattr(self.registry, "servers", None)
+        if isinstance(servers, dict) and servers:
+            return list(servers.items())
+        return [(getattr(server, "name", ""), server)
+                for server in self.registry.list_servers()]
+
+    def _key_of(self, server: Any) -> str:
+        for key, candidate in self._instrument_entries():
+            if candidate is server:
+                return key
+        return getattr(server, "name", "") or ""
 
     def _topology(self) -> ResourceTopology:
         """Resolve what every discovered instrument occupies.
 
         Built per run rather than cached: a workflow starts rarely, the
         registry changes under us as servers come and go, and a stale topology
-        is a stale safety rule. Keyed by server name, which is what a workflow
-        step writes and what `get_server_by_name` resolves.
-        """
-        declarations = {}
-        for server in self.registry.list_servers():
-            catalog = getattr(server, "catalog", None)
-            declarations[server.name] = (getattr(catalog, "resources", None)
-                                         or ResourceDeclaration())
-        return build_topology(declarations, get_settings(self.base_dir).resources)
+        is a stale safety rule.
 
-    def _claims_of(self, step: WorkflowStep, topology: ResourceTopology) -> frozenset:
-        """What this step occupies, for exclusion purposes.
+        Keyed by registry key, through the one function the API and the CLI
+        also use. It used to be keyed by the name the server announces, on the
+        belief that a workflow writes that name; a workflow writes `mobile`,
+        the robot announces `GoFaGo Mobile Robot`, and so
+        `resources.declare.mobile` never reached the executor while the
+        Settings panel - keyed correctly - showed it as applied.
+        """
+        return topology_of(
+            ((key, getattr(server, "name", key),
+              getattr(getattr(server, "catalog", None), "resources", None))
+             for key, server in self._instrument_entries()),
+            get_settings(self.base_dir).resources)
+
+    def _occupancy(self, step: WorkflowStep,
+                   topology: ResourceTopology) -> Tuple[frozenset, frozenset, frozenset]:
+        """(claims, acquires, releases) for a step.
 
         A step with no server behind it - a Delay, or an operator task handled
         in the orchestrator - occupies nothing physical, so it gets a token of
         its own and never blocks or is blocked. Everything else goes through
         the topology, which always answers with at least the instrument.
         """
+        nothing: frozenset = frozenset()
         if is_locally_handled(step.instrument, step.action):
-            return frozenset({f"step:{step.step_number}"})
+            return frozenset({f"step:{step.step_number}"}), nothing, nothing
         server = self.registry.get_server_by_name(step.instrument)
         if server is None:
             # Validation rejects an unresolvable instrument before execution;
             # if one reaches here, exclude it from everything rather than let
             # it run unguarded.
-            return frozenset({instrument_resource(step.instrument)})
-        return topology.claims_for(server.name, step.action, step.parameters)
+            return frozenset({instrument_resource(step.instrument)}), nothing, nothing
+        key = self._key_of(server)
+        return (topology.claims_for(key, step.action, step.parameters),
+                topology.acquires_for(key, step.action, step.parameters),
+                topology.releases_for(key, step.action, step.parameters))
+
+    def _claims_of(self, step: WorkflowStep, topology: ResourceTopology) -> frozenset:
+        """What this step occupies while it runs."""
+        return self._occupancy(step, topology)[0]
 
     async def _run_one(
         self,
@@ -1562,7 +1713,12 @@ class PnPWorkflowExecutor:
 
         last_result = None
         last_error: Optional[CategorizedError] = None
-        retry_count = step.retry_count if step.retry_count is not None else self._error_config.max_retries
+        if step.retry_count is not None:
+            retry_count = step.retry_count
+        elif self._retry_on_failure:
+            retry_count = self._error_config.max_retries
+        else:
+            retry_count = 0
         max_attempts = retry_count + 1
         # A step's own TimeoutSeconds wins when present, including 0, which
         # means unlimited (normalize_timeout turns it into None). `or` would be
@@ -1602,6 +1758,10 @@ class PnPWorkflowExecutor:
                 step.instrument, step.action, step.parameters, timeout=step_timeout)
 
         for attempt in range(max_attempts):
+            # Never re-send a command into a run that is being stopped: the
+            # failure in hand may well be the stop itself taking effect.
+            if attempt and self._abort_requested:
+                break
             try:
                 result = await _dispatch()
                 
@@ -1670,6 +1830,7 @@ class PnPWorkflowExecutor:
         while (self._intervention_callback and
                self._error_config.enable_human_intervention and
                last_error and
+               not self._abort_requested and
                rounds < self.MAX_INTERVENTION_ROUNDS):
             rounds += 1
             step.status = StepStatus.WAITING_INTERVENTION

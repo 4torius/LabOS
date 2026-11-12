@@ -1404,9 +1404,11 @@ class LabCore:
 
         self._workflow_executor.add_progress_callback(on_step_progress)
 
-        # Determine parallel flag: caller overrides config; config overrides default False
-        if parallel is None:
-            parallel = get_settings(self.base_dir).workflow.parallel_execution
+        # `parallel` is passed on only when the caller gave one. Filling it in
+        # from `workflow.parallel_execution` - which defaults to False when the
+        # key is absent - forced one step at a time on every run, whatever
+        # `max_concurrency` said: the retired flag was still the master
+        # switch. The executor reads the cap from the settings itself.
 
         try:
             result = await self._workflow_executor.execute(workflow_obj, validate=False, parallel=parallel)

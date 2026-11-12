@@ -47,5 +47,8 @@
         "control": true
       }
     }
+  },
+  "emergency_stop": {
+    "not_applicable": "an operator at a bench - there is no machine here to stop"
   }
 }
