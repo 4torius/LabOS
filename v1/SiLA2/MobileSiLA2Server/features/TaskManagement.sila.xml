@@ -1,0 +1,585 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Feature SiLA2Version="1.1" FeatureVersion="1.0" MaturityLevel="Draft"
+         Originator="it.bicoccalab" Category="automation"
+         xmlns="http://www.sila-standard.org"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://www.sila-standard.org https://gitlab.com/SiLA2/sila_base/raw/master/schema/FeatureDefinition.xsd">
+
+    <Identifier>TaskManagement</Identifier>
+    <DisplayName>Task Management</DisplayName>
+    <Description>
+        High-level task management for the mobile robot system.
+
+        This feature allows the orchestrator to:
+        - Discover available tasks from the robot controller
+        - Execute tasks with progress feedback
+        - Monitor task execution status
+        - Cancel running tasks
+
+        The robot PC exposes predefined tasks via ROS action/service:
+        - Action Server: /setup1/state_exec (executionCommand.action)
+        - Service: /setup1/getSubtasksInfo (getSubtaskInfo.srv)
+
+        Each task consists of a root task with multiple subtasks.
+        Feedback is provided during execution showing current subtask.
+    </Description>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!--                     DEFINED EXECUTION ERRORS                        -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+    <DefinedExecutionError>
+        <Identifier>TaskNotFound</Identifier>
+        <DisplayName>Task Not Found</DisplayName>
+        <Description>The specified task ID does not exist</Description>
+    </DefinedExecutionError>
+
+    <DefinedExecutionError>
+        <Identifier>TaskExecutionFailed</Identifier>
+        <DisplayName>Task Execution Failed</DisplayName>
+        <Description>The task failed during execution</Description>
+    </DefinedExecutionError>
+
+    <DefinedExecutionError>
+        <Identifier>RobotNotConnected</Identifier>
+        <DisplayName>Robot Not Connected</DisplayName>
+        <Description>Cannot communicate with the robot controller</Description>
+    </DefinedExecutionError>
+
+    <DefinedExecutionError>
+        <Identifier>HardwareNotFound</Identifier>
+        <DisplayName>Hardware Not Found</DisplayName>
+        <Description>The specified hardware ID is not registered on the robot controller</Description>
+    </DefinedExecutionError>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!--                          DATA TYPE DEFINITIONS                      -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+    <DataTypeDefinition>
+        <Identifier>TaskInfo</Identifier>
+        <DisplayName>Task Information</DisplayName>
+        <Description>Information about an available task</Description>
+        <DataType>
+            <Structure>
+                <Element>
+                    <Identifier>TaskId</Identifier>
+                    <DisplayName>Task ID</DisplayName>
+                    <Description>Unique identifier for the task</Description>
+                    <DataType><Basic>String</Basic></DataType>
+                </Element>
+                <Element>
+                    <Identifier>TaskName</Identifier>
+                    <DisplayName>Task Name</DisplayName>
+                    <Description>Human-readable name of the task</Description>
+                    <DataType><Basic>String</Basic></DataType>
+                </Element>
+                <Element>
+                    <Identifier>SubtaskCount</Identifier>
+                    <DisplayName>Subtask Count</DisplayName>
+                    <Description>Number of subtasks in this task</Description>
+                    <DataType><Basic>Integer</Basic></DataType>
+                </Element>
+            </Structure>
+        </DataType>
+    </DataTypeDefinition>
+
+    <DataTypeDefinition>
+        <Identifier>TaskExecutionMode</Identifier>
+        <DisplayName>Task Execution Mode</DisplayName>
+        <Description>Mode for task execution</Description>
+        <DataType>
+            <Constrained>
+                <DataType><Basic>String</Basic></DataType>
+                <Constraints>
+                    <Set>
+                        <Value>Normal</Value>
+                        <Value>StepByStep</Value>
+                        <Value>DryRun</Value>
+                    </Set>
+                </Constraints>
+            </Constrained>
+        </DataType>
+    </DataTypeDefinition>
+
+    <DataTypeDefinition>
+        <Identifier>HardwareInfo</Identifier>
+        <DisplayName>Hardware Information</DisplayName>
+        <Description>Information about a piece of hardware registered on the robot controller (arm, gripper, camera, mobile base, ...)</Description>
+        <DataType>
+            <Structure>
+                <Element>
+                    <Identifier>HardwareId</Identifier>
+                    <DisplayName>Hardware ID</DisplayName>
+                    <Description>Unique identifier for the hardware, as registered on the robot controller</Description>
+                    <DataType><Basic>String</Basic></DataType>
+                </Element>
+                <Element>
+                    <Identifier>HardwareName</Identifier>
+                    <DisplayName>Hardware Name</DisplayName>
+                    <Description>Human-readable name of the hardware</Description>
+                    <DataType><Basic>String</Basic></DataType>
+                </Element>
+                <Element>
+                    <Identifier>Brand</Identifier>
+                    <DisplayName>Brand</DisplayName>
+                    <Description>Manufacturer of the hardware (e.g. ABB, OnRobot, Intel, Robotnik)</Description>
+                    <DataType><Basic>String</Basic></DataType>
+                </Element>
+                <Element>
+                    <Identifier>Model</Identifier>
+                    <DisplayName>Model</DisplayName>
+                    <Description>Hardware model (e.g. GoFa5, 2FG7, rsD415, summit-xl-steel)</Description>
+                    <DataType><Basic>String</Basic></DataType>
+                </Element>
+                <Element>
+                    <Identifier>Activated</Identifier>
+                    <DisplayName>Activated</DisplayName>
+                    <Description>Whether the hardware is currently activated on the robot controller</Description>
+                    <DataType><Basic>Boolean</Basic></DataType>
+                </Element>
+            </Structure>
+        </DataType>
+    </DataTypeDefinition>
+
+    <DataTypeDefinition>
+        <Identifier>HardwareRole</Identifier>
+        <DisplayName>Hardware Role</DisplayName>
+        <Description>
+            Which piece of hardware to activate/deactivate. Resolved to the actual
+            controller-registered hardware ID at call time (via getSetupInfo), so
+            this stays valid even if the underlying hardware ID changes on
+            reconfiguration.
+        </Description>
+        <DataType>
+            <Constrained>
+                <DataType><Basic>String</Basic></DataType>
+                <Constraints>
+                    <Set>
+                        <Value>Arm</Value>
+                        <Value>Gripper</Value>
+                        <Value>Camera</Value>
+                        <Value>MobileBase</Value>
+                    </Set>
+                </Constraints>
+            </Constrained>
+        </DataType>
+    </DataTypeDefinition>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!--                            PROPERTIES                               -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+    <Property>
+        <Identifier>AvailableTasks</Identifier>
+        <DisplayName>Available Tasks</DisplayName>
+        <Description>
+            List of tasks available for execution on the robot.
+            This list is populated from the robot controller via ROS service.
+        </Description>
+        <Observable>No</Observable>
+        <DataType>
+            <List>
+                <DataType>
+                    <DataTypeIdentifier>TaskInfo</DataTypeIdentifier>
+                </DataType>
+            </List>
+        </DataType>
+    </Property>
+
+    <Property>
+        <Identifier>CurrentTaskId</Identifier>
+        <DisplayName>Current Task ID</DisplayName>
+        <Description>ID of the currently executing task, or empty if idle</Description>
+        <Observable>Yes</Observable>
+        <DataType><Basic>String</Basic></DataType>
+    </Property>
+
+    <Property>
+        <Identifier>CurrentSubtask</Identifier>
+        <DisplayName>Current Subtask</DisplayName>
+        <Description>Name of the subtask currently being executed</Description>
+        <Observable>Yes</Observable>
+        <DataType><Basic>String</Basic></DataType>
+    </Property>
+
+    <Property>
+        <Identifier>TaskStatus</Identifier>
+        <DisplayName>Task Status</DisplayName>
+        <Description>Current status of task execution</Description>
+        <Observable>Yes</Observable>
+        <DataType>
+            <Constrained>
+                <DataType><Basic>String</Basic></DataType>
+                <Constraints>
+                    <Set>
+                        <Value>Idle</Value>
+                        <Value>Executing</Value>
+                        <Value>Paused</Value>
+                        <Value>Completed</Value>
+                        <Value>Failed</Value>
+                        <Value>Cancelled</Value>
+                    </Set>
+                </Constraints>
+            </Constrained>
+        </DataType>
+    </Property>
+
+    <Property>
+        <Identifier>RobotConnectionStatus</Identifier>
+        <DisplayName>Robot Connection Status</DisplayName>
+        <Description>Status of the connection to the robot controller (ROS)</Description>
+        <Observable>Yes</Observable>
+        <DataType>
+            <Constrained>
+                <DataType><Basic>String</Basic></DataType>
+                <Constraints>
+                    <Set>
+                        <Value>Connected</Value>
+                        <Value>Disconnected</Value>
+                        <Value>Connecting</Value>
+                        <Value>Error</Value>
+                    </Set>
+                </Constraints>
+            </Constrained>
+        </DataType>
+    </Property>
+
+    <Property>
+        <Identifier>AvailableHardware</Identifier>
+        <DisplayName>Available Hardware</DisplayName>
+        <Description>
+            List of hardware registered on the robot controller (arm, gripper, camera,
+            mobile base, ...) with their current activation state. Queried live from
+            the robot controller (getSetupInfo + get_hardware_activation) on every read.
+        </Description>
+        <Observable>No</Observable>
+        <DataType>
+            <List>
+                <DataType>
+                    <DataTypeIdentifier>HardwareInfo</DataTypeIdentifier>
+                </DataType>
+            </List>
+        </DataType>
+    </Property>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!--                            COMMANDS                                 -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+    <Command>
+        <Identifier>RefreshTasks</Identifier>
+        <DisplayName>Refresh Tasks</DisplayName>
+        <Description>
+            Query the robot controller for available tasks.
+            Updates the AvailableTasks property.
+        </Description>
+        <Observable>No</Observable>
+        <Response>
+            <Identifier>TaskCount</Identifier>
+            <DisplayName>Task Count</DisplayName>
+            <Description>Number of tasks discovered</Description>
+            <DataType><Basic>Integer</Basic></DataType>
+        </Response>
+        <DefinedExecutionErrors>
+            <Identifier>RobotNotConnected</Identifier>
+        </DefinedExecutionErrors>
+    </Command>
+
+    <Command>
+        <Identifier>ExecuteTask</Identifier>
+        <DisplayName>Execute Task</DisplayName>
+        <Description>
+            Execute a task on the robot by sending a goal to the ROS action server.
+
+            The task is identified by its ID (startTaskID in ROS).
+            Progress feedback is provided via the IntermediateResponse.
+        </Description>
+        <Observable>Yes</Observable>
+        <Parameter>
+            <Identifier>TaskId</Identifier>
+            <DisplayName>Task ID</DisplayName>
+            <Description>ID of the task to execute (dropdown populated from AvailableTasks)</Description>
+            <DataType><Basic>String</Basic></DataType>
+        </Parameter>
+        <Parameter>
+            <Identifier>ExecutionMode</Identifier>
+            <DisplayName>Execution Mode</DisplayName>
+            <Description>How to execute the task</Description>
+            <DataType>
+                <DataTypeIdentifier>TaskExecutionMode</DataTypeIdentifier>
+            </DataType>
+        </Parameter>
+        <Response>
+            <Identifier>Success</Identifier>
+            <DisplayName>Success</DisplayName>
+            <Description>Whether the task completed successfully</Description>
+            <DataType><Basic>Boolean</Basic></DataType>
+        </Response>
+        <Response>
+            <Identifier>Message</Identifier>
+            <DisplayName>Message</DisplayName>
+            <Description>Result message from the robot controller</Description>
+            <DataType><Basic>String</Basic></DataType>
+        </Response>
+        <Response>
+            <Identifier>ExecutionTime</Identifier>
+            <DisplayName>Execution Time</DisplayName>
+            <Description>Total execution time in seconds</Description>
+            <DataType><Basic>Real</Basic></DataType>
+        </Response>
+        <IntermediateResponse>
+            <Identifier>CurrentSubtask</Identifier>
+            <DisplayName>Current Subtask</DisplayName>
+            <Description>Name of the subtask being executed</Description>
+            <DataType><Basic>String</Basic></DataType>
+        </IntermediateResponse>
+        <IntermediateResponse>
+            <Identifier>Progress</Identifier>
+            <DisplayName>Progress</DisplayName>
+            <Description>Execution progress percentage (0-100)</Description>
+            <DataType><Basic>Real</Basic></DataType>
+        </IntermediateResponse>
+        <IntermediateResponse>
+            <Identifier>Status</Identifier>
+            <DisplayName>Status</DisplayName>
+            <Description>Current execution status</Description>
+            <DataType><Basic>String</Basic></DataType>
+        </IntermediateResponse>
+        <DefinedExecutionErrors>
+            <Identifier>TaskNotFound</Identifier>
+            <Identifier>TaskExecutionFailed</Identifier>
+            <Identifier>RobotNotConnected</Identifier>
+        </DefinedExecutionErrors>
+    </Command>
+
+    <Command>
+        <Identifier>CancelTask</Identifier>
+        <DisplayName>Cancel Task</DisplayName>
+        <Description>
+            Cancel the currently executing task.
+            Sends a cancel request to the ROS action server.
+        </Description>
+        <Observable>No</Observable>
+        <Response>
+            <Identifier>Cancelled</Identifier>
+            <DisplayName>Cancelled</DisplayName>
+            <Description>Whether the task was successfully cancelled</Description>
+            <DataType><Basic>Boolean</Basic></DataType>
+        </Response>
+    </Command>
+
+    <Command>
+        <Identifier>GetTaskDetails</Identifier>
+        <DisplayName>Get Task Details</DisplayName>
+        <Description>
+            Get detailed information about a specific task, including all subtasks.
+        </Description>
+        <Observable>No</Observable>
+        <Parameter>
+            <Identifier>TaskId</Identifier>
+            <DisplayName>Task ID</DisplayName>
+            <Description>ID of the task to query</Description>
+            <DataType><Basic>String</Basic></DataType>
+        </Parameter>
+        <Response>
+            <Identifier>TaskId</Identifier>
+            <DisplayName>Task ID</DisplayName>
+            <Description>ID of the task</Description>
+            <DataType><Basic>String</Basic></DataType>
+        </Response>
+        <Response>
+            <Identifier>TaskName</Identifier>
+            <DisplayName>Task Name</DisplayName>
+            <Description>Human-readable name of the task</Description>
+            <DataType><Basic>String</Basic></DataType>
+        </Response>
+        <Response>
+            <Identifier>Subtasks</Identifier>
+            <DisplayName>Subtasks</DisplayName>
+            <Description>JSON array of subtask information</Description>
+            <DataType><Basic>String</Basic></DataType>
+        </Response>
+        <DefinedExecutionErrors>
+            <Identifier>TaskNotFound</Identifier>
+        </DefinedExecutionErrors>
+    </Command>
+
+    <Command>
+        <Identifier>ConnectToRobot</Identifier>
+        <DisplayName>Connect to Robot</DisplayName>
+        <Description>
+            Establish connection to the robot controller via ROS.
+            This initializes the ROS node and connects to the action server.
+        </Description>
+        <Observable>No</Observable>
+        <Parameter>
+            <Identifier>RosMasterUri</Identifier>
+            <DisplayName>ROS Master URI</DisplayName>
+            <Description>URI of the ROS master (e.g., http://192.168.1.100:11311). Leave empty to use config default.</Description>
+            <DataType><Basic>String</Basic></DataType>
+        </Parameter>
+        <Response>
+            <Identifier>Connected</Identifier>
+            <DisplayName>Connected</DisplayName>
+            <Description>Whether connection was successful</Description>
+            <DataType><Basic>Boolean</Basic></DataType>
+        </Response>
+        <Response>
+            <Identifier>Message</Identifier>
+            <DisplayName>Message</DisplayName>
+            <Description>Connection status message</Description>
+            <DataType><Basic>String</Basic></DataType>
+        </Response>
+    </Command>
+
+    <Command>
+        <Identifier>SetHardwareActivation</Identifier>
+        <DisplayName>Set Hardware Activation</DisplayName>
+        <Description>
+            Activate or deactivate a single piece of hardware (arm, gripper, camera,
+            mobile base, ...) on the robot controller, via the ROS
+            /setup1/set_hardware_activation service. This is a physically consequential
+            action — activating hardware may engage motors/servos.
+
+            To activate everything, call this command once per hardware ID from
+            AvailableHardware.
+        </Description>
+        <Observable>No</Observable>
+        <Parameter>
+            <Identifier>HardwareId</Identifier>
+            <DisplayName>Hardware ID</DisplayName>
+            <Description>ID of the hardware to activate/deactivate (from AvailableHardware)</Description>
+            <DataType><Basic>String</Basic></DataType>
+        </Parameter>
+        <Parameter>
+            <Identifier>Activate</Identifier>
+            <DisplayName>Activate</DisplayName>
+            <Description>True to activate the hardware, False to deactivate it</Description>
+            <DataType><Basic>Boolean</Basic></DataType>
+        </Parameter>
+        <Response>
+            <Identifier>Success</Identifier>
+            <DisplayName>Success</DisplayName>
+            <Description>Whether the robot controller accepted the activation request</Description>
+            <DataType><Basic>Boolean</Basic></DataType>
+        </Response>
+        <Response>
+            <Identifier>ActivationState</Identifier>
+            <DisplayName>Activation State</DisplayName>
+            <Description>The hardware's activation state after the request</Description>
+            <DataType><Basic>Boolean</Basic></DataType>
+        </Response>
+        <Response>
+            <Identifier>Message</Identifier>
+            <DisplayName>Message</DisplayName>
+            <Description>Status message from the robot controller</Description>
+            <DataType><Basic>String</Basic></DataType>
+        </Response>
+        <DefinedExecutionErrors>
+            <Identifier>HardwareNotFound</Identifier>
+            <Identifier>RobotNotConnected</Identifier>
+        </DefinedExecutionErrors>
+    </Command>
+
+    <Command>
+        <Identifier>SetHardwareActivationByRole</Identifier>
+        <DisplayName>Set Hardware Activation (by role)</DisplayName>
+        <Description>
+            Same as SetHardwareActivation, but selects the hardware by its role
+            (Arm/Gripper/Camera/MobileBase) instead of its raw controller ID —
+            resolved live via getSetupInfo, so no external system needs to know
+            the actual hardware IDs. This is a physically consequential action —
+            activating hardware may engage motors/servos.
+        </Description>
+        <Observable>No</Observable>
+        <Parameter>
+            <Identifier>Hardware</Identifier>
+            <DisplayName>Hardware</DisplayName>
+            <Description>Which hardware to activate/deactivate</Description>
+            <DataType>
+                <DataTypeIdentifier>HardwareRole</DataTypeIdentifier>
+            </DataType>
+        </Parameter>
+        <Parameter>
+            <Identifier>Activate</Identifier>
+            <DisplayName>Activate</DisplayName>
+            <Description>True to activate the hardware, False to deactivate it</Description>
+            <DataType><Basic>Boolean</Basic></DataType>
+        </Parameter>
+        <Response>
+            <Identifier>Success</Identifier>
+            <DisplayName>Success</DisplayName>
+            <Description>Whether the robot controller accepted the activation request</Description>
+            <DataType><Basic>Boolean</Basic></DataType>
+        </Response>
+        <Response>
+            <Identifier>ActivationState</Identifier>
+            <DisplayName>Activation State</DisplayName>
+            <Description>The hardware's activation state after the request</Description>
+            <DataType><Basic>Boolean</Basic></DataType>
+        </Response>
+        <Response>
+            <Identifier>Message</Identifier>
+            <DisplayName>Message</DisplayName>
+            <Description>Status message from the robot controller</Description>
+            <DataType><Basic>String</Basic></DataType>
+        </Response>
+        <DefinedExecutionErrors>
+            <Identifier>HardwareNotFound</Identifier>
+            <Identifier>RobotNotConnected</Identifier>
+        </DefinedExecutionErrors>
+    </Command>
+
+    <Command>
+        <Identifier>ActivateAllHardware</Identifier>
+        <DisplayName>Activate All Hardware</DisplayName>
+        <Description>
+            Activate every piece of hardware registered on the robot controller
+            (arm, gripper, camera, mobile base), one at a time. This is a
+            physically consequential action — engages real motors/servos.
+        </Description>
+        <Observable>No</Observable>
+        <Response>
+            <Identifier>ActivatedCount</Identifier>
+            <DisplayName>Activated Count</DisplayName>
+            <Description>Number of hardware items successfully activated</Description>
+            <DataType><Basic>Integer</Basic></DataType>
+        </Response>
+        <Response>
+            <Identifier>Message</Identifier>
+            <DisplayName>Message</DisplayName>
+            <Description>Summary of the activation results, one line per hardware item</Description>
+            <DataType><Basic>String</Basic></DataType>
+        </Response>
+        <DefinedExecutionErrors>
+            <Identifier>RobotNotConnected</Identifier>
+        </DefinedExecutionErrors>
+    </Command>
+
+    <Command>
+        <Identifier>DeactivateAllHardware</Identifier>
+        <DisplayName>Deactivate All Hardware</DisplayName>
+        <Description>
+            Deactivate every piece of hardware registered on the robot controller
+            (arm, gripper, camera, mobile base), one at a time.
+        </Description>
+        <Observable>No</Observable>
+        <Response>
+            <Identifier>DeactivatedCount</Identifier>
+            <DisplayName>Deactivated Count</DisplayName>
+            <Description>Number of hardware items successfully deactivated</Description>
+            <DataType><Basic>Integer</Basic></DataType>
+        </Response>
+        <Response>
+            <Identifier>Message</Identifier>
+            <DisplayName>Message</DisplayName>
+            <Description>Summary of the deactivation results, one line per hardware item</Description>
+            <DataType><Basic>String</Basic></DataType>
+        </Response>
+        <DefinedExecutionErrors>
+            <Identifier>RobotNotConnected</Identifier>
+        </DefinedExecutionErrors>
+    </Command>
+
+</Feature>

@@ -1,0 +1,16 @@
+# MobileSiLA2Server — Python dependencies (Ubuntu / ROS PC)
+# Install with: pip3 install -r requirements.txt --user
+
+# SiLA2 standard library (replaces raw gRPC)
+sila2[codegen]>=0.14.0
+
+# gRPC transport (pulled in by sila2, listed for explicitness)
+grpcio>=1.60.0
+protobuf>=4.25.0
+
+# YAML config
+pyyaml>=6.0.1
+
+# NOTE: rospy, actionlib, std_srvs, rpwc_msgs come from ROS
+# and must be installed via apt + catkin — not pip.
+# See install.sh for full setup instructions.

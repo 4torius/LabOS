@@ -1,0 +1,12 @@
+{
+  "library_types": [
+    {
+      "hint": "mobile_task",
+      "display_name": "Mobile Task",
+      "folder": "Library/MobileTasks",
+      "file_extension": ".json",
+      "parameter_names": ["TaskId", "StartTaskId"],
+      "dynamic": true
+    }
+  ]
+}

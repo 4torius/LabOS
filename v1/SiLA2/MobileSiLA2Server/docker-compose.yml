@@ -1,0 +1,40 @@
+# MobileSiLA2Server — standalone container, separate from the heavy
+# ros-rpwc/exsocker (GPU/vision) container. network_mode: host lets it
+# reach the ROS master at localhost:11311 (ros-rpwc also runs host-networked)
+# and exposes gRPC port 50053 directly to the LAN, exactly like a native
+# process — no port mapping needed.
+#
+# The exsensia_ws volume mount is required: the rpwc_msgs Python package
+# (ROS action/service message definitions for task execution) only exists
+# in the live, built workspace on the host — the same one ros-rpwc mounts.
+# The base image (exsensia:bicocca_release) bakes in an empty /exsensia_ws
+# skeleton with no packages, so without this mount rpwc_msgs is unimportable
+# and the ROS task bridge can never leave 'Disconnected' state.
+services:
+  mobile-sila2:
+    build: .
+    image: mobile-sila2-server:latest
+    container_name: mobile-sila2
+    network_mode: host
+    restart: always
+    environment:
+      # Without ROS_IP, rospy falls back to gethostname() ("zbox"), which has
+      # no /etc/hosts entry — init_node() then hangs indefinitely trying to
+      # resolve it. Mirror ros-rpwc's working ROS_IP so node registration with
+      # the local master actually completes.
+      - ROS_IP=exsensialocal.net
+      # Unbuffered stdout/stderr -- otherwise Python block-buffers when
+      # stdout isn't a TTY and log lines (incl. reconnect/error diagnostics)
+      # can sit invisible in docker logs for hours until the buffer flushes.
+      - PYTHONUNBUFFERED=1
+      # LabOSLibraryProvider creates the folders library_catalog.json names
+      # under the LabOS root, which it takes to be two levels above this
+      # server. In the container that would be '/', so point it at the app.
+      - LABOS_ROOT=/app
+    volumes:
+      - .:/app
+      - /home/zotac/exsensia_ws:/exsensia_ws
+    working_dir: /app
+    command: >
+      bash -c "source /exsensia_ws/devel/setup.bash &&
+      exec python3 main.py --production"

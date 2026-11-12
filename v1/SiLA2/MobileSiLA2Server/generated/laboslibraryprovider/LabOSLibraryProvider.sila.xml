@@ -1,0 +1,20 @@
+<Feature xmlns="http://www.sila-standard.org" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Category="core" FeatureVersion="1.0" MaturityLevel="Draft" Originator="de.bicocca.labos" SiLA2Version="1.1" xsi:schemaLocation="http://www.sila-standard.org https://gitlab.com/SiLA2/sila_base/-/raw/master/schema/FeatureDefinition.xsd">
+  <Identifier>LabOSLibraryProvider</Identifier>
+  <DisplayName>LabOS Library Provider</DisplayName>
+  <Description>Exposes the library file types used by this instrument.
+    The LabOS orchestrator reads this property at discovery time to populate
+    workflow builder dropdowns automatically, without requiring static
+    configuration in lab_config.yaml.</Description>
+  <Property>
+    <Identifier>LibraryCatalog</Identifier>
+    <DisplayName>Library Catalog</DisplayName>
+    <Description>JSON string describing the library file types this instrument uses.
+      Each entry contains: hint (UI identifier), display_name, folder (relative
+      to v1/), file_extension, and parameter_names (SiLA2 parameter identifiers
+      that map to this library type).</Description>
+    <Observable>No</Observable>
+    <DataType>
+      <Basic>String</Basic>
+    </DataType>
+  </Property>
+</Feature>
