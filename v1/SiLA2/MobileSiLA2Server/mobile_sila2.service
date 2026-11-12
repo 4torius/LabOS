@@ -1,0 +1,33 @@
+[Unit]
+Description=LabOS Mobile SiLA2 Server (GoFaGo bridge)
+Documentation=https://github.com/yourlab/LabOS
+# Start after ROS master is up and the WiFi interface is ready
+After=network-online.target
+Wants=network-online.target
+# If you have a roscore.service unit, add:
+#   After=roscore.service
+#   BindsTo=roscore.service
+
+[Service]
+Type=simple
+User=__SERVICE_USER__
+WorkingDirectory=__INSTALL_DIR__
+
+# Source ROS + catkin workspace then start the server.
+# systemd does NOT execute bash rc files, so we must source explicitly.
+ExecStart=/bin/bash __INSTALL_DIR__/start_service.sh
+
+# Restart automatically on crash
+Restart=always
+RestartSec=5
+
+# Give up after 3 fast consecutive crashes (within StartLimitIntervalSec)
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Stdout/stderr go to journald (journalctl -u mobile_sila2 -f)
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

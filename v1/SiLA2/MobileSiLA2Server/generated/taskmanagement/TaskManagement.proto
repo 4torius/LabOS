@@ -1,0 +1,255 @@
+syntax = "proto3";
+
+import "SiLAFramework.proto";
+
+package sila2.it.bicoccalab.automation.taskmanagement.v1;
+
+/* High-level task management for the mobile robot system. This feature allows the orchestrator to: - Discover available tasks from the robot controller - Execute tasks with progress feedback - Monitor task execution status - Cancel running tasks The robot PC exposes predefined tasks via ROS action/service: - Action Server: /setup1/state_exec (executionCommand.action) - Service: /setup1/getSubtasksInfo (getSubtaskInfo.srv) Each task consists of a root task with multiple subtasks. Feedback is provided during execution showing current subtask. */
+service TaskManagement {
+  /* Query the robot controller for available tasks. Updates the AvailableTasks property. */
+  rpc RefreshTasks (sila2.it.bicoccalab.automation.taskmanagement.v1.RefreshTasks_Parameters) returns (sila2.it.bicoccalab.automation.taskmanagement.v1.RefreshTasks_Responses) {}
+  /* 
+            Execute a task on the robot by sending a goal to the ROS action server.
+
+            The task is identified by its ID (startTaskID in ROS).
+            Progress feedback is provided via the IntermediateResponse.
+         */
+  rpc ExecuteTask (sila2.it.bicoccalab.automation.taskmanagement.v1.ExecuteTask_Parameters) returns (sila2.org.silastandard.CommandConfirmation) {}
+  /* Monitor the state of ExecuteTask */
+  rpc ExecuteTask_Info (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.org.silastandard.ExecutionInfo) {}
+  /* Retrieve intermediate responses of ExecuteTask */
+  rpc ExecuteTask_Intermediate (sila2.org.silastandard.CommandExecutionUUID) returns (stream sila2.it.bicoccalab.automation.taskmanagement.v1.ExecuteTask_IntermediateResponses) {}
+  /* Retrieve result of ExecuteTask */
+  rpc ExecuteTask_Result(sila2.org.silastandard.CommandExecutionUUID) returns (sila2.it.bicoccalab.automation.taskmanagement.v1.ExecuteTask_Responses) {}
+  /* Cancel the currently executing task. Sends a cancel request to the ROS action server. */
+  rpc CancelTask (sila2.it.bicoccalab.automation.taskmanagement.v1.CancelTask_Parameters) returns (sila2.it.bicoccalab.automation.taskmanagement.v1.CancelTask_Responses) {}
+  /* Get detailed information about a specific task, including all subtasks. */
+  rpc GetTaskDetails (sila2.it.bicoccalab.automation.taskmanagement.v1.GetTaskDetails_Parameters) returns (sila2.it.bicoccalab.automation.taskmanagement.v1.GetTaskDetails_Responses) {}
+  /* Establish connection to the robot controller via ROS. This initializes the ROS node and connects to the action server. */
+  rpc ConnectToRobot (sila2.it.bicoccalab.automation.taskmanagement.v1.ConnectToRobot_Parameters) returns (sila2.it.bicoccalab.automation.taskmanagement.v1.ConnectToRobot_Responses) {}
+  /* Activate or deactivate a single piece of hardware (arm, gripper, camera, mobile base, ...) on the robot controller, via the ROS /setup1/set_hardware_activation service. This is a physically consequential action — activating hardware may engage motors/servos. To activate everything, call this command once per hardware ID from AvailableHardware. */
+  rpc SetHardwareActivation (sila2.it.bicoccalab.automation.taskmanagement.v1.SetHardwareActivation_Parameters) returns (sila2.it.bicoccalab.automation.taskmanagement.v1.SetHardwareActivation_Responses) {}
+  /* Same as SetHardwareActivation, but selects the hardware by its role (Arm/Gripper/Camera/MobileBase) instead of its raw controller ID — resolved live via getSetupInfo, so no external system needs to know the actual hardware IDs. This is a physically consequential action — activating hardware may engage motors/servos. */
+  rpc SetHardwareActivationByRole (sila2.it.bicoccalab.automation.taskmanagement.v1.SetHardwareActivationByRole_Parameters) returns (sila2.it.bicoccalab.automation.taskmanagement.v1.SetHardwareActivationByRole_Responses) {}
+  /* Activate every piece of hardware registered on the robot controller (arm, gripper, camera, mobile base), one at a time. This is a physically consequential action — engages real motors/servos. */
+  rpc ActivateAllHardware (sila2.it.bicoccalab.automation.taskmanagement.v1.ActivateAllHardware_Parameters) returns (sila2.it.bicoccalab.automation.taskmanagement.v1.ActivateAllHardware_Responses) {}
+  /* Deactivate every piece of hardware registered on the robot controller (arm, gripper, camera, mobile base), one at a time. */
+  rpc DeactivateAllHardware (sila2.it.bicoccalab.automation.taskmanagement.v1.DeactivateAllHardware_Parameters) returns (sila2.it.bicoccalab.automation.taskmanagement.v1.DeactivateAllHardware_Responses) {}
+  /* 
+            List of tasks available for execution on the robot.
+            This list is populated from the robot controller via ROS service.
+         */
+  rpc Get_AvailableTasks (sila2.it.bicoccalab.automation.taskmanagement.v1.Get_AvailableTasks_Parameters) returns (sila2.it.bicoccalab.automation.taskmanagement.v1.Get_AvailableTasks_Responses) {}
+  /* ID of the currently executing task, or empty if idle */
+  rpc Subscribe_CurrentTaskId (sila2.it.bicoccalab.automation.taskmanagement.v1.Subscribe_CurrentTaskId_Parameters) returns (stream sila2.it.bicoccalab.automation.taskmanagement.v1.Subscribe_CurrentTaskId_Responses) {}
+  /* Name of the subtask currently being executed */
+  rpc Subscribe_CurrentSubtask (sila2.it.bicoccalab.automation.taskmanagement.v1.Subscribe_CurrentSubtask_Parameters) returns (stream sila2.it.bicoccalab.automation.taskmanagement.v1.Subscribe_CurrentSubtask_Responses) {}
+  /* Current status of task execution */
+  rpc Subscribe_TaskStatus (sila2.it.bicoccalab.automation.taskmanagement.v1.Subscribe_TaskStatus_Parameters) returns (stream sila2.it.bicoccalab.automation.taskmanagement.v1.Subscribe_TaskStatus_Responses) {}
+  /* Status of the connection to the robot controller (ROS) */
+  rpc Subscribe_RobotConnectionStatus (sila2.it.bicoccalab.automation.taskmanagement.v1.Subscribe_RobotConnectionStatus_Parameters) returns (stream sila2.it.bicoccalab.automation.taskmanagement.v1.Subscribe_RobotConnectionStatus_Responses) {}
+  /* 
+            List of hardware registered on the robot controller (arm, gripper, camera,
+            mobile base, ...) with their current activation state. Queried live from
+            the robot controller (getSetupInfo + get_hardware_activation) on every read.
+         */
+  rpc Get_AvailableHardware (sila2.it.bicoccalab.automation.taskmanagement.v1.Get_AvailableHardware_Parameters) returns (sila2.it.bicoccalab.automation.taskmanagement.v1.Get_AvailableHardware_Responses) {}
+}
+
+/* Information about an available task */
+message DataType_TaskInfo {
+  message TaskInfo_Struct {
+    sila2.org.silastandard.String TaskId = 1;  /* Unique identifier for the task */
+    sila2.org.silastandard.String TaskName = 2;  /* Human-readable name of the task */
+    sila2.org.silastandard.Integer SubtaskCount = 3;  /* Number of subtasks in this task */
+  }
+  sila2.it.bicoccalab.automation.taskmanagement.v1.DataType_TaskInfo.TaskInfo_Struct TaskInfo = 1;  /* Information about an available task */
+}
+
+/* Mode for task execution */
+message DataType_TaskExecutionMode {
+  sila2.org.silastandard.String TaskExecutionMode = 1;  /* Mode for task execution */
+}
+
+/* Information about a piece of hardware registered on the robot controller (arm, gripper, camera, mobile base, ...) */
+message DataType_HardwareInfo {
+  message HardwareInfo_Struct {
+    sila2.org.silastandard.String HardwareId = 1;  /* Unique identifier for the hardware, as registered on the robot controller */
+    sila2.org.silastandard.String HardwareName = 2;  /* Human-readable name of the hardware */
+    sila2.org.silastandard.String Brand = 3;  /* Manufacturer of the hardware (e.g. ABB, OnRobot, Intel, Robotnik) */
+    sila2.org.silastandard.String Model = 4;  /* Hardware model (e.g. GoFa5, 2FG7, rsD415, summit-xl-steel) */
+    sila2.org.silastandard.Boolean Activated = 5;  /* Whether the hardware is currently activated on the robot controller */
+  }
+  sila2.it.bicoccalab.automation.taskmanagement.v1.DataType_HardwareInfo.HardwareInfo_Struct HardwareInfo = 1;  /* Information about a piece of hardware registered on the robot controller (arm, gripper, camera, mobile base, ...) */
+}
+
+/* 
+            Which piece of hardware to activate/deactivate. Resolved to the actual
+            controller-registered hardware ID at call time (via getSetupInfo), so
+            this stays valid even if the underlying hardware ID changes on
+            reconfiguration.
+         */
+message DataType_HardwareRole {
+  sila2.org.silastandard.String HardwareRole = 1;  /* Which piece of hardware to activate/deactivate. Resolved to the actual controller-registered hardware ID at call time (via getSetupInfo), so this stays valid even if the underlying hardware ID changes on reconfiguration. */
+}
+
+/* Parameters for RefreshTasks */
+message RefreshTasks_Parameters {
+}
+
+/* Responses of RefreshTasks */
+message RefreshTasks_Responses {
+  sila2.org.silastandard.Integer TaskCount = 1;  /* Number of tasks discovered */
+}
+
+/* Parameters for ExecuteTask */
+message ExecuteTask_Parameters {
+  sila2.org.silastandard.String TaskId = 1;  /* ID of the task to execute (dropdown populated from AvailableTasks) */
+  sila2.it.bicoccalab.automation.taskmanagement.v1.DataType_TaskExecutionMode ExecutionMode = 2;  /* How to execute the task */
+}
+
+/* Responses of ExecuteTask */
+message ExecuteTask_Responses {
+  sila2.org.silastandard.Boolean Success = 1;  /* Whether the task completed successfully */
+  sila2.org.silastandard.String Message = 2;  /* Result message from the robot controller */
+  sila2.org.silastandard.Real ExecutionTime = 3;  /* Total execution time in seconds */
+}
+
+/* Intermediate responses of ExecuteTask */
+message ExecuteTask_IntermediateResponses {
+  sila2.org.silastandard.String CurrentSubtask = 1;  /* Name of the subtask being executed */
+  sila2.org.silastandard.Real Progress = 2;  /* Execution progress percentage (0-100) */
+  sila2.org.silastandard.String Status = 3;  /* Current execution status */
+}
+
+/* Parameters for CancelTask */
+message CancelTask_Parameters {
+}
+
+/* Responses of CancelTask */
+message CancelTask_Responses {
+  sila2.org.silastandard.Boolean Cancelled = 1;  /* Whether the task was successfully cancelled */
+}
+
+/* Parameters for GetTaskDetails */
+message GetTaskDetails_Parameters {
+  sila2.org.silastandard.String TaskId = 1;  /* ID of the task to query */
+}
+
+/* Responses of GetTaskDetails */
+message GetTaskDetails_Responses {
+  sila2.org.silastandard.String TaskId = 1;  /* ID of the task */
+  sila2.org.silastandard.String TaskName = 2;  /* Human-readable name of the task */
+  sila2.org.silastandard.String Subtasks = 3;  /* JSON array of subtask information */
+}
+
+/* Parameters for ConnectToRobot */
+message ConnectToRobot_Parameters {
+  sila2.org.silastandard.String RosMasterUri = 1;  /* URI of the ROS master (e.g., http://192.168.1.100:11311). Leave empty to use config default. */
+}
+
+/* Responses of ConnectToRobot */
+message ConnectToRobot_Responses {
+  sila2.org.silastandard.Boolean Connected = 1;  /* Whether connection was successful */
+  sila2.org.silastandard.String Message = 2;  /* Connection status message */
+}
+
+/* Parameters for SetHardwareActivation */
+message SetHardwareActivation_Parameters {
+  sila2.org.silastandard.String HardwareId = 1;  /* ID of the hardware to activate/deactivate (from AvailableHardware) */
+  sila2.org.silastandard.Boolean Activate = 2;  /* True to activate the hardware, False to deactivate it */
+}
+
+/* Responses of SetHardwareActivation */
+message SetHardwareActivation_Responses {
+  sila2.org.silastandard.Boolean Success = 1;  /* Whether the robot controller accepted the activation request */
+  sila2.org.silastandard.Boolean ActivationState = 2;  /* The hardware's activation state after the request */
+  sila2.org.silastandard.String Message = 3;  /* Status message from the robot controller */
+}
+
+/* Parameters for SetHardwareActivationByRole */
+message SetHardwareActivationByRole_Parameters {
+  sila2.it.bicoccalab.automation.taskmanagement.v1.DataType_HardwareRole Hardware = 1;  /* Which hardware to activate/deactivate */
+  sila2.org.silastandard.Boolean Activate = 2;  /* True to activate the hardware, False to deactivate it */
+}
+
+/* Responses of SetHardwareActivationByRole */
+message SetHardwareActivationByRole_Responses {
+  sila2.org.silastandard.Boolean Success = 1;  /* Whether the robot controller accepted the activation request */
+  sila2.org.silastandard.Boolean ActivationState = 2;  /* The hardware's activation state after the request */
+  sila2.org.silastandard.String Message = 3;  /* Status message from the robot controller */
+}
+
+/* Parameters for ActivateAllHardware */
+message ActivateAllHardware_Parameters {
+}
+
+/* Responses of ActivateAllHardware */
+message ActivateAllHardware_Responses {
+  sila2.org.silastandard.Integer ActivatedCount = 1;  /* Number of hardware items successfully activated */
+  sila2.org.silastandard.String Message = 2;  /* Summary of the activation results, one line per hardware item */
+}
+
+/* Parameters for DeactivateAllHardware */
+message DeactivateAllHardware_Parameters {
+}
+
+/* Responses of DeactivateAllHardware */
+message DeactivateAllHardware_Responses {
+  sila2.org.silastandard.Integer DeactivatedCount = 1;  /* Number of hardware items successfully deactivated */
+  sila2.org.silastandard.String Message = 2;  /* Summary of the deactivation results, one line per hardware item */
+}
+
+/* Parameters for AvailableTasks */
+message Get_AvailableTasks_Parameters {
+}
+
+/* Responses of AvailableTasks */
+message Get_AvailableTasks_Responses {
+  repeated sila2.it.bicoccalab.automation.taskmanagement.v1.DataType_TaskInfo AvailableTasks = 1;  /* List of tasks available for execution on the robot. This list is populated from the robot controller via ROS service. */
+}
+
+/* Parameters for CurrentTaskId */
+message Subscribe_CurrentTaskId_Parameters {
+}
+
+/* Responses of CurrentTaskId */
+message Subscribe_CurrentTaskId_Responses {
+  sila2.org.silastandard.String CurrentTaskId = 1;  /* ID of the currently executing task, or empty if idle */
+}
+
+/* Parameters for CurrentSubtask */
+message Subscribe_CurrentSubtask_Parameters {
+}
+
+/* Responses of CurrentSubtask */
+message Subscribe_CurrentSubtask_Responses {
+  sila2.org.silastandard.String CurrentSubtask = 1;  /* Name of the subtask currently being executed */
+}
+
+/* Parameters for TaskStatus */
+message Subscribe_TaskStatus_Parameters {
+}
+
+/* Responses of TaskStatus */
+message Subscribe_TaskStatus_Responses {
+  sila2.org.silastandard.String TaskStatus = 1;  /* Current status of task execution */
+}
+
+/* Parameters for RobotConnectionStatus */
+message Subscribe_RobotConnectionStatus_Parameters {
+}
+
+/* Responses of RobotConnectionStatus */
+message Subscribe_RobotConnectionStatus_Responses {
+  sila2.org.silastandard.String RobotConnectionStatus = 1;  /* Status of the connection to the robot controller (ROS) */
+}
+
+/* Parameters for AvailableHardware */
+message Get_AvailableHardware_Parameters {
+}
+
+/* Responses of AvailableHardware */
+message Get_AvailableHardware_Responses {
+  repeated sila2.it.bicoccalab.automation.taskmanagement.v1.DataType_HardwareInfo AvailableHardware = 1;  /* List of hardware registered on the robot controller (arm, gripper, camera, mobile base, ...) with their current activation state. Queried live from the robot controller (getSetupInfo + get_hardware_activation) on every read. */
+}

@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+import "SiLAFramework.proto";
+
+package sila2.de.bicocca.labos.core.laboslibraryprovider.v1;
+
+/* Exposes the library file types used by this instrument. The LabOS orchestrator reads this property at discovery time to populate workflow builder dropdowns automatically, without requiring static configuration in lab_config.yaml. */
+service LabOSLibraryProvider {
+  /* 
+      JSON string describing the library file types this instrument uses.
+      Each entry contains: hint (UI identifier), display_name, folder (relative
+      to v1/), file_extension, and parameter_names (SiLA2 parameter identifiers
+      that map to this library type).
+     */
+  rpc Get_LibraryCatalog (sila2.de.bicocca.labos.core.laboslibraryprovider.v1.Get_LibraryCatalog_Parameters) returns (sila2.de.bicocca.labos.core.laboslibraryprovider.v1.Get_LibraryCatalog_Responses) {}
+}
+
+/* Parameters for LibraryCatalog */
+message Get_LibraryCatalog_Parameters {
+}
+
+/* Responses of LibraryCatalog */
+message Get_LibraryCatalog_Responses {
+  sila2.org.silastandard.String LibraryCatalog = 1;  /* JSON string describing the library file types this instrument uses. Each entry contains: hint (UI identifier), display_name, folder (relative to v1/), file_extension, and parameter_names (SiLA2 parameter identifiers that map to this library type). */
+}
