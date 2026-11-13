@@ -272,19 +272,44 @@ instrument and *not* the tray — the hold already protects it. Claiming both
 makes `Measure` wait for the `UnloadPlate` that comes after it, and validation
 will tell you so.
 
-**A hold can deadlock, so validation is strict about it.** Two shapes are
-refused before anything moves: a workflow where nothing ever runs the releasing
-command (the resource would stay held for the rest of the run), and a step that
-needs the resource without being ordered after the step that releases it (it
-would wait for something nothing will free). Both say which `DependsOn` to add.
+**A step that needs a held resource waits for it**, the way it would for any
+other claim. What validation refuses is the case where it could never be freed
+first: nothing releases it at all while a later step needs it, or the step that
+releases it depends on the one waiting. A deadlock that only shows up at run
+time — two plates each waiting for the position the other is in — makes the
+steps fail with a message naming what they were waiting for; the run does not
+hang.
 
-**Before you declare one, ask whether the command always means the same thing.**
-The LabOS Tecan server does *not* declare a hold on `PlateIn`, and the reason is
-instructive: in the lab's own workflow `PlateIn` is used both to insert a plate
-and, later, to close the empty tray. Per-command declarations cannot tell those
-apart, so declaring the hold made a correct workflow fail validation. If your
-command is overloaded the same way, leave the hold out and let `DependsOn`
-carry the ordering.
+`holds` names a command **of your own server**. The same command name on
+another instrument releases nothing of yours.
+
+**Before you declare one, ask who actually puts the plate there.** The LabOS
+Tecan server does *not* declare a hold on `PlateIn`: `PlateIn` moves the tray,
+and is used both to load a plate and to close the empty tray afterwards. The
+plate arrives when the *robot* places it and leaves when the robot picks it up,
+so that is where it is declared — see the next section. Use `holds` when your
+own load and unload commands each mean one thing.
+
+#### `acquires` / `releases` — when somebody else moves the plate
+
+A position that stays occupied between one command and another, where the two
+are not necessarily yours: you provide the position, the transport declares
+when it fills and empties it.
+
+```json
+"provides": ["instrument:x", "tray:x", "slot:x"]
+```
+
+and, in the robot's catalog:
+
+```json
+"place_on_x":  {"claims": ["tray:x"], "acquires": ["slot:x"]},
+"pick_from_x": {"claims": ["tray:x"], "releases": ["slot:x"]}
+```
+
+`tray:x` is the space something moves in — occupied for one step. `slot:x` is
+"there is a plate here" — occupied from the place to the pick. A step that
+fails leaves the position occupied either way: nobody knows where the plate is.
 
 #### `by_parameter` — when the command is not the whole story
 
@@ -304,15 +329,44 @@ which command it is. The mobile robot is the case: every transport is one
 }
 ```
 
+A value maps to a list of claims, or to an object with `claims`, `acquires`
+and `releases`.
+
 A value that is not listed contributes nothing, so the command falls back to
-its unconditional `claims`.
+its unconditional `claims` — unless the command says `"exhaustive": true`. Then
+the table is taken to list **every** value, and a workflow step using one that
+is not there is refused at validation. Use it whenever "not listed" must not
+mean "harmless": the robot's catalog does, so a task taught after the catalog
+was written cannot run until somebody declares what it occupies (an empty
+entry, `[]`, if nothing beyond the robot).
 
 **The trap, and it is a real one:** declare the parameter under the name the
-workflow actually sends. The shipped mobile robot sends `TaskId` — an opaque
-id — while a hand-written workflow may send `TaskName`. Keying on only one of
-them matches nothing, and *a claim that never matches means no exclusion, with
-no error*. Declare both spellings when in doubt; an unmatched key costs
-nothing. Check a real workflow file rather than assuming.
+workflow actually sends. A workflow for the mobile robot sends `TaskId` — an
+opaque id that changes when the task is re-taught — while a person can only
+sensibly write `TaskName`. Keying on only one of them matches nothing, and *a
+claim that never matches means no exclusion, with no error*. The robot's server
+solves it by declaring names in the file and adding the ids itself when it
+serves the catalog (`LibraryProviderImpl(server, augment=...)`, see
+`SiLA2/MobileSiLA2Server/src/task_resources.py`). Check a real workflow file
+rather than assuming.
+
+#### `emergency_stop` — how your instrument is stopped
+
+Outside `resources`, at the top level of the catalog:
+
+```json
+"emergency_stop": {"command": "Stop"}
+```
+
+The command must take no required parameters; the emergency stop sends it with
+none. Name it. A server that does not is tried against a short list of usual
+names, and if none fits, every emergency stop reports your instrument as **not
+stopped** — which is the truth, and is shown to the operator as such. If there
+is genuinely nothing to stop (an operator at a bench):
+
+```json
+"emergency_stop": {"not_applicable": "an operator at a bench"}
+```
 
 #### If you declare nothing
 
@@ -340,8 +394,11 @@ Before you call it done:
 - [ ] your stop/abort/pause commands are `control: true`
 - [ ] no command that moves hardware is `control: true`
 - [ ] any `by_parameter` key matches what a real workflow sends
-- [ ] any `holds` has a command that always releases it, and the command
-      that holds it always means the same thing
+- [ ] any `holds` names a command of this server that always means "the plate
+      is gone"; a plate somebody else moves is `acquires` / `releases` on theirs
+- [ ] `emergency_stop` names your stop command
+- [ ] it runs in the simulated lab: add it to `sim_lab/lab.py` and see
+      [SIMULATED_LAB.md](SIMULATED_LAB.md)
 - [ ] `labos.py doctor` reports no resource problems
 
 ---

@@ -89,10 +89,11 @@ workflow:
   # At most this many steps at once. What may overlap is decided by what each
   # step physically occupies (see `python labos.py resources`); this is a cap
   # on top of that. 1 = strictly one step at a time, which is how this lab has
-  # always run. Remove the line (or raise it) only after the bench tests in
-  # docs/SIMULATED_LAB.md have passed AND the robot PC runs the
-  # MobileSiLA2Server from this repository - until it does, the robot declares
-  # nothing and its steps are not excluded from the Opentrons deck.
+  # always run, and what a config without this line also gets. Raise it (0 =
+  # no cap) only after the bench tests in docs/SIMULATED_LAB.md have passed
+  # AND the robot PC runs the MobileSiLA2Server from this repository - until
+  # it does, the robot declares nothing and its steps are not excluded from
+  # the Opentrons deck.
   # (`parallel_execution: false` used to be written here; it is retired, and
   # is still read as a cap of 1 if an old config carries it.)
   max_concurrency: 1

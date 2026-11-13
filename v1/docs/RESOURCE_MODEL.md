@@ -153,101 +153,18 @@ This is a *supplement*, never an override: see the resolution rules below. It is
 what keeps the model open to instruments nobody here wrote, which is the
 direction the system is meant to grow.
 
-**What this layer is not about: reachability.** The mobile robot is declared
-here, and the reason is narrow — its catalog is a file inside a container on the
-robot PC and that server's source is not in this repository. It is *not* that
-the robot is hard to reach: when the orchestrator joins the robot PC's hotspot
-they are on one network and mDNS announcements arrive normally. Being able to
-talk to a server and being able to edit a file in its image are different
-things, and only the second one is why a declaration would have to live
-elsewhere.
+**What this layer is not about: reachability.** The mobile robot *was*
+declared here, and the reason was narrow — its server's source was not in this
+repository. It now is (`SiLA2/MobileSiLA2Server`), so the robot declares for
+itself like every other instrument and this layer is, in the shipped
+configuration, empty. It earns its place only for servers nobody here can
+modify at all.
 
-Which makes the robot's entry provisional on purpose. If that catalog ever
-gains a `resources` section, the server wins by rule 1 below, the config block
-is ignored, and `labos.py resources` reports that it is being ignored. That is
-the better end state, and the model is already arranged to prefer it. The layer
-earns its place permanently only for servers nobody here can modify at all.
-
-### Layer 3 — aliases, for the one genuinely variable binding
-
-Tasks are taught by demonstration relative to each workstation's ArUco marker.
-If the instrument behind a marker is swapped, the taught *motion* stays valid
-but the *claim target* changes. That is the one binding that is deployment
-variable rather than intrinsic, so it gets an indirection:
-
-```yaml
-resources:
-  aliases:
-    station_1: "deck:opentrons"
-```
-
-A claim on `station_1` resolves through it. Everything else resolves to itself.
-
-### Why not make the indirection mandatory
-
-Because for a safety mechanism, every extra place the truth can be wrong is a
-cost, and mandatory abstract-name-plus-binding buys no expressive power this
-scheme lacks. With server-declared names there is one way to be wrong — a claim
-nobody provides, reported loudly. With a mandatory binding layer there are two
-sources that can disagree, and the common implementation of a missing binding
-is to fail open, which is silent and unsafe. With four instruments the config
-cost would also be ~40 lines to keep correct, against zero here.
-
-### What is deliberately *not* in the model
-
-**Cross-resource mutex groups** ("these two resources cannot be held together
-even though they are distinct") were considered and dropped. The motivating
-example — "the arm cannot be in two places at once" — turns out to be covered
-already, since every robot task claims `instrument:mobile`. The remaining cases
-(two instruments on one power circuit, overlapping manoeuvring envelopes) are
-hazards this lab does not have. Phase 1 of the refactor removed 1,500 lines of
-machinery built against a hypothetical; this is not the moment to add more. The
-extension point is `ResourceTopology.conflicts()`, which is the only place that
-would need to change.
-
----
-
-## Resolution rules
-
-1. **The server wins for what it declares.** If a server declares a
-   `resources` section, `resources.declare` in the config is ignored for that
-   server's listed commands. The instrument stays the authority on itself, so
-   plug-and-play is preserved: adding an instrument never edits central config.
-2. **The config supplements where the server is silent** — a server with no
-   `resources` section at all, or a command it did not list.
-3. **Aliases are applied to claims after collection**, one step, no chains. An
-   alias whose target is itself an alias is a configuration error.
-4. **Anything unresolved is an error, fail closed.** A claim that names a
-   resource no server provides and no alias translates makes every workflow
-   containing that step fail validation, naming the instrument, the command and
-   the resource. It is never downgraded to "no exclusion".
-
-## Implicit claims, and why concurrency has to be earned
-
-Every step implicitly claims `instrument:<instrument_id>`, declared or not. A
-server that says nothing still gets serialised against itself.
-
-That is not sufficient on its own. If an undeclared server's steps carried
-*only* that implicit claim, then today — when no server has a `resources`
-section yet — every step would have disjoint claims, nothing would conflict, and
-the executor would happily dispatch all 19 steps of `Test_Bicocca` at once. The
-new model would have introduced exactly the hazard it exists to remove.
-
-So a step on an instrument whose server declares **no** resources at all also
-claims a shared token, `lab:undeclared`. Every other undeclared step claims it
-too, so they all serialise against each other.
-
-The consequence is the migration path:
-
-- **Today**, with no catalog declaring anything, every step claims
-  `lab:undeclared` and execution is fully serial — byte-for-byte today's
-  behaviour under `parallel_execution: false`. Nothing changes until something
-  is declared.
-- **As declarations land**, parallelism appears only between steps whose
-  instruments have stated what they touch.
-
-Concurrency is opted into by declaring, never by flipping a flag. For hardware
-that is the right direction for the default to fail.
+An entry is keyed by the instrument's key under `servers:` (`mobile`), which
+is what a workflow writes. It is **not** the name the server announces
+(`GoFaGo Mobile Robot`) — see *What the first review found* below for what
+that confusion cost. An entry whose key matches no discovered instrument is
+reported by `labos.py resources` and on the Settings page rather than dropped.
 
 ## `workflow.parallel_execution` goes away
 
@@ -256,9 +173,12 @@ things at once"*. With claims, neither needs configuring — a wave dispatches
 concurrently for steps whose claims are disjoint and serially for steps that
 contend, and there is no setting to get wrong.
 
-It is replaced by `workflow.max_concurrency` (default unlimited, `1` to force
-strict serial execution as a brake), which is a resource limit rather than a
-change of semantics. The old key is read for one release and warned about.
+It is replaced by `workflow.max_concurrency`, which is a resource limit rather
+than a change of semantics: `1` forces strict serial execution, `0` means no
+cap. A configuration that says nothing gets `1` — a lab that has not decided
+runs one step at a time — and the shipped `lab_config.yaml` says `1`
+explicitly. The old key is still read: `parallel_execution: false` is a cap of
+one.
 
 ## No deadlock, by construction — and why that justifies the phasing
 
@@ -267,14 +187,24 @@ releases them when it finishes. It never holds one claim while waiting for
 another, so a cycle cannot form: step-scoped claims cannot deadlock, whatever
 the workflow looks like.
 
-Deadlock becomes possible only with claims *held across* steps — the plate that
-sits in the Tecan between `PlateIn` and `PlateOut`, where the tray is genuinely
-occupied for the duration of three steps and no single step holds it. That is
-real, and it is phase 2 (`holds` / `release_on`, declared by the server), with
-validation rejecting a workflow that holds a claim and then depends on a step
-needing it — before anything physical moves. It is deliberately second: a
-deadlock in a system that moves a robot arm is not something to introduce
-before the resource model itself has run at the bench.
+Deadlock becomes possible only with resources *kept across* steps — the plate
+that sits in the reader between the robot putting it there and the robot taking
+it away, where the position is genuinely occupied for the duration of several
+steps and no single step holds it. That is real, and it is handled in two
+places:
+
+* **Validation** refuses the case that is decidable from the workflow alone: a
+  step needs a kept resource, and nothing able to release it can run before
+  that step does (nothing releases it at all, or the releaser itself depends on
+  the waiting step).
+* **The scheduler** handles the rest — two plates each waiting for the position
+  the other is in, which depends on the order things happen to run. When every
+  step still alive is waiting on the ledger, none of them can ever be granted;
+  they fail with a message naming what each was waiting for and who left it
+  occupied, instead of the run hanging with nothing on screen.
+
+A step that merely has to *wait* for a kept resource is not an error. It waits,
+exactly as it would for a step-scoped claim.
 
 ---
 
@@ -306,8 +236,123 @@ only an internal extension.
 | 4 | `Test_Bicocca` annotated with its real dependencies | ✅ |
 | 5 | Template server + authoring guide | ✅ |
 | 6 | `holds` for resources kept across steps | ✅ |
+| 7 | Review before the first bench run: topology key, scheduler, `acquires`/`releases`, retries, emergency stop | ✅ |
+| 8 | The robot's server in the repository, declaring by task name | ✅ |
+| 9 | Simulated lab, end-to-end tests ([SIMULATED_LAB.md](SIMULATED_LAB.md)) | ✅ |
+| 10 | Bench validation with concurrency raised above 1 | **not done** |
 
-### Why the Tecan does not declare a hold, after all
+## What the first review found
+
+The branch was reviewed before it had run at the bench. Every unit test passed;
+the following were nonetheless true, and each is now pinned by a test.
+
+**The robot's claims never reached the executor.** The executor keyed its
+topology by the name a server announces; `resources.declare.mobile` is keyed
+the way a workflow is written. The robot announces `GoFaGo Mobile Robot`, so
+its declaration matched nothing and `place_on_OT` claimed only the robot — the
+motivating exclusion of this whole document did not engage. The Settings page,
+which keyed by `mobile`, showed it as applied; the tests used doubles whose key
+and name were the same string. Executor, API and CLI now build the topology
+through one function (`topology_of`), and the end-to-end tests run against
+servers that announce their real names.
+
+**Concurrency could not be switched on except through the retired flag.**
+Callers read `workflow.parallel_execution` — false when absent — and passed it
+on, which forced one step at a time regardless of `max_concurrency`. This is
+why the bug above never did any harm.
+
+**The run advanced in waves.** A step waited for every step of the previous
+wave, not for its own dependencies, so two independent chains moved in lockstep
+and a `DeadlineSeconds` was missed by construction. A step now starts when its
+own dependencies have settled. After a failure that halts the run nothing new
+is started; what is already moving is left to finish.
+
+**A kept resource counted as a step in progress.** Under a limit of one — the
+shipped configuration — the first hold filled the limit and nothing could start
+again; an abort could not reach a step queued for a resource either.
+
+**A releaser was matched by command name alone**, so the same command on a
+second instrument would have freed the first one's resource.
+
+### The plate in the reader, resolved
+
+The section below records why a hold on `PlateIn` was backed out. The overload
+it describes was a symptom; the hold was on the wrong command. `PlateIn` moves
+the tray. The plate enters the reader when the **robot** puts it there
+(`place_on_TC`) and leaves when the robot picks it up (`pick_from_tecan`) —
+with a hold on `PlateIn` there was even a gap, between the robot letting go and
+the tray closing, in which a plate sat on a tray the model called free.
+
+So there are two resources, and the robot's tasks declare the second:
+
+| | what it is | who occupies it | for how long |
+|---|---|---|---|
+| `tray:tecan` | the tray as a space something moves in | `PlateIn`, `PlateOut`, a measurement, the robot's place/pick | one step (`claims`) |
+| `slot:tecan` | "a plate is in the reader" | acquired by `place_on_TC`, released by `pick_from_tecan` | from one step to another (`acquires` / `releases`) |
+
+```json
+"ExecuteTask": {
+  "claims": ["instrument:mobile"],
+  "exhaustive": true,
+  "by_parameter": { "TaskName": {
+    "place_on_TC":     { "claims": ["tray:tecan"], "acquires": ["slot:tecan"] },
+    "pick_from_tecan": { "claims": ["tray:tecan"], "releases": ["slot:tecan"] },
+    "go_to_Tecan":     []
+  } }
+}
+```
+
+The same pair exists for the Opentrons deck (`slot:opentrons`). What happens to
+a kept resource when a step ends:
+
+* the step **succeeded** — what it acquires stays occupied; what it releases is
+  free;
+* the step **never ran** (skipped by the operator, or halted) — nothing changes;
+* the step **failed** — nobody knows where the plate is, so what it acquires
+  stays occupied *and* what it was releasing stays occupied.
+
+A resource still occupied when the run ends is released and reported
+(*"slot:tecan was still occupied at the end of the run (since step 12 …)"*):
+the operator taking the plate out by hand is a legitimate ending, and worth a
+line in the record.
+
+`holds: {resource: Command}` remains, as shorthand for the case it fits — an
+instrument whose own load and unload commands mean one thing each. It is read
+as "this command acquires, and `Command` **on this server** releases".
+
+### Declared by name, served by id
+
+`Test_Bicocca` sends `TaskId`, an opaque id that changes whenever a task is
+taught again. Declared by id in a file, the declaration stops matching the day
+somebody re-teaches a pick, silently. The robot's catalog is therefore written
+by task **name**, and the server — the only party that knows both — adds the id
+entries from the robot's live task list each time it serves the catalog
+(`SiLA2/MobileSiLA2Server/src/task_resources.py`).
+
+`"exhaustive": true` says the table lists every value. A step whose task is not
+in it is refused at validation, rather than believed to occupy nothing: a task
+taught yesterday is not known to be harmless because nobody has written it down
+yet. A task that only moves the robot gets an empty entry.
+
+### What is still open
+
+* **Nothing here has run at the bench with concurrency above one.** The
+  simulated lab exercises the whole orchestrator against the real interfaces
+  and declarations; it cannot tell whether a declaration is *physically true*.
+  [SIMULATED_LAB.md](SIMULATED_LAB.md) has the order to do it in.
+* **The robot PC must be redeployed** from this repository before the cap is
+  raised. Until then the running server declares nothing and the Settings page
+  lists the robot under "Declaring nothing".
+* **The Tecan cannot be stopped from software.** Its server has no stop
+  command, and the bridge's `RunMeasurementAsync` accepts a cancellation token
+  it never uses. An emergency stop reports the reader as not stopped.
+* **Whether `CancelTask` stops the arm mid-motion** is the robot platform's
+  behaviour and has not been measured.
+* **A robot carrying a plate** is not modelled (a `gripper:mobile` kept between
+  a pick and a place would be the same mechanism).
+
+
+### Why the Tecan does not declare a hold on `PlateIn`
 
 `holds` exists and is tested, and the obvious place for it is the plate sitting
 in the reader between `PlateIn` and `PlateOut`. Declaring it there was tried
@@ -332,9 +377,9 @@ Trying it also found two real bugs, which is the better argument for trying it:
   refills the tray, so a correct workflow was refused. A step the holder itself
   depends on runs strictly earlier and is never at risk; the rule now says so.
 
-So the tray stays protected by `DependsOn` for now, which the annotated
-`Test_Bicocca` provides, and the feature is there for an instrument whose load
-and unload commands mean one thing each.
+At the time the tray was left protected by `DependsOn` alone. It is now also
+protected by `slot:tecan`, declared where the plate actually arrives and leaves
+— see *The plate in the reader, resolved* above.
 
 Two things the real declarations taught us, now part of the model:
 
