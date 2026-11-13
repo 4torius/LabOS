@@ -1,0 +1,42 @@
+[
+  {
+    "id": "dygcadtafeigrdpnagztfdaececwotng",
+    "name": "WorkingPose"
+  },
+  {
+    "id": "xkeqmsaqecoaxpclaefiebursgddrbff",
+    "name": "go_to_Tecan"
+  },
+  {
+    "id": "cupxdbwrdxtcbxrybaxekhfticuhekfc",
+    "name": "go_to_Opentrons"
+  },
+  {
+    "id": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
+    "name": "pick_from_dima"
+  },
+  {
+    "id": "dxvadjvibetfceaybdybsqsqcmzimdfj",
+    "name": "place_on_OT"
+  },
+  {
+    "id": "qufptekmeyycpckgbvcpudozfdfkctba",
+    "name": "pick_from_opentrons"
+  },
+  {
+    "id": "rxzeeofvewbamneadgvdafucvefidfgb",
+    "name": "place_on_TC"
+  },
+  {
+    "id": "nnegfohactaltbahtxfnejaaycafskaq",
+    "name": "pick_from_tecan"
+  },
+  {
+    "id": "opfbbcdwkdfpvftuabototnjcedyqfbf",
+    "name": "Docking"
+  },
+  {
+    "id": "obwlfxkzdevvwcueaeekddafeaabccyb",
+    "name": "go_to_opentrons"
+  }
+]

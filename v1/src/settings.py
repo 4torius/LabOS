@@ -218,6 +218,11 @@ class Settings:
 
     @property
     def database_path(self) -> Path:
+        # `paths.database` exists so the simulated lab can keep its runs out of
+        # the real lab's record without moving the Results tree.
+        override = self.paths.get("database")
+        if override:
+            return (self.base_dir / override).resolve()
         return self.results_dir / "labos.db"
 
     # ── Servers ─────────────────────────────────────────────────────────────

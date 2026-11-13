@@ -124,7 +124,7 @@ def create_app() -> "FastAPI":
     ws_manager = ConnectionManager()
 
     if _db is not None:
-        _db.configure(BASE_DIR / "Results" / "labos.db")
+        _db.configure(get_settings(BASE_DIR).database_path)
         _db.init_db()
 
     # Holds a strong reference to the fire-and-forget startup discovery task so
