@@ -1,12 +1,108 @@
 {
+  "_comment": "What the orchestrator needs to know about the mobile robot beyond its commands. resources is keyed by TASK NAME, which is what a person can read and what survives a task being re-taught; the server adds the matching TaskId entries itself from the robot's live task list when it serves this file (see src/task_resources.py), because TaskId is what a workflow actually sends. exhaustive:true means every task has to be listed here: a task that is not is refused at workflow validation rather than assumed to occupy nothing. A task that only moves the robot gets an empty entry. claims: occupied while the task runs. acquires / releases: a plate position that stays occupied after the task that puts a plate there, until the task that takes it away. See v1/docs/RESOURCE_MODEL.md.",
   "library_types": [
     {
       "hint": "mobile_task",
       "display_name": "Mobile Task",
       "folder": "Library/MobileTasks",
       "file_extension": ".json",
-      "parameter_names": ["TaskId", "StartTaskId"],
+      "parameter_names": [
+        "TaskId",
+        "StartTaskId"
+      ],
       "dynamic": true
     }
-  ]
+  ],
+  "emergency_stop": {
+    "command": "CancelTask"
+  },
+  "resources": {
+    "provides": [
+      "instrument:mobile"
+    ],
+    "commands": {
+      "ExecuteTask": {
+        "claims": [
+          "instrument:mobile"
+        ],
+        "exhaustive": true,
+        "by_parameter": {
+          "TaskName": {
+            "place_on_OT": {
+              "claims": [
+                "deck:opentrons"
+              ],
+              "acquires": [
+                "slot:opentrons"
+              ]
+            },
+            "pick_from_opentrons": {
+              "claims": [
+                "deck:opentrons"
+              ],
+              "releases": [
+                "slot:opentrons"
+              ]
+            },
+            "place_on_TC": {
+              "claims": [
+                "tray:tecan"
+              ],
+              "acquires": [
+                "slot:tecan"
+              ]
+            },
+            "pick_from_tecan": {
+              "claims": [
+                "tray:tecan"
+              ],
+              "releases": [
+                "slot:tecan"
+              ]
+            },
+            "go_to_Opentrons": [],
+            "go_to_opentrons": [],
+            "go_to_Tecan": [],
+            "Docking": [],
+            "WorkingPose": [],
+            "pick_from_dima": []
+          }
+        }
+      },
+      "ConnectToRobot": {
+        "claims": [
+          "instrument:mobile"
+        ]
+      },
+      "SetHardwareActivation": {
+        "claims": [
+          "instrument:mobile"
+        ]
+      },
+      "SetHardwareActivationByRole": {
+        "claims": [
+          "instrument:mobile"
+        ]
+      },
+      "ActivateAllHardware": {
+        "claims": [
+          "instrument:mobile"
+        ]
+      },
+      "DeactivateAllHardware": {
+        "claims": [
+          "instrument:mobile"
+        ]
+      },
+      "CancelTask": {
+        "control": true
+      },
+      "RefreshTasks": {
+        "control": true
+      },
+      "GetTaskDetails": {
+        "control": true
+      }
+    }
+  }
 }

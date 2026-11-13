@@ -254,6 +254,7 @@
       <Identifier>ProtocolNotFound</Identifier>
       <Identifier>MeasurementFailed</Identifier>
       <Identifier>InstrumentBusy</Identifier>
+      <Identifier>MeasurementAborted</Identifier>
     </DefinedExecutionErrors>
   </Command>
   <Command>
@@ -295,6 +296,65 @@
       </DataType>
     </Response>
   </Command>
+  <Command>
+    <Identifier>AbortMeasurement</Identifier>
+    <DisplayName>Abort Measurement</DisplayName>
+    <Description>Stop the running measurement now, as the Stop button in i-control does. Returns when the measurement has ended; the instrument is sent its abort sequence and re-initialised. Asking a reader that is not measuring succeeds and reports that nothing was aborted, so an emergency stop can always be sent.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>Aborted</Identifier>
+      <DisplayName>Aborted</DisplayName>
+      <Description>True if a measurement was actually interrupted.</Description>
+      <DataType>
+        <Basic>Boolean</Basic>
+      </DataType>
+    </Response>
+    <Response>
+      <Identifier>Message</Identifier>
+      <DisplayName>Message</DisplayName>
+      <Description>What happened.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+    <DefinedExecutionErrors>
+      <Identifier>AbortFailed</Identifier>
+    </DefinedExecutionErrors>
+  </Command>
+  <Command>
+    <Identifier>PauseMeasurement</Identifier>
+    <DisplayName>Pause Measurement</DisplayName>
+    <Description>Pause the running measurement. Takes effect between two kinetic cycles, as the Pause button in i-control does; a measurement without kinetic cycles cannot be paused, only aborted.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>Message</Identifier>
+      <DisplayName>Message</DisplayName>
+      <Description>Whether the reader is paused now or will pause at the next cycle boundary.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+    <DefinedExecutionErrors>
+      <Identifier>NoMeasurementRunning</Identifier>
+    </DefinedExecutionErrors>
+  </Command>
+  <Command>
+    <Identifier>ResumeMeasurement</Identifier>
+    <DisplayName>Resume Measurement</DisplayName>
+    <Description>Continue a paused measurement, or withdraw a pause that has not taken effect yet.</Description>
+    <Observable>No</Observable>
+    <Response>
+      <Identifier>Message</Identifier>
+      <DisplayName>Message</DisplayName>
+      <Description>What happened.</Description>
+      <DataType>
+        <Basic>String</Basic>
+      </DataType>
+    </Response>
+    <DefinedExecutionErrors>
+      <Identifier>NoMeasurementRunning</Identifier>
+    </DefinedExecutionErrors>
+  </Command>
   <!-- =================== DEFINED EXECUTION ERRORS =================== -->
   <DefinedExecutionError>
     <Identifier>ConnectionFailed</Identifier>
@@ -335,5 +395,20 @@
     <Identifier>ResultNotFound</Identifier>
     <DisplayName>Result Not Found</DisplayName>
     <Description>No result found for the requested plate ID.</Description>
+  </DefinedExecutionError>
+  <DefinedExecutionError>
+    <Identifier>MeasurementAborted</Identifier>
+    <DisplayName>Measurement Aborted</DisplayName>
+    <Description>The measurement was aborted on request (AbortMeasurement, or Stop in i-control). The instrument is idle, not in error.</Description>
+  </DefinedExecutionError>
+  <DefinedExecutionError>
+    <Identifier>AbortFailed</Identifier>
+    <DisplayName>Abort Failed</DisplayName>
+    <Description>The measurement could not be stopped. Switch the reader off.</Description>
+  </DefinedExecutionError>
+  <DefinedExecutionError>
+    <Identifier>NoMeasurementRunning</Identifier>
+    <DisplayName>No Measurement Running</DisplayName>
+    <Description>There is no running (or paused) measurement to act on.</Description>
   </DefinedExecutionError>
 </Feature>

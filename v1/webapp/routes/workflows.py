@@ -673,12 +673,11 @@ def create_workflows_router(
 
         executor.set_intervention_callback(on_intervention)
 
-        _parallel = get_settings(BASE_DIR).workflow.parallel_execution
 
         try:
             # Validate upfront so dependency/instrument/command issues are explicit
             # instead of being silently skipped at runtime.
-            result = await executor.execute(workflow_obj, validate=True, parallel=_parallel)
+            result = await executor.execute(workflow_obj, validate=True)
         except Exception as e:
             state.add_log("error", f"Workflow error: {e}", "workflow")
             await _broadcast_workflow({"type": "workflow_failed", "workflow_name": workflow_name, "error": str(e)})
@@ -946,7 +945,6 @@ def create_workflows_router(
         batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         workflow_name = workflow_def.get("WorkflowName", "Batch")
 
-        _parallel = get_settings(BASE_DIR).workflow.parallel_execution
 
         state.add_log("info", f"Batch started: {batch_id} ({len(samples)} samples)", "workflow")
         await ws_manager.broadcast({
@@ -1063,7 +1061,7 @@ def create_workflows_router(
                     executor.set_step_executor(_sample_step)
                     executor.add_progress_callback(on_batch_progress)
                     executor.set_intervention_callback(on_batch_intervention)
-                    result = await executor.execute(wf_obj, validate=False, parallel=_parallel)
+                    result = await executor.execute(wf_obj, validate=False)
                     run_id = _save_run_archive(BASE_DIR, sample_wf["WorkflowName"], result, shared_ctx["step_results"])
                     if run_id:
                         # Tag run with batch metadata

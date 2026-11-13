@@ -17,7 +17,10 @@ already declared. This module is the one reader of that document:
       "library_types":      [...],   # inputs: files in Library/ -> pickers
       "result_types":       [...],   # outputs: folders in Results/ -> Results page
       "parameter_defaults": {"Command": {"Parameter": value}},
-      "traceability":       {"Command": {"role": "prepares_plate" | "measures_plate", ...}}
+      "traceability":       {"Command": {"role": "prepares_plate" | "measures_plate", ...}},
+      "resources":          {"provides": [...], "commands": {...}},  # see src/resources.py
+      "emergency_stop":     {"command": "EmergencyStop", "timeout_seconds": 3}
+                            # or {"not_applicable": "why there is nothing to stop"}
     }
 
 Every section is optional, so a catalog written before this module existed
@@ -38,6 +41,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
+
+from .resources import ResourceDeclaration, parse_declaration
 
 #: Roles a command can play in a plate's history.
 PREPARES_PLATE = "prepares_plate"
@@ -116,6 +121,23 @@ class ServerCatalog:
     display: Dict[str, str] = field(default_factory=dict)
     parameter_defaults: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     traceability: Dict[str, Traceability] = field(default_factory=dict)
+    #: What this server's commands physically occupy. Parsed by
+    #: src/resources.py, which also explains why it is declared here and
+    #: not inferred from the instrument.
+    resources: ResourceDeclaration = field(default_factory=ResourceDeclaration)
+    #: The command an emergency stop sends this instrument. Declared rather
+    #: than guessed from a list of likely names: the robot's stop is called
+    #: `CancelTask`, which no such list contained, so an emergency stop
+    #: skipped the one instrument that swings an arm.
+    stop_command: str = ""
+    #: Set (to the reason) when there is nothing here to stop - an operator at
+    #: a bench. Distinct from "has no stop command", which is an instrument an
+    #: emergency stop could not reach and has to say so.
+    stop_not_applicable: str = ""
+    #: How long an emergency stop waits for this instrument to confirm. Zero:
+    #: the default. A stop that returns only once the motion has ended (the
+    #: Tecan's) needs longer than one that returns once the stop is sent.
+    stop_timeout: float = 0.0
     problems: List[str] = field(default_factory=list)
 
     def defaults_for(self, command: str) -> Dict[str, Any]:
@@ -153,6 +175,13 @@ class ServerCatalog:
                     "protocol_parameter": t.protocol_parameter}
                 for k, t in self.traceability.items()
             },
+            "resources": self.resources.to_dict(),
+            "emergency_stop": (
+                dict({"command": self.stop_command},
+                     **({"timeout_seconds": self.stop_timeout} if self.stop_timeout else {}))
+                if self.stop_command
+                else {"not_applicable": self.stop_not_applicable}
+                if self.stop_not_applicable else {}),
         }
 
 
@@ -294,6 +323,43 @@ def parse_catalog(raw: Union[str, bytes, Mapping[str, Any], List[Any], None],
             )
     else:
         catalog.problems.append(f"{label}traceability is not an object")
+
+    # ── resources ──────────────────────────────────────────────────────────────
+    # Absent means "said nothing", which is not the same as an empty
+    # section: see ResourceDeclaration.declared.
+    if "resources" in raw:
+        catalog.resources = parse_declaration(raw.get("resources"), source=source)
+        catalog.problems.extend(catalog.resources.problems)
+        catalog.resources.problems = []
+
+    # ── emergency stop ─────────────────────────────────────────────────────────
+    stop = raw.get("emergency_stop")
+    if isinstance(stop, Mapping):
+        command = stop.get("command")
+        reason = stop.get("not_applicable")
+        if isinstance(command, str) and command.strip():
+            catalog.stop_command = command.strip()
+            timeout = stop.get("timeout_seconds")
+            if timeout is not None:
+                if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) \
+                        and 0 < timeout <= 300:
+                    catalog.stop_timeout = float(timeout)
+                else:
+                    catalog.problems.append(
+                        f"{label}emergency_stop.timeout_seconds must be a number "
+                        "of seconds between 0 and 300")
+            if reason:
+                catalog.problems.append(
+                    f"{label}emergency_stop names a command and also says "
+                    "not_applicable; the command is used")
+        elif isinstance(reason, str) and reason.strip():
+            catalog.stop_not_applicable = reason.strip()
+        else:
+            catalog.problems.append(
+                f"{label}emergency_stop needs either a command or a "
+                "not_applicable reason")
+    elif stop is not None:
+        catalog.problems.append(f"{label}emergency_stop is not an object")
 
     return catalog
 

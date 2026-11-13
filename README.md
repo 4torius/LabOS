@@ -32,6 +32,7 @@ All documentation lives in [v1/docs/](v1/docs/):
 | [TRAINING_GUIDE.md](v1/docs/TRAINING_GUIDE.md) | Operator-facing walkthrough and training talking points |
 | [SETUP.md](v1/docs/SETUP.md) | New PC deployment, prerequisites, what to configure |
 | [ARCHITECTURE.md](v1/docs/ARCHITECTURE.md) | Four-layer system architecture |
+| [RESOURCE_MODEL.md](v1/docs/RESOURCE_MODEL.md) | What a step physically occupies, and why two steps may or may not run at once |
 | [WORKFLOW_SYSTEM.md](v1/docs/WORKFLOW_SYSTEM.md) | JSON workflow format, DAG execution |
 | [HAL_SYSTEM.md](v1/docs/HAL_SYSTEM.md) | Hardware Abstraction Layer, recipe format |
 | [SILA2_INTEGRATION.md](v1/docs/SILA2_INTEGRATION.md) | SiLA2 standard, FDL, discovery |

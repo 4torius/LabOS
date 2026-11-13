@@ -226,14 +226,23 @@ class TestExecutionOrdering:
         now declared by the servers, so these deliberately have other names."""
         from src.catalog import parse_catalog
         servers = {
-            "Pipettor": SimpleNamespace(catalog=parse_catalog({"traceability": {
-                "Dispense": {"role": "prepares_plate", "recipe_parameter": "RecipeName"}}})),
-            "Reader": SimpleNamespace(catalog=parse_catalog({"traceability": {
-                "Read": {"role": "measures_plate", "plate_parameter": "PlateID"}}})),
+            "Pipettor": SimpleNamespace(name="Pipettor", catalog=parse_catalog({
+                "traceability": {"Dispense": {
+                    "role": "prepares_plate", "recipe_parameter": "RecipeName"}},
+                "resources": {"provides": ["instrument:Pipettor"],
+                              "commands": {"Dispense": {"claims": ["instrument:Pipettor"]}}},
+            })),
+            "Reader": SimpleNamespace(name="Reader", catalog=parse_catalog({
+                "traceability": {"Read": {
+                    "role": "measures_plate", "plate_parameter": "PlateID"}},
+                "resources": {"provides": ["instrument:Reader"],
+                              "commands": {"Read": {"claims": ["instrument:Reader"]}}},
+            })),
         }
         for parallel in (False, True):
             ex = _executor()
             ex.registry.get_server_by_name = lambda name: servers.get(name)
+            ex.registry.list_servers = lambda: list(servers.values())
             sent = {}
 
             async def _execute(instrument, action, parameters, timeout=None):
@@ -273,8 +282,20 @@ class TestParallelModeRespectsInstruments:
     @staticmethod
     def _executor_tracking_overlap():
         ex = _executor()
-        servers = {"A": SimpleNamespace(name="A"), "B": SimpleNamespace(name="B")}
+        # Both declare what they occupy — themselves and nothing else — so they
+        # are allowed to overlap. An instrument that declares nothing serialises
+        # against every other undeclared one on purpose: concurrency is earned
+        # by declaring, see docs/RESOURCE_MODEL.md.
+        from src.catalog import parse_catalog
+        servers = {
+            name: SimpleNamespace(name=name, catalog=parse_catalog({"resources": {
+                "provides": [f"instrument:{name}"],
+                "commands": {"Run": {"claims": [f"instrument:{name}"]}},
+            }}))
+            for name in ("A", "B")
+        }
         ex.registry.get_server_by_name = lambda name: servers.get(name)
+        ex.registry.list_servers = lambda: list(servers.values())
         running = {"A": 0, "B": 0}
         peak = {"A": 0, "B": 0, "total": 0}
 

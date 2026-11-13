@@ -22,6 +22,12 @@ Nothing in the orchestrator, the web interface or the workflow engine changes:
 everything they know about an instrument comes from what the server itself
 publishes at runtime — its feature definition, and its `library_catalog.json`.
 
+One part of that file has a physical consequence and is worth reading before
+you write it: [**what your commands occupy**](#5-declare-what-your-commands-occupy),
+which is how the orchestrator knows your instrument must not run while a robot
+arm is inside it — and how your stop command avoids queueing behind the run it
+is meant to stop.
+
 This used to be nine manual steps involving four renames, three consistent
 edits and a codegen run into a temp directory. Each was a chance to get
 something subtly wrong, and the failure mode was a server that starts and then
@@ -165,9 +171,10 @@ written. Every section is optional.
 | Section | What it does |
 |---|---|
 | `display` | Bootstrap icon (`bi-…`) and colour (`primary`, `success`, `warning`, `info`, `danger`, `secondary`, `dark`) for the dashboard card and the toolbox block |
-| `library_types` | a parameter named in `parameter_names` becomes a picker over that folder. Instead of `folder`: `values` (+ `value_labels`) for a fixed list, `json_keys_file` for the keys of a Library JSON file, or `source_property` (+ `value_field`, `label_field`, and `folder` for the offline snapshot) for a list the server itself holds |
+| `library_types` | a parameter named in `parameter_names` becomes a picker over that folder. Several sources can be unioned with a `sources` list, and besides `folder` a source may be `glob` + `field` (one value read out of every matching JSON file), `file` + `list_key`, or `file` + `items_key` + `key_template` — see `src/options.py`. Instead of `folder`: `values` (+ `value_labels`) for a fixed list, `json_keys_file` for the keys of a Library JSON file, or `source_property` (+ `value_field`, `label_field`, and `folder` for the offline snapshot) for a list the server itself holds |
 | `result_types` | a folder under `Results/` the instrument writes. Created when the server starts, created again by the orchestrator at discovery (which is what matters for a server on another computer), and listed as a tab on the Results page |
 | `parameter_defaults` | parameters a workflow step may leave out; dispatch fills them in. The step's own value always wins |
+| `resources` | what each command physically occupies, so two steps that would collide never run together. Its own section below — **read it before you write it** |
 | `traceability` | `prepares_plate` (with `recipe_parameter`) or `measures_plate` (with `plate_parameter`, `protocol_parameter`): the plate prepared earlier in a run is passed to a measuring command that did not name one, and the AnIML result is recorded against it on the Database page |
 
 Folders must be under `Library/` or `Results/`; anything else is refused, on
@@ -176,7 +183,227 @@ both sides. They are relative to the LabOS root — the directory holding
 
 `python labos.py doctor` checks every server's catalog.
 
-### 5. Run it, and test it from the command line
+### 5. Declare what your commands occupy
+
+This is the one section with a physical consequence: it is how the orchestrator
+knows that two steps must not run at the same time. The full reasoning is in
+[RESOURCE_MODEL.md](RESOURCE_MODEL.md); what you need to write it is here.
+
+```json
+"resources": {
+  "provides": ["instrument:centrifuge", "bucket:centrifuge"],
+  "commands": {
+    "Spin":       {"claims": ["instrument:centrifuge", "bucket:centrifuge"]},
+    "OpenLid":    {"claims": ["bucket:centrifuge"]},
+    "SetSpeed":   {"claims": ["instrument:centrifuge"]},
+    "Stop":       {"control": true},
+    "GetStatus":  {"control": true}
+  }
+}
+```
+
+#### The rule in one line
+
+**Two steps whose claims share an id never run together.** Everything else
+follows from that.
+
+#### `provides` — name the things you own
+
+List the physical things *this* instrument owns. Keep `instrument:<your key>`,
+and **add an id for anything another instrument can physically reach into** — a
+deck, a tray, a bucket, a carousel slot. That id is how a robot excludes itself
+from your instrument without either server knowing the other exists: the robot
+claims `bucket:centrifuge`, you provide it, and the orchestrator does the rest.
+
+If nothing can reach into your instrument, `["instrument:<your key>"]` is the
+whole list.
+
+An id is `kind:name`. The kind is a lowercase category (`instrument`, `deck`,
+`tray`, `bucket`, `operator`); the name is whatever you call the thing. One
+owner per id — if two servers both claim to provide one, discovery says so.
+
+#### `commands` — what each one occupies while it runs
+
+Ask of each command: *while this is running, what must nothing else touch?*
+
+| If the command… | Claim |
+|---|---|
+| moves the instrument's own mechanics | `instrument:<key>` |
+| exposes a space another instrument reaches into | that space's id too |
+| only changes a setting or reads a value | mark it `control: true` |
+| can and must run *during* another command | mark it `control: true` |
+
+A command you do not list claims `instrument:<key>` by default. That is the
+safe choice, so omitting a command is never dangerous — only conservative.
+
+#### `control: true` — get this one right
+
+A control command occupies **nothing at all**, not even its own instrument, so
+it can run while the instrument is busy. Your stop, abort, pause and status
+commands belong here.
+
+> Mark your stop command `control: true`. Without it the implicit
+> `instrument:<key>` claim makes `Stop` wait for the command it is meant to
+> interrupt — and a stop that queues behind the run it is stopping is not a
+> stop.
+
+Do not mark anything that moves hardware as `control`. Declaring both `control`
+and `claims` is contradictory: the claims are dropped and discovery reports it.
+
+#### `holds` — a resource still occupied after the command ends
+
+Most claims last as long as the command. Some do not: load a plate into a tray
+and the tray is occupied *after* `LoadPlate` returns, for as long as the plate
+is in there — across several steps, held by none of them.
+
+```json
+"LoadPlate":   {"claims": ["instrument:x", "tray:x"],
+                "holds":  {"tray:x": "UnloadPlate"}},
+"UnloadPlate": {"claims": ["instrument:x", "tray:x"]}
+```
+
+The tray is taken when `LoadPlate` runs and kept until a step runs
+`UnloadPlate`. The hand-over happens without ever letting go, so there is no
+instant where the tray looks free with a plate still in it.
+
+**A command that claims a resource during a hold is double-counting.** If your
+`Measure` only reads the plate that is already in the tray, it claims the
+instrument and *not* the tray — the hold already protects it. Claiming both
+makes `Measure` wait for the `UnloadPlate` that comes after it, and validation
+will tell you so.
+
+**A step that needs a held resource waits for it**, the way it would for any
+other claim. What validation refuses is the case where it could never be freed
+first: nothing releases it at all while a later step needs it, or the step that
+releases it depends on the one waiting. A deadlock that only shows up at run
+time — two plates each waiting for the position the other is in — makes the
+steps fail with a message naming what they were waiting for; the run does not
+hang.
+
+`holds` names a command **of your own server**. The same command name on
+another instrument releases nothing of yours.
+
+**Before you declare one, ask who actually puts the plate there.** The LabOS
+Tecan server does *not* declare a hold on `PlateIn`: `PlateIn` moves the tray,
+and is used both to load a plate and to close the empty tray afterwards. The
+plate arrives when the *robot* places it and leaves when the robot picks it up,
+so that is where it is declared — see the next section. Use `holds` when your
+own load and unload commands each mean one thing.
+
+#### `acquires` / `releases` — when somebody else moves the plate
+
+A position that stays occupied between one command and another, where the two
+are not necessarily yours: you provide the position, the transport declares
+when it fills and empties it.
+
+```json
+"provides": ["instrument:x", "tray:x", "slot:x"]
+```
+
+and, in the robot's catalog:
+
+```json
+"place_on_x":  {"claims": ["tray:x"], "acquires": ["slot:x"]},
+"pick_from_x": {"claims": ["tray:x"], "releases": ["slot:x"]}
+```
+
+`tray:x` is the space something moves in — occupied for one step. `slot:x` is
+"there is a plate here" — occupied from the place to the pick. A step that
+fails leaves the position occupied either way: nobody knows where the plate is.
+
+#### `by_parameter` — when the command is not the whole story
+
+Use it when what a command occupies depends on an *argument* rather than on
+which command it is. The mobile robot is the case: every transport is one
+`ExecuteTask`, and where the arm ends up is in the parameter.
+
+```json
+"ExecuteTask": {
+  "claims": ["instrument:mobile"],
+  "by_parameter": {
+    "TaskName": {
+      "place_on_centrifuge": ["bucket:centrifuge"],
+      "pick_from_centrifuge": ["bucket:centrifuge"]
+    }
+  }
+}
+```
+
+A value maps to a list of claims, or to an object with `claims`, `acquires`
+and `releases`.
+
+A value that is not listed contributes nothing, so the command falls back to
+its unconditional `claims` — unless the command says `"exhaustive": true`. Then
+the table is taken to list **every** value, and a workflow step using one that
+is not there is refused at validation. Use it whenever "not listed" must not
+mean "harmless": the robot's catalog does, so a task taught after the catalog
+was written cannot run until somebody declares what it occupies (an empty
+entry, `[]`, if nothing beyond the robot).
+
+**The trap, and it is a real one:** declare the parameter under the name the
+workflow actually sends. A workflow for the mobile robot sends `TaskId` — an
+opaque id that changes when the task is re-taught — while a person can only
+sensibly write `TaskName`. Keying on only one of them matches nothing, and *a
+claim that never matches means no exclusion, with no error*. The robot's server
+solves it by declaring names in the file and adding the ids itself when it
+serves the catalog (`LibraryProviderImpl(server, augment=...)`, see
+`SiLA2/MobileSiLA2Server/src/task_resources.py`). Check a real workflow file
+rather than assuming.
+
+#### `emergency_stop` — how your instrument is stopped
+
+Outside `resources`, at the top level of the catalog:
+
+```json
+"emergency_stop": {"command": "Stop"}
+```
+
+The command must take no required parameters; the emergency stop sends it with
+none. Name it. A server that does not is tried against a short list of usual
+names, and if none fits, every emergency stop reports your instrument as **not
+stopped** — which is the truth, and is shown to the operator as such. If there
+is genuinely nothing to stop (an operator at a bench):
+
+```json
+"emergency_stop": {"not_applicable": "an operator at a bench"}
+```
+
+#### If you declare nothing
+
+The section is optional, and leaving it out is safe but costly: every step of
+your instrument will serialise against every other instrument that also
+declares nothing. Nothing of yours ever overlaps with anything. Concurrency is
+earned by declaring — the default fails towards "do not run these together",
+which is the right direction for hardware.
+
+#### Check it
+
+```bash
+python labos.py doctor        # catalog parses, no unresolved claim, one owner per id
+python labos.py resources     # the resolved topology: who provides what, who claims it
+```
+
+A claim naming an id nobody provides is a **configuration error**: any workflow
+touching your instrument fails validation before anything moves, naming the
+command and the id. That is deliberate — the alternative is a safety rule that
+silently does not engage.
+
+Before you call it done:
+
+- [ ] every space another instrument can reach into has an id in `provides`
+- [ ] your stop/abort/pause commands are `control: true`
+- [ ] no command that moves hardware is `control: true`
+- [ ] any `by_parameter` key matches what a real workflow sends
+- [ ] any `holds` names a command of this server that always means "the plate
+      is gone"; a plate somebody else moves is `acquires` / `releases` on theirs
+- [ ] `emergency_stop` names your stop command
+- [ ] it runs in the simulated lab: add it to `sim_lab/lab.py` and see
+      [SIMULATED_LAB.md](SIMULATED_LAB.md)
+- [ ] `labos.py doctor` reports no resource problems
+
+---
+
+### 6. Run it, and test it from the command line
 
 ```bash
 cd SiLA2/CentrifugeSiLA2Server && python main.py

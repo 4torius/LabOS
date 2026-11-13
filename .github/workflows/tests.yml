@@ -81,5 +81,5 @@ jobs:
       - name: Everything compiles
         # Catches syntax errors in files no test imports.
         run: |
-          python -m compileall -q src webapp scripts labos.py launcher.py
+          python -m compileall -q src webapp scripts sim_lab labos.py launcher.py
           python -m compileall -q SiLA2 -x "generated|__pycache__"

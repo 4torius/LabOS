@@ -26,12 +26,15 @@ timeout in this module is already normalized to `Optional[float]`, where
 
 from __future__ import annotations
 
+import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from src.config_schema import ConfigValidationResult, load_lab_config
+
+from .resources import ResourceConfig, parse_config as parse_resource_config
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -95,7 +98,14 @@ class ServerSpec:
 
 @dataclass(frozen=True)
 class WorkflowSettings:
+    #: Deprecated. Whether two steps overlap is decided by what they
+    #: physically occupy (see docs/RESOURCE_MODEL.md), so this no longer
+    #: selects an execution mode. Read only to warn, and to honour an explicit
+    #: `false` as `max_concurrency: 1`.
     parallel_execution: bool = False
+    #: Cap on steps running at once, on top of resource exclusion. None or 0
+    #: means no cap; 1 forces strictly one step at a time.
+    max_concurrency: Optional[int] = None
     default_timeout: Optional[float] = 600.0
     retry_on_failure: bool = False
     max_retries: int = 3
@@ -173,6 +183,10 @@ class Settings:
     webapp: WebappSettings
     paths: Mapping[str, str]
     ui_dropdowns: Mapping[str, Any]
+    #: Only what no server can speak for: declarations on behalf of servers
+    #: that cannot declare their own resources, and workstation aliases.
+    #: See docs/RESOURCE_MODEL.md.
+    resources: ResourceConfig
     validation: ConfigValidationResult
     raw: Mapping[str, Any]
 
@@ -204,6 +218,11 @@ class Settings:
 
     @property
     def database_path(self) -> Path:
+        # `paths.database` exists so the simulated lab can keep its runs out of
+        # the real lab's record without moving the Results tree.
+        override = self.paths.get("database")
+        if override:
+            return (self.base_dir / override).resolve()
         return self.results_dir / "labos.db"
 
     # ── Servers ─────────────────────────────────────────────────────────────
@@ -233,6 +252,25 @@ class Settings:
 # ─────────────────────────────────────────────────────────────────────────────
 #  Construction
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _concurrency_cap(wf_cfg: Mapping[str, Any]) -> Optional[int]:
+    """`workflow.max_concurrency`, honouring the retired `parallel_execution`.
+
+    A deployment that still says `parallel_execution: false` meant "one step at
+    a time", and this is a hardware system: that intent is honoured as a cap of
+    1 rather than quietly ignored. Setting `max_concurrency` explicitly wins.
+    """
+    raw = wf_cfg.get("max_concurrency")
+    if raw is not None:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+    if "parallel_execution" in wf_cfg and not wf_cfg.get("parallel_execution"):
+        return 1
+    return None
+
 
 def _as_tuple(value: Any) -> Tuple[str, ...]:
     if isinstance(value, (list, tuple)):
@@ -296,6 +334,7 @@ def build_settings(config: Mapping[str, Any], base_dir: Path,
         servers=servers,
         workflow=WorkflowSettings(
             parallel_execution=bool(wf_cfg.get("parallel_execution", False)),
+            max_concurrency=_concurrency_cap(wf_cfg),
             default_timeout=normalize_timeout(wf_cfg.get("default_timeout", 600)),
             retry_on_failure=bool(wf_cfg.get("retry_on_failure", False)),
             max_retries=int(wf_cfg.get("max_retries", 3)),
@@ -329,6 +368,7 @@ def build_settings(config: Mapping[str, Any], base_dir: Path,
         ),
         paths=dict(config.get("paths") or {}),
         ui_dropdowns=dict(config.get("ui_dropdowns") or {}),
+        resources=parse_resource_config(config.get("resources")),
         validation=validation or ConfigValidationResult(),
         raw=dict(config),
     )
@@ -341,6 +381,21 @@ def build_settings(config: Mapping[str, Any], base_dir: Path,
 _DEFAULT_BASE_DIR = Path(__file__).resolve().parent.parent
 _cache: Dict[Path, Settings] = {}
 _cache_lock = threading.Lock()
+
+
+def config_path(root: Path) -> Path:
+    """The configuration file in force: `lab_config.yaml`, unless overridden.
+
+    `LABOS_CONFIG` names another file - absolute, or relative to the project
+    root. It exists for the simulated lab (docs/SIMULATED_LAB.md), which has to
+    point the same orchestrator at stand-in servers on localhost without
+    anybody editing the real lab's configuration to do it.
+    """
+    override = os.environ.get("LABOS_CONFIG", "").strip()
+    if not override:
+        return root / "lab_config.yaml"
+    path = Path(override)
+    return path if path.is_absolute() else root / path
 
 
 def get_settings(base_dir: Optional[Path] = None, *, strict: bool = False) -> Settings:
@@ -357,7 +412,7 @@ def get_settings(base_dir: Optional[Path] = None, *, strict: bool = False) -> Se
             return cached
 
     config, validation = load_lab_config(
-        root / "lab_config.yaml", apply_defaults=True, strict=strict
+        config_path(root), apply_defaults=True, strict=strict
     )
     settings = build_settings(config, root, validation)
 

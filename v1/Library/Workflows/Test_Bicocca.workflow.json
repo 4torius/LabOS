@@ -9,7 +9,8 @@
         "TaskId": "dygcadtafeigrdpnagztfdaececwotng",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [],
+      "Description": "Arm to working pose (WorkingPose)"
     },
     {
       "StepNumber": 2,
@@ -19,7 +20,10 @@
         "TaskId": "xkeqmsaqecoaxpclaefiebursgddrbff",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        1
+      ],
+      "Description": "Drive to the Tecan (go_to_Tecan)"
     },
     {
       "StepNumber": 3,
@@ -31,7 +35,10 @@
         "TaskDescription": "Caricare Piastra",
         "SourceInstrument": ""
       },
-      "DependsOn": []
+      "DependsOn": [
+        2
+      ],
+      "Description": "Operator loads the plate"
     },
     {
       "StepNumber": 4,
@@ -41,7 +48,10 @@
         "TaskId": "cupxdbwrdxtcbxrybaxekhfticuhekfc",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        3
+      ],
+      "Description": "Drive to the Opentrons (go_to_Opentrons)"
     },
     {
       "StepNumber": 5,
@@ -51,7 +61,10 @@
         "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        4
+      ],
+      "Description": "Pick the plate off the jig (pick_from_dima)"
     },
     {
       "StepNumber": 6,
@@ -61,7 +74,10 @@
         "TaskId": "dxvadjvibetfceaybdybsqsqcmzimdfj",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        5
+      ],
+      "Description": "Place it on the Opentrons deck (place_on_OT)"
     },
     {
       "StepNumber": 7,
@@ -70,7 +86,10 @@
       "Parameters": {
         "RecipeName": "test_6.json"
       },
-      "DependsOn": []
+      "DependsOn": [
+        6
+      ],
+      "Description": "Run the pipetting recipe"
     },
     {
       "StepNumber": 8,
@@ -80,7 +99,10 @@
         "TaskId": "qufptekmeyycpckgbvcpudozfdfkctba",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        7
+      ],
+      "Description": "Pick the plate off the Opentrons deck (pick_from_opentrons)"
     },
     {
       "StepNumber": 9,
@@ -90,14 +112,20 @@
         "TaskId": "xkeqmsaqecoaxpclaefiebursgddrbff",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        8
+      ],
+      "Description": "Drive to the Tecan (go_to_Tecan)"
     },
     {
       "StepNumber": 10,
       "Instrument": "tecan",
       "Action": "PlateOut",
       "Parameters": {},
-      "DependsOn": []
+      "DependsOn": [
+        9
+      ],
+      "Description": "Open the reader tray"
     },
     {
       "StepNumber": 11,
@@ -107,7 +135,10 @@
         "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        10
+      ],
+      "Description": "Pick the plate off the jig (pick_from_dima)"
     },
     {
       "StepNumber": 12,
@@ -117,14 +148,20 @@
         "TaskId": "rxzeeofvewbamneadgvdafucvefidfgb",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        11
+      ],
+      "Description": "Place it on the reader tray (place_on_TC)"
     },
     {
       "StepNumber": 13,
       "Instrument": "tecan",
       "Action": "PlateIn",
       "Parameters": {},
-      "DependsOn": []
+      "DependsOn": [
+        12
+      ],
+      "Description": "Close the tray"
     },
     {
       "StepNumber": 14,
@@ -136,14 +173,20 @@
         "PlateID": "",
         "SampleSetID": ""
       },
-      "DependsOn": []
+      "DependsOn": [
+        13
+      ],
+      "Description": "Read the plate"
     },
     {
       "StepNumber": 15,
       "Instrument": "tecan",
       "Action": "PlateOut",
       "Parameters": {},
-      "DependsOn": []
+      "DependsOn": [
+        14
+      ],
+      "Description": "Open the tray"
     },
     {
       "StepNumber": 16,
@@ -153,14 +196,20 @@
         "TaskId": "nnegfohactaltbahtxfnejaaycafskaq",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        15
+      ],
+      "Description": "Pick the plate off the tray (pick_from_tecan)"
     },
     {
       "StepNumber": 17,
       "Instrument": "tecan",
       "Action": "PlateIn",
       "Parameters": {},
-      "DependsOn": []
+      "DependsOn": [
+        16
+      ],
+      "Description": "Close the empty tray"
     },
     {
       "StepNumber": 18,
@@ -172,7 +221,10 @@
         "TaskDescription": "Prelevare piastra",
         "SourceInstrument": ""
       },
-      "DependsOn": []
+      "DependsOn": [
+        17
+      ],
+      "Description": "Operator collects the plate"
     },
     {
       "StepNumber": 19,
@@ -182,9 +234,13 @@
         "TaskId": "opfbbcdwkdfpvftuabototnjcedyqfbf",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        18
+      ],
+      "Description": "Return to the docking station (Docking)"
     }
   ],
   "CreatedAt": "2026-10-06T16:07:47.302602",
-  "SchemaVersion": "1.0"
+  "SchemaVersion": "1.0",
+  "Description": "One plate through Opentrons and Tecan, carried by the mobile robot. Dependencies are strictly sequential: a single plate cannot be in two places, and every step needs the previous one finished. They used to be absent entirely, which left the order resting on how the file happened to be written — see docs/RESOURCE_MODEL.md. Some pairs could in principle overlap (opening the tray while the robot is still driving, say); relaxing a specific edge is a physical claim for whoever runs this at the bench to make, not something to infer from the task names."
 }

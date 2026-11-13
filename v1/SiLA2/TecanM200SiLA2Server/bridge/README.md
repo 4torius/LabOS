@@ -145,6 +145,9 @@ I percorsi possono essere:
 | `TurnOffTemperature` | - | Spegni controllo temperatura |
 | `RunMeasurement` | protocol, plateId, sampleSetId | Esegui protocollo di misura |
 | `ListProtocols` | - | Lista protocolli .mdfx disponibili |
+| `AbortMeasurement` | - | Ferma la misura in corso (come Stop in i-control). Ritorna quando la misura è finita |
+| `PauseMeasurement` | - | Pausa tra due cicli cinetici (come Pausa in i-control). Una lettura singola non si può mettere in pausa |
+| `ResumeMeasurement` | - | Riprende una misura in pausa |
 | `GetAnIMLResult` | plateId | Ottieni risultato in formato AnIML |
 
 ---

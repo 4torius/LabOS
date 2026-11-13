@@ -36,6 +36,74 @@ def create_instruments_router(
 ) -> APIRouter:
     router = APIRouter(tags=["instruments"])
 
+    # Resources
+
+    @router.get("/api/resources")
+    async def get_resources():
+        """The resolved resource topology: who owns what, who reaches into it.
+
+        One query, two consumers: the Settings panel renders it, and an
+        external scheduler needs exactly this to plan around the instruments
+        (see docs/RESOURCE_MODEL.md). It is read-only — what a server declares
+        about itself is not editable from here, because two sources that can
+        disagree about a safety rule is the failure the model avoids. The
+        config layers are edited through /api/config.
+        """
+        from src.resources import topology_of
+        from src.settings import get_settings
+
+        instruments = lab_core.list_instruments() if lab_core else []
+        # The same function the executor builds its topology with, keyed the
+        # same way, so this page cannot show an exclusion that is not applied.
+        topology = topology_of(
+            ((inst.id, inst.name, getattr(inst.catalog, "resources", None))
+             for inst in instruments),
+            get_settings(BASE_DIR).resources)
+
+        payload = topology.to_dict()
+        # Which instrument a resource belongs to is more useful in the UI as a
+        # display name than as an internal id.
+        names = {inst.id: inst.name for inst in instruments}
+        payload["instrument_names"] = names
+        payload["held"] = {}
+        # Positions a plate was left in by a step that has already finished:
+        # resource -> the step that left it there.
+        payload["kept"] = {}
+        # A run started from the web interface has an executor of its own, not
+        # LabCore's, so asking LabCore's alone showed nothing held during
+        # exactly the runs an operator is watching.
+        from src.workflow import running_ledgers
+        executor = getattr(lab_core, "_workflow_executor", None) if lab_core else None
+        ledgers = list(running_ledgers())
+        own = getattr(executor, "_ledger", None)
+        if own is not None and own not in ledgers:
+            ledgers.append(own)
+        for ledger in ledgers:
+            payload["held"].update(ledger.held)
+            kept = getattr(ledger, "kept", None)
+            if callable(kept):
+                payload["kept"].update(kept())
+        return payload
+
+    @router.get("/api/dropdowns")
+    async def get_dropdown_sources():
+        """Which picker gets its values from where.
+
+        The companion to /api/resources, for the other kind of declared fact.
+        An operator seeing an empty dropdown has no way to tell a server that
+        has not declared it from a folder that is empty; this says which.
+        Read-only for the same reason: a server is the authority on itself.
+        """
+        if lab_core is None:
+            return {"hints": {}, "problems": ["LabCore unavailable"]}
+        registry = lab_core._hint_registry()
+        payload = registry.to_dict()
+        for hint, spec in registry.hints.items():
+            entry = payload["hints"][hint]
+            entry["count"] = (len(lab_core._dynamic_option_items(hint))
+                              if spec.dynamic else len(spec.resolve(lab_core.base_dir)))
+        return payload
+
     # Devices
 
     @router.get("/api/devices")

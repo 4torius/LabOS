@@ -60,6 +60,13 @@ service PlateReaderService {
     
     // ListProtocols
     rpc ListProtocols(ListProtocolsRequest) returns (ListProtocolsResponse);
+
+    // AbortMeasurement / PauseMeasurement / ResumeMeasurement
+    // Abort is what i-control's Stop button does. Pause takes effect between
+    // two kinetic cycles; a non-kinetic read cannot be paused.
+    rpc AbortMeasurement(AbortMeasurementRequest) returns (AbortMeasurementResponse);
+    rpc PauseMeasurement(PauseMeasurementRequest) returns (PauseMeasurementResponse);
+    rpc ResumeMeasurement(ResumeMeasurementRequest) returns (ResumeMeasurementResponse);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -181,4 +188,26 @@ message GetAnIMLResultResponse {
 message ListProtocolsRequest {}
 message ListProtocolsResponse {
     repeated string protocols = 1;
+}
+
+// AbortMeasurement
+message AbortMeasurementRequest {}
+message AbortMeasurementResponse {
+    bool success = 1;   // the reader is not measuring now
+    bool aborted = 2;   // a measurement was actually interrupted
+    string message = 3;
+}
+
+// PauseMeasurement
+message PauseMeasurementRequest {}
+message PauseMeasurementResponse {
+    bool success = 1;   // the request was accepted
+    string message = 2;
+}
+
+// ResumeMeasurement
+message ResumeMeasurementRequest {}
+message ResumeMeasurementResponse {
+    bool success = 1;
+    string message = 2;
 }
