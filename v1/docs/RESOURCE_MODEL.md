@@ -343,9 +343,12 @@ yet. A task that only moves the robot gets an empty entry.
 * **The robot PC must be redeployed** from this repository before the cap is
   raised. Until then the running server declares nothing and the Settings page
   lists the robot under "Declaring nothing".
-* **The Tecan cannot be stopped from software.** Its server has no stop
-  command, and the bridge's `RunMeasurementAsync` accepts a cancellation token
-  it never uses. An emergency stop reports the reader as not stopped.
+* **The Tecan's abort, pause and resume have not run on the reader.** They
+  are `AbortMeasurement`, `PauseMeasurement`, `ResumeMeasurement`, built on
+  what i-control itself calls, read out of its assemblies
+  (`bridge/Instrument/TecanBridge.RunControl.cs` says what and why). The bridge
+  compiles against the real SDK; the behaviour is unmeasured. A pause takes
+  effect between two kinetic cycles: a single read can only be aborted.
 * **Whether `CancelTask` stops the arm mid-motion** is the robot platform's
   behaviour and has not been measured.
 * **A robot carrying a plate** is not modelled (a `gripper:mobile` kept between

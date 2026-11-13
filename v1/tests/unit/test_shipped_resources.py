@@ -184,7 +184,15 @@ class TestEveryInstrumentSaysHowItIsStopped:
         raw = (V1_DIR / SHIPPED["manual_station"]).read_text(encoding="utf-8-sig")
         assert parse_catalog(raw).stop_not_applicable
 
-    def test_the_reader_admits_it_cannot_be_stopped(self):
-        # No stop command in its FDL; an emergency stop must report it.
+    def test_the_reader_is_stopped_the_way_i_control_stops_it(self):
         catalog = parse_catalog((V1_DIR / SHIPPED["tecan"]).read_text(encoding="utf-8-sig"))
-        assert not catalog.stop_command and not catalog.stop_not_applicable
+        assert catalog.stop_command == "AbortMeasurement"
+        # Its abort returns only once the measurement thread has ended.
+        assert catalog.stop_timeout >= 10
+
+    @pytest.mark.parametrize("command", [
+        "AbortMeasurement", "PauseMeasurement", "ResumeMeasurement"])
+    def test_run_control_does_not_queue_behind_the_measurement(self, topology, command):
+        # Claiming the reader would make the stop wait for the very
+        # measurement it is meant to stop.
+        assert topology.claims_for("tecan", command) == frozenset()

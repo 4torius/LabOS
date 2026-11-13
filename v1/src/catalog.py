@@ -19,7 +19,7 @@ already declared. This module is the one reader of that document:
       "parameter_defaults": {"Command": {"Parameter": value}},
       "traceability":       {"Command": {"role": "prepares_plate" | "measures_plate", ...}},
       "resources":          {"provides": [...], "commands": {...}},  # see src/resources.py
-      "emergency_stop":     {"command": "EmergencyStop"}
+      "emergency_stop":     {"command": "EmergencyStop", "timeout_seconds": 3}
                             # or {"not_applicable": "why there is nothing to stop"}
     }
 
@@ -134,6 +134,10 @@ class ServerCatalog:
     #: a bench. Distinct from "has no stop command", which is an instrument an
     #: emergency stop could not reach and has to say so.
     stop_not_applicable: str = ""
+    #: How long an emergency stop waits for this instrument to confirm. Zero:
+    #: the default. A stop that returns only once the motion has ended (the
+    #: Tecan's) needs longer than one that returns once the stop is sent.
+    stop_timeout: float = 0.0
     problems: List[str] = field(default_factory=list)
 
     def defaults_for(self, command: str) -> Dict[str, Any]:
@@ -173,7 +177,9 @@ class ServerCatalog:
             },
             "resources": self.resources.to_dict(),
             "emergency_stop": (
-                {"command": self.stop_command} if self.stop_command
+                dict({"command": self.stop_command},
+                     **({"timeout_seconds": self.stop_timeout} if self.stop_timeout else {}))
+                if self.stop_command
                 else {"not_applicable": self.stop_not_applicable}
                 if self.stop_not_applicable else {}),
         }
@@ -333,6 +339,15 @@ def parse_catalog(raw: Union[str, bytes, Mapping[str, Any], List[Any], None],
         reason = stop.get("not_applicable")
         if isinstance(command, str) and command.strip():
             catalog.stop_command = command.strip()
+            timeout = stop.get("timeout_seconds")
+            if timeout is not None:
+                if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) \
+                        and 0 < timeout <= 300:
+                    catalog.stop_timeout = float(timeout)
+                else:
+                    catalog.problems.append(
+                        f"{label}emergency_stop.timeout_seconds must be a number "
+                        "of seconds between 0 and 300")
             if reason:
                 catalog.problems.append(
                     f"{label}emergency_stop names a command and also says "

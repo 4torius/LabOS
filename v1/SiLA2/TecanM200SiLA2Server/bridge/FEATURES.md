@@ -27,6 +27,8 @@
 | IsSimulated | ✅ Interno | ✅ Esposto | |
 | **Protocolli** |
 | ListProtocols | ❌ Non disponibile | ✅ `ListProtocols` | Lista file .mdfx |
+| Abort | ✅ Stop | ✅ `AbortMeasurement` | `MeasurementServer.Stop()` |
+| Pausa / Riprendi | ✅ Pausa / Continua | ✅ `PauseMeasurement` / `ResumeMeasurement` | Tra due cicli cinetici, via `ExternalActionListener` |
 
 ## Nuove Funzionalità in TecanSiLA2Server
 

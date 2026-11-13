@@ -252,13 +252,44 @@ class TestAnEmergencyStop:
         report, plan, result = asyncio.run(_scenario())
 
         sent = {(instrument.id, command) for instrument, command in plan.targets}
-        assert sent == {("opentrons", "EmergencyStop"), ("mobile", "CancelTask")}
-        # The reader has no stop command, and the report says so.
-        assert report["status"] == "partial"
-        assert report["skipped_instruments"] == ["TecanM200Pro"]
+        assert sent == {("opentrons", "EmergencyStop"), ("mobile", "CancelTask"),
+                        ("tecan", "AbortMeasurement")}
+        assert report["status"] == "stopped"
+        assert report["skipped_instruments"] == []
         assert report["not_applicable"] == ["ManualStation"]
 
         assert not result.success
         recipe = [i for i in fresh.intervals() if i.command == "ExecuteRecipe"]
         assert [i.status for i in recipe] == ["stopped"], "the recipe was sent again"
         assert fresh.commands("mobile") == [], "the next step started after the stop"
+
+
+class TestAbortingAMeasurement:
+    """The reader is stopped the way i-control's Stop button stops it."""
+
+    def test_a_measurement_in_progress_is_aborted_and_the_run_ends(self, fresh):
+        scenario = json.loads(fresh.scenario_path.read_text(encoding="utf-8"))
+        scenario["tecan"]["RunMeasurement"] = {"hang": True}
+        fresh.reset(scenario)
+
+        async def _scenario():
+            core, _registry, executor = await fresh.orchestrator()
+            running = asyncio.ensure_future(executor.execute(
+                Workflow.from_dict(workflow((1, READ, []), (2, PICK_TC, [1]))), validate=False))
+            for _ in range(100):
+                if fresh.commands("tecan"):
+                    break
+                await asyncio.sleep(0.05)
+            # Sent while the measurement holds the reader: it must not queue
+            # behind it.
+            for each in halt_running_workflows():
+                outcome = await core.execute_command("tecan", "AbortMeasurement", {})
+                each.cancel_inflight()
+            return outcome, await asyncio.wait_for(running, timeout=10)
+
+        outcome, result = asyncio.run(_scenario())
+        assert outcome.success
+        assert not result.success
+        reads = [i for i in fresh.intervals() if i.command == "RunMeasurement"]
+        assert [i.status for i in reads] == ["stopped"]
+        assert fresh.commands("mobile") == []

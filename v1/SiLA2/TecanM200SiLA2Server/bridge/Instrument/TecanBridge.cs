@@ -70,7 +70,7 @@ namespace TecanSiLA2Server.Instrument
 
     /// </summary>
 
-    public class TecanBridge : IDisposable
+    public partial class TecanBridge : IDisposable
 
     {
 
@@ -1257,6 +1257,10 @@ namespace TecanSiLA2Server.Instrument
 
         {
 
+            // Abort / pause state for this run: see TecanBridge.RunControl.cs
+
+            BeginRunControl();
+
             UpdateStatus("Busy", "Starting measurement...");
 
             progress?.Report(new MeasurementProgress { Percentage = 0, Message = "Initializing..." });
@@ -1397,9 +1401,11 @@ namespace TecanSiLA2Server.Instrument
 
                 _server.ActionsAsObjects = scriptToRun;
 
-                _server.NewRunState(runGuid);
+                // Run() with the listeners that let it be paused and aborted,
 
-                _server.Run(runGuid);
+                // and that say afterwards whether it actually worked.
+
+                RunWithControl(runGuid);
 
 
 
@@ -1501,6 +1507,28 @@ namespace TecanSiLA2Server.Instrument
 
             }
 
+            catch (OperationCanceledException ex)
+
+            {
+
+                // Aborted on request. The SDK has already sent the instrument
+
+                // its abort sequence and re-initialised it, so the reader is
+
+                // idle, not in error.
+
+                result.Success = false;
+
+                result.Aborted = true;
+
+                result.ErrorMessage = ex.Message;
+
+                UpdateStatus("Idle", ex.Message);
+
+                _logger.LogWarning("Measurement aborted by operator");
+
+            }
+
             catch (Exception ex)
 
             {
@@ -1528,6 +1556,8 @@ namespace TecanSiLA2Server.Instrument
                     output.RemoveAllExceptionListeners();
 
                 }
+
+                EndRunControl();
 
                 dummyForm?.Dispose();
 
@@ -1878,6 +1908,10 @@ namespace TecanSiLA2Server.Instrument
         public string? PlateId { get; set; }
 
         public string MeasurementType { get; set; } = "Unknown";
+
+        /// <summary>The run ended because it was aborted on request, not because it failed.</summary>
+
+        public bool Aborted { get; set; }
 
     }
 

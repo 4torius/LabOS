@@ -2,10 +2,13 @@
 from .platereaderservice_base import PlateReaderServiceBase
 from .platereaderservice_client import PlateReaderServiceClient
 from .platereaderservice_errors import (
+    AbortFailed,
     ConnectionFailed,
     InstrumentBusy,
+    MeasurementAborted,
     MeasurementFailed,
     MovementFailed,
+    NoMeasurementRunning,
     NotConnected,
     ProtocolNotFound,
     ResultNotFound,
@@ -13,12 +16,15 @@ from .platereaderservice_errors import (
 )
 from .platereaderservice_feature import PlateReaderServiceFeature
 from .platereaderservice_types import (
+    AbortMeasurement_Responses,
     Connect_Responses,
     Disconnect_Responses,
     GetAnIMLResult_Responses,
     ListProtocols_Responses,
+    PauseMeasurement_Responses,
     PlateIn_Responses,
     PlateOut_Responses,
+    ResumeMeasurement_Responses,
     RunMeasurement_IntermediateResponses,
     RunMeasurement_Responses,
     SetTemperature_Responses,
@@ -37,6 +43,9 @@ __all__ = [
     "TurnOffTemperature_Responses",
     "GetAnIMLResult_Responses",
     "ListProtocols_Responses",
+    "AbortMeasurement_Responses",
+    "PauseMeasurement_Responses",
+    "ResumeMeasurement_Responses",
     "RunMeasurement_Responses",
     "RunMeasurement_IntermediateResponses",
     "ConnectionFailed",
@@ -47,4 +56,7 @@ __all__ = [
     "MeasurementFailed",
     "InstrumentBusy",
     "ResultNotFound",
+    "MeasurementAborted",
+    "AbortFailed",
+    "NoMeasurementRunning",
 ]

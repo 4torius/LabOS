@@ -31,7 +31,11 @@ ROBOT = _instrument("mobile", "GoFaGo Mobile Robot",
 HANDLER = _instrument("opentrons", "OpentronsFlex",
                       [_command("ExecuteRecipe", ["RecipeName"]), _command("EmergencyStop")],
                       {"emergency_stop": {"command": "EmergencyStop"}})
-READER = _instrument("tecan", "TecanM200Pro", [_command("RunMeasurement"), _command("PlateIn")])
+READER = _instrument("tecan", "TecanM200Pro",
+                     [_command("RunMeasurement"), _command("AbortMeasurement")],
+                     {"emergency_stop": {"command": "AbortMeasurement", "timeout_seconds": 30}})
+#: An instrument whose server has no stop command at all.
+STOPLESS = _instrument("stopless", "Old Reader", [_command("RunMeasurement"), _command("PlateIn")])
 BENCH = _instrument("manual_station", "Manual Station",
                     [_command("RequestOperatorTask", ["Description"]),
                      _command("CancelTask", ["TaskId"])],
@@ -62,8 +66,13 @@ class TestWhichCommandStopsAnInstrument:
     def test_the_bench_has_nothing_to_stop(self):
         assert stop_command_of(BENCH)[0] == ""
 
-    def test_the_reader_cannot_be_stopped(self):
-        assert stop_command_of(READER)[0] is None
+    def test_an_instrument_without_a_stop_command_cannot_be_stopped(self):
+        assert stop_command_of(STOPLESS)[0] is None
+
+    def test_the_reader_is_aborted_and_given_longer(self):
+        plan = plan_stop([READER, ROBOT])
+        assert (READER, "AbortMeasurement") in plan.targets
+        assert plan.timeouts == {"tecan": 30.0}
 
 
 class TestWhatTheStopMayClaim:
@@ -75,15 +84,19 @@ class TestWhatTheStopMayClaim:
         assert report["not_applicable"] == ["Manual Station"]
 
     def test_an_instrument_with_no_stop_command_makes_it_partial(self):
-        # This is the real lab: it used to read "all instruments confirmed".
-        plan = plan_stop([ROBOT, HANDLER, READER, BENCH])
+        # It used to read "all instruments confirmed".
+        plan = plan_stop([ROBOT, HANDLER, STOPLESS, BENCH])
         report = verdict(plan, acknowledged=2, failures=[])
         assert report["status"] == "partial"
-        assert "TecanM200Pro" in report["message"]
-        assert report["skipped_instruments"] == ["TecanM200Pro"]
+        assert "Old Reader" in report["message"]
+        assert report["skipped_instruments"] == ["Old Reader"]
+
+    def test_the_whole_bicocca_lab_can_now_be_stopped(self):
+        plan = plan_stop([ROBOT, HANDLER, READER, BENCH])
+        assert verdict(plan, acknowledged=3, failures=[])["status"] == "stopped"
 
     def test_nothing_acknowledged_reads_failed(self):
-        plan = plan_stop([ROBOT, READER])
+        plan = plan_stop([ROBOT, STOPLESS])
         report = verdict(plan, acknowledged=0, failures=["GoFaGo Mobile Robot: timeout"])
         assert report["status"] == "failed"
         assert "hardware" in report["message"].lower()
@@ -97,8 +110,9 @@ class TestTheEndpoint:
         result = await _endpoint(core)()
         assert ("mobile", "CancelTask") in core.calls
         assert ("opentrons", "EmergencyStop") in core.calls
+        assert ("tecan", "AbortMeasurement") in core.calls
         assert not any(key == "manual_station" for key, _ in core.calls)
-        assert result["status"] == "partial"
+        assert result["status"] == "stopped"
 
     @pytest.mark.asyncio
     async def test_a_running_workflow_is_reported_as_halted(self, monkeypatch):

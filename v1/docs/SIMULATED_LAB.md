@@ -164,6 +164,13 @@ robot's `place_on_OT` claiming `deck:opentrons`. If a task is reported as not
 declared, add it to the robot's `library_catalog.json` — with what it really
 occupies.
 
+**2b. The Tecan's bridge.** The launcher rebuilds `TecanSiLA2Server.exe` when
+its C# sources are newer than the binary, so the PC needs the .NET SDK
+(`dotnet build` in `SiLA2/TecanM200SiLA2Server/bridge` should succeed). Then,
+with a long kinetic protocol: `PauseMeasurement` (it pauses at the next cycle,
+not at once), `ResumeMeasurement`, and `AbortMeasurement`. Compare with what
+the same buttons do in i-control.
+
 **3. The same run as always.** `Test_Bicocca`, cap still 1. It must behave as
 on `main`. Two differences are intended: a failed step is no longer sent again
 on its own (the operator is asked at once), and the run summary ends with a
@@ -171,7 +178,10 @@ line if a plate was left in an instrument.
 
 **4. The emergency stop, with nothing at stake.** Press it during an operator
 step, then during a robot move in free space. Check on the Operator page which
-instruments acknowledged: the Tecan is expected to be listed as *not stopped*.
+instruments acknowledged — all four should be, the Manual Station as "nothing
+to stop". Then once more during a Tecan measurement: the read must end, the
+reader must be idle afterwards (not in error), and the run must report the step
+as aborted.
 Check that the arm actually stops — whether `CancelTask` halts a motion in
 progress is the robot platform's behaviour and has not been measured — and that
 the workflow does not carry on.

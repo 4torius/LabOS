@@ -105,7 +105,7 @@
     }
   },
   "resources": {
-    "_comment": "tray:tecan is the plate tray as a space, occupied while something moves in it: PlateIn, PlateOut, a measurement, and the mobile robot's place_on_TC / pick_from_tecan tasks. slot:tecan is 'a plate is in the reader', a state that outlives any one step: the robot acquires it when it places a plate and releases it when it picks the plate up. It is NOT held by PlateIn - PlateIn only moves the tray, and is called both to load a plate and to close the empty tray afterwards. There is no emergency_stop here because this server has no stop command: an emergency stop reports the reader as not stopped. See v1/docs/RESOURCE_MODEL.md.",
+    "_comment": "tray:tecan is the plate tray as a space, occupied while something moves in it: PlateIn, PlateOut, a measurement, and the mobile robot's place_on_TC / pick_from_tecan tasks. slot:tecan is 'a plate is in the reader', a state that outlives any one step: the robot acquires it when it places a plate and releases it when it picks the plate up. It is NOT held by PlateIn - PlateIn only moves the tray, and is called both to load a plate and to close the empty tray afterwards. AbortMeasurement / PauseMeasurement / ResumeMeasurement are control: they must run WHILE a measurement holds the reader, or they would queue behind the very thing they stop. See v1/docs/RESOURCE_MODEL.md.",
     "provides": [
       "instrument:tecan",
       "tray:tecan",
@@ -155,7 +155,21 @@
       },
       "GetAnIMLResult": {
         "control": true
+      },
+      "AbortMeasurement": {
+        "control": true
+      },
+      "PauseMeasurement": {
+        "control": true
+      },
+      "ResumeMeasurement": {
+        "control": true
       }
     }
-  }
+  },
+  "emergency_stop": {
+    "command": "AbortMeasurement",
+    "timeout_seconds": 30
+  },
+  "_comment_emergency_stop": "AbortMeasurement is what i-control's Stop button does. It returns when the SDK's measurement thread has ended (the instrument is sent its abort sequence and re-initialised), which takes longer than the other instruments' stops: hence the longer timeout."
 }

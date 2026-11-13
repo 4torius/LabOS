@@ -50,6 +50,35 @@ class ListProtocols_Responses(NamedTuple):
     """
 
 
+class AbortMeasurement_Responses(NamedTuple):
+
+    Aborted: bool
+    """
+    True if a measurement was actually interrupted.
+    """
+
+    Message: str
+    """
+    What happened.
+    """
+
+
+class PauseMeasurement_Responses(NamedTuple):
+
+    Message: str
+    """
+    Whether the reader is paused now or will pause at the next cycle boundary.
+    """
+
+
+class ResumeMeasurement_Responses(NamedTuple):
+
+    Message: str
+    """
+    What happened.
+    """
+
+
 class RunMeasurement_Responses(NamedTuple):
 
     AnIMLFilePath: str

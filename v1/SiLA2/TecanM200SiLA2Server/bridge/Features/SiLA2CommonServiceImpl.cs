@@ -117,6 +117,9 @@ namespace TecanSiLA2Server.Features
                     new[] { CreateParameter("protocol_file", "string", "Protocol filename (.mdfx)", true) },
                     isObservable: true),
                 CreateCommand("ListProtocols", "List Protocols", "List available .mdfx protocols"),
+                CreateCommand("AbortMeasurement", "Abort Measurement", "Stop the running measurement now"),
+                CreateCommand("PauseMeasurement", "Pause Measurement", "Pause between two kinetic cycles"),
+                CreateCommand("ResumeMeasurement", "Resume Measurement", "Continue a paused measurement"),
                 CreateCommand("GetAnIMLResult", "Get AnIML Result", "Retrieve results in AnIML format",
                     new[] { CreateParameter("plate_id", "string", "Plate identifier", true) })
             });
@@ -159,7 +162,8 @@ namespace TecanSiLA2Server.Features
             response.Details["temperature"] = _tecanBridge.GetCurrentTemperature().ToString("F1");
             response.Details["serial"] = instrumentInfo?.SerialNumber ?? "";
             response.Details["simulated"] = (instrumentInfo?.IsSimulated ?? true).ToString();
-            response.Details["is_busy"] = (_tecanBridge.CurrentStatus == "Busy").ToString();
+            response.Details["is_busy"] = (_tecanBridge.CurrentStatus == "Busy" || _tecanBridge.CurrentStatus == "Paused").ToString();
+            response.Details["is_paused"] = _tecanBridge.IsPaused.ToString();
 
             return Task.FromResult(response);
         }
@@ -342,6 +346,25 @@ namespace TecanSiLA2Server.Features
                         var receivedParams = string.Join(", ", parameters.Keys);
                         throw new ArgumentException($"Missing protocol file parameter. Expected one of: protocol_file, ProtocolFile, ProtocolPath, protocol, Protocol, ProtocolName. Received parameters: [{receivedParams}]");
                     }
+                    break;
+
+                case "AbortMeasurement":
+                    var abortResp = await _plateReaderService.AbortMeasurement(new AbortMeasurementRequest(), context);
+                    result["success"] = abortResp.Success.ToString();
+                    result["aborted"] = abortResp.Aborted.ToString();
+                    result["message"] = abortResp.Message;
+                    break;
+
+                case "PauseMeasurement":
+                    var pauseResp = await _plateReaderService.PauseMeasurement(new PauseMeasurementRequest(), context);
+                    result["success"] = pauseResp.Success.ToString();
+                    result["message"] = pauseResp.Message;
+                    break;
+
+                case "ResumeMeasurement":
+                    var resumeResp = await _plateReaderService.ResumeMeasurement(new ResumeMeasurementRequest(), context);
+                    result["success"] = resumeResp.Success.ToString();
+                    result["message"] = resumeResp.Message;
                     break;
 
                 case "ListProtocols":

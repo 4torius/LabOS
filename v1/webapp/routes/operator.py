@@ -195,13 +195,16 @@ def create_operator_router(
             state.add_log("info", f"Nothing to stop on {name}: {why}", "system")
 
         async def _stop(instrument, command_id):
+            # All stops are sent at once; an instrument whose stop returns
+            # only when its motion has ended (the Tecan) is waited for longer.
+            limit = plan.timeouts.get(instrument.id, EMERGENCY_STOP_TIMEOUT_S)
             try:
                 result = await asyncio.wait_for(
                     lab_core.execute_command(instrument.id, command_id, {}),
-                    timeout=EMERGENCY_STOP_TIMEOUT_S,
+                    timeout=limit,
                 )
             except asyncio.TimeoutError:
-                return instrument.name, command_id, False, f"no answer within {EMERGENCY_STOP_TIMEOUT_S:g}s"
+                return instrument.name, command_id, False, f"no answer within {limit:g}s"
             except Exception as exc:
                 return instrument.name, command_id, False, str(exc)
             if getattr(result, "success", False):

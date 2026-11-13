@@ -36,6 +36,8 @@ FALLBACK_STOP_COMMANDS: Tuple[str, ...] = (
 class StopPlan:
     #: (instrument, command id) for everything a stop will be sent to
     targets: List[Tuple[Any, str]] = field(default_factory=list)
+    #: instrument id -> seconds to wait for it, where its catalog asks for more
+    timeouts: Dict[str, float] = field(default_factory=dict)
     #: (instrument name, why) for every instrument a stop cannot reach
     unreachable: List[Tuple[str, str]] = field(default_factory=list)
     #: (instrument name, why) for everything with nothing to stop
@@ -80,6 +82,9 @@ def plan_stop(instruments: Iterable[Any]) -> StopPlan:
         command, why = stop_command_of(instrument)
         if command:
             plan.targets.append((instrument, command))
+            seconds = getattr(getattr(instrument, "catalog", None), "stop_timeout", 0.0) or 0.0
+            if seconds:
+                plan.timeouts[getattr(instrument, "id", name)] = float(seconds)
         elif command == "":
             plan.not_applicable.append((name, why))
         else:
