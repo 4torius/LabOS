@@ -94,6 +94,5 @@
     "isTiprack": false,
     "isMagneticModuleCompatible": false,
     "loadName": "custom_fra_euroclone_primo_48_wellplate_1.5ml_flat"
-  },
-  "notes": "x/y/z/diameter/depth here are UNVERIFIED PLACEHOLDERS on a standard 48-well SBS grid, not a real measured/manufacturer geometry file. IMPORTANT (changed 2026-09-03, Fase B): this file is now pushed directly to the real robot via POST /runs/{id}/labware_definitions before a run starts (server.py::_collect_custom_labware_definitions) - it is NO LONGER just a Python-side planning aid, the robot uses THESE coordinates to physically address this labware. Safe for a load-only test (loading a labware definition causes no movement by itself), but do NOT use this labware for real pipetting/aspirate/dispense until the geometry here is replaced with real calibrated measurements - the placeholder x/y/z could send the pipette to the wrong position inside a well, or miss it entirely. total_wells/totalLiquidVolume set to 48 wells x 1500uL based on: (1) the pre-existing Library/Labware/Plates/primo_euroclone_46_wellplate_1000.plate.json entry, which already independently states 48 wells / 1500uL / EuroClone id 'euroclone_48_wellplate_1500ul', despite this file's own name saying '46_wellplate_1000'; (2) EuroClone's official Primo 48-well plate (cat. ET3048) datasheet, which lists a nominal volume of 1.55 mL/well. These two sources converge on 48 wells / ~1.5mL, contradicting the '46/1000' in the filename - flagged to the user, not silently assumed."
+  }
 }
