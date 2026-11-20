@@ -1,0 +1,355 @@
+{
+  "ProtocolName": "PROVA_OPENTRONS",
+  "Description": "Generated from Excel. Groups: Solvent, HA-N3, GEL-N3, 4arm-20kPEG-DBCO",
+  "Requirements": {
+    "Source_1": "Source_1",
+    "TargetPlate": "TargetPlate",
+    "MyTrash": "MyTrash",
+    "HeaterShaker": "HeaterShaker",
+    "MyTips_50": "MyTips_50"
+  },
+  "Steps": [
+    {
+      "Command": "MoveLabware",
+      "LabwareID": "Source_1",
+      "NewLocation": "HeaterShaker",
+      "UseGripper": true
+    },
+    {
+      "Command": "HeaterShaker",
+      "ModuleID": "HeaterShaker",
+      "Temperature": 60,
+      "RPM": 300,
+      "Duration": 120,
+      "WaitForTemp": true,
+      "CloseLatch": true,
+      "OpenLatch": true
+    },
+    {
+      "Command": "MoveLabware",
+      "LabwareID": "Source_1",
+      "NewLocation": "A2",
+      "UseGripper": true
+    },
+    {
+      "Command": "Comment",
+      "Text": "=== Solvent: Solvent ==="
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips_50"
+    },
+    {
+      "Command": "Distribute",
+      "PipetteMount": "left",
+      "Volume": [
+        17,
+        2
+      ],
+      "Source": "Source_1:A1",
+      "Destinations": [
+        "TargetPlate:A12",
+        "TargetPlate:B12"
+      ],
+      "NewTip": "never",
+      "DisposalVolume": 0,
+      "Description": "Distribute 2-17µL Solvent to 2 wells"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "Comment",
+      "Text": "=== HA-N3: HA-N3 ==="
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips_50"
+    },
+    {
+      "Command": "Distribute",
+      "PipetteMount": "left",
+      "Volume": 20,
+      "Source": "Source_1:B1",
+      "Destinations": [
+        "TargetPlate:A12",
+        "TargetPlate:B12"
+      ],
+      "NewTip": "never",
+      "DisposalVolume": 0,
+      "Description": "Distribute 20µL HA-N3 to 2 wells"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "MoveLabware",
+      "LabwareID": "Source_1",
+      "NewLocation": "HeaterShaker",
+      "UseGripper": true
+    },
+    {
+      "Command": "HeaterShaker",
+      "ModuleID": "HeaterShaker",
+      "Temperature": 60,
+      "RPM": 300,
+      "Duration": 60,
+      "WaitForTemp": true,
+      "CloseLatch": true,
+      "OpenLatch": true
+    },
+    {
+      "Command": "MoveLabware",
+      "LabwareID": "Source_1",
+      "NewLocation": "A2",
+      "UseGripper": true
+    },
+    {
+      "Command": "Comment",
+      "Text": "=== GEL-N3: GEL-N3 ==="
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips_50"
+    },
+    {
+      "Command": "Distribute",
+      "PipetteMount": "left",
+      "Volume": [
+        40,
+        50
+      ],
+      "Source": "Source_1:C1",
+      "Destinations": [
+        "TargetPlate:A12",
+        "TargetPlate:B12"
+      ],
+      "NewTip": "never",
+      "DisposalVolume": 0,
+      "Description": "Distribute 40-50µL GEL-N3 to 2 wells"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    },
+    {
+      "Command": "Comment",
+      "Text": "=== 4arm-20kPEG-DBCO: 4arm-20kPEG-DBCO ==="
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips_50"
+    },
+    {
+      "Command": "Distribute",
+      "PipetteMount": "left",
+      "Volume": [
+        23,
+        28
+      ],
+      "Source": "Source_1:D1",
+      "Destinations": [
+        "TargetPlate:A12",
+        "TargetPlate:B12"
+      ],
+      "NewTip": "never",
+      "DisposalVolume": 0,
+      "Description": "Distribute 23-28µL 4arm-20kPEG-DBCO to 2 wells"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left",
+      "TrashLocation": "MyTrash"
+    }
+  ],
+  "Metadata": {
+    "Generated": "20261119_182711",
+    "Source": "excel_import_configurable",
+    "TotalWells": 2,
+    "PlateId": "corning_96_wellplate_360ul_flat",
+    "PlateRows": 8,
+    "PlateColumns": 12,
+    "PlateTotalWells": 96,
+    "Reagents": [
+      "Solvent",
+      "HA-N3",
+      "GEL-N3",
+      "4arm-20kPEG-DBCO"
+    ],
+    "Groups": [
+      {
+        "name": "Solvent",
+        "columns": [
+          "Solvent"
+        ],
+        "delay_seconds": 0
+      },
+      {
+        "name": "HA-N3",
+        "columns": [
+          "HA-N3"
+        ],
+        "delay_seconds": 0
+      },
+      {
+        "name": "GEL-N3",
+        "columns": [
+          "GEL-N3"
+        ],
+        "delay_seconds": 0
+      },
+      {
+        "name": "4arm-20kPEG-DBCO",
+        "columns": [
+          "4arm-20kPEG-DBCO"
+        ],
+        "delay_seconds": 0
+      }
+    ],
+    "ReagentMapping": {
+      "Solvent": "Source_1",
+      "HA-N3": "Source_1",
+      "GEL-N3": "Source_1",
+      "4arm-20kPEG-DBCO": "Source_1"
+    },
+    "WellAssignments": {
+      "Solvent": "Source_1:A1",
+      "HA-N3": "Source_1:B1",
+      "GEL-N3": "Source_1:C1",
+      "4arm-20kPEG-DBCO": "Source_1:D1"
+    },
+    "RequiredVolumes": {
+      "GEL-N3": {
+        "nominal_ul": 90,
+        "excess_ul": 59.0,
+        "with_excess_ul": 149.0,
+        "estimated_waste_ul": 2.0
+      },
+      "Solvent": {
+        "nominal_ul": 19,
+        "excess_ul": 51.9,
+        "with_excess_ul": 70.9,
+        "estimated_waste_ul": 1.0
+      },
+      "4arm-20kPEG-DBCO": {
+        "nominal_ul": 51,
+        "excess_ul": 55.1,
+        "with_excess_ul": 106.1,
+        "estimated_waste_ul": 2.0
+      },
+      "HA-N3": {
+        "nominal_ul": 40,
+        "excess_ul": 54.0,
+        "with_excess_ul": 94.0,
+        "estimated_waste_ul": 1.0
+      }
+    },
+    "Notes": [
+      "Solvent: 19 uL nominal -> load 70.9 uL into Source_1:A1",
+      "HA-N3: 40 uL nominal -> load 94.0 uL into Source_1:B1",
+      "GEL-N3: 90 uL nominal -> load 149.0 uL into Source_1:C1",
+      "4arm-20kPEG-DBCO: 51 uL nominal -> load 106.1 uL into Source_1:D1"
+    ],
+    "HasDelays": false,
+    "ModulesUsed": {
+      "HeaterShaker": "heaterShakerModuleV1"
+    }
+  },
+  "Configuration": {
+    "groups": [
+      {
+        "name": "Solvent",
+        "columns": [
+          "Solvent"
+        ],
+        "delay_after_seconds": 0,
+        "strategy": "distribute",
+        "treatments": []
+      },
+      {
+        "name": "HA-N3",
+        "columns": [
+          "HA-N3"
+        ],
+        "delay_after_seconds": 0,
+        "strategy": "distribute",
+        "treatments": [
+          {
+            "kind": "HeaterShaker",
+            "target": "GEL-N3",
+            "params": {
+              "Temperature": 60,
+              "RPM": 300,
+              "Duration": 60,
+              "WaitForTemp": true
+            },
+            "return_after": true
+          }
+        ]
+      },
+      {
+        "name": "GEL-N3",
+        "columns": [
+          "GEL-N3"
+        ],
+        "delay_after_seconds": 0,
+        "strategy": "distribute",
+        "treatments": []
+      },
+      {
+        "name": "4arm-20kPEG-DBCO",
+        "columns": [
+          "4arm-20kPEG-DBCO"
+        ],
+        "delay_after_seconds": 0,
+        "strategy": "distribute",
+        "treatments": []
+      }
+    ],
+    "pipette": "left",
+    "pre_treatments": [
+      {
+        "kind": "HeaterShaker",
+        "target": "Solvent",
+        "params": {
+          "Temperature": 60,
+          "RPM": 300,
+          "Duration": 120,
+          "WaitForTemp": true
+        },
+        "return_after": true
+      }
+    ],
+    "post_treatments": [],
+    "target_plate": "corning_96_wellplate_360ul_flat",
+    "plate_rows": 8,
+    "plate_columns": 12,
+    "plate_total_wells": 96,
+    "plate_row_labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F",
+      "G",
+      "H"
+    ],
+    "reservoir_type": "custom_fra_euroclone_primo_48_wellplate_1.5ml_flat",
+    "num_reservoirs": 1,
+    "tip_sizes_ul": [
+      50,
+      200,
+      1000
+    ]
+  }
+}

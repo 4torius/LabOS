@@ -1,24 +1,38 @@
 [
   {
-    "TaskId": "cupxdbwrdxtcbxrybaxekhfticuhekfc",
-    "TaskName": "go_to_Opentrons",
+    "TaskId": "cxnqdonaaeasamlnxeffccbezmydxdwz",
+    "TaskName": "PRENDERE_PIASTRA_FRA",
     "SubtaskCount": 1,
-    "id": "cupxdbwrdxtcbxrybaxekhfticuhekfc",
-    "name": "go_to_Opentrons"
+    "id": "cxnqdonaaeasamlnxeffccbezmydxdwz",
+    "name": "PRENDERE_PIASTRA_FRA"
   },
   {
     "TaskId": "dxvadjvibetfceaybdybsqsqcmzimdfj",
-    "TaskName": "place_on_OT",
+    "TaskName": "place_on_Opentrons",
     "SubtaskCount": 2,
     "id": "dxvadjvibetfceaybdybsqsqcmzimdfj",
-    "name": "place_on_OT"
+    "name": "place_on_Opentrons"
   },
   {
-    "TaskId": "dygcadtafeigrdpnagztfdaececwotng",
-    "TaskName": "WorkingPose",
+    "TaskId": "eebzzndefzrktbrqbammcxfjikbmqpaa",
+    "TaskName": "go_to_tecan",
     "SubtaskCount": 1,
-    "id": "dygcadtafeigrdpnagztfdaececwotng",
-    "name": "WorkingPose"
+    "id": "eebzzndefzrktbrqbammcxfjikbmqpaa",
+    "name": "go_to_tecan"
+  },
+  {
+    "TaskId": "efbcereejzxiycfdvccbbcvealdjdmbf",
+    "TaskName": "go_to_docking",
+    "SubtaskCount": 1,
+    "id": "efbcereejzxiycfdvccbbcvealdjdmbf",
+    "name": "go_to_docking"
+  },
+  {
+    "TaskId": "eymnhzlaatqzobafwcbbdazkrcwninfh",
+    "TaskName": "go_to_WorkingPose",
+    "SubtaskCount": 1,
+    "id": "eymnhzlaatqzobafwcbbdazkrcwninfh",
+    "name": "go_to_WorkingPose"
   },
   {
     "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
@@ -28,18 +42,18 @@
     "name": "pick_from_dima"
   },
   {
+    "TaskId": "lfesetxmbebkafkuxdsyebfckfnaaghe",
+    "TaskName": "CAPPA",
+    "SubtaskCount": 1,
+    "id": "lfesetxmbebkafkuxdsyebfckfnaaghe",
+    "name": "CAPPA"
+  },
+  {
     "TaskId": "nnegfohactaltbahtxfnejaaycafskaq",
     "TaskName": "pick_from_tecan",
     "SubtaskCount": 2,
     "id": "nnegfohactaltbahtxfnejaaycafskaq",
     "name": "pick_from_tecan"
-  },
-  {
-    "TaskId": "opfbbcdwkdfpvftuabototnjcedyqfbf",
-    "TaskName": "Docking",
-    "SubtaskCount": 2,
-    "id": "opfbbcdwkdfpvftuabototnjcedyqfbf",
-    "name": "Docking"
   },
   {
     "TaskId": "qufptekmeyycpckgbvcpudozfdfkctba",
@@ -50,16 +64,16 @@
   },
   {
     "TaskId": "rxzeeofvewbamneadgvdafucvefidfgb",
-    "TaskName": "place_on_TC",
+    "TaskName": "place_on_Tecan",
     "SubtaskCount": 2,
     "id": "rxzeeofvewbamneadgvdafucvefidfgb",
-    "name": "place_on_TC"
+    "name": "place_on_Tecan"
   },
   {
-    "TaskId": "xkeqmsaqecoaxpclaefiebursgddrbff",
-    "TaskName": "go_to_Tecan",
+    "TaskId": "udgldepfnpbyteaybebdacfyxdifdygt",
+    "TaskName": "go_to_opentrons",
     "SubtaskCount": 1,
-    "id": "xkeqmsaqecoaxpclaefiebursgddrbff",
-    "name": "go_to_Tecan"
+    "id": "udgldepfnpbyteaybebdacfyxdifdygt",
+    "name": "go_to_opentrons"
   }
 ]
