@@ -195,8 +195,22 @@ class TestTheHeaterShakerLatch:
         """Recipes rely on this to place a plate on the module."""
         assert 'if "heaterShaker" in c["Type"]: m.open_labware_latch()' in self.GENERATOR
 
-    def test_a_move_onto_the_module_still_opens_the_latch(self):
-        assert "target_to_check.open_labware_latch()" in self.GENERATOR
+    def test_a_move_onto_or_off_the_module_opens_the_latch(self):
+        """Both ends of the move, and the module itself as a target (its
+        parent is a slot name, which the old one-level check walked past)."""
+        start = self.GENERATOR.index('elif cmd == "MoveLabware":')
+        body = self.GENERATOR[start:self.GENERATOR.index('elif cmd == "MoveToWell":', start)]
+        assert "for _end in (l, n):" in body
+        assert "_set_latch(_hs, closed=False)" in body
+        assert body.index("_set_latch") < body.index("ctx.move_labware")
+
+    def test_pipetting_into_a_plate_on_it_closes_the_latch_first(self):
+        """The robot refuses to move a pipette there with the latch open;
+        every step that pipettes names its PipetteMount."""
+        start = self.GENERATOR.index('cmd = step["Command"]')
+        body = self.GENERATOR[start:start + 600]
+        assert 'if "PipetteMount" in step:' in body
+        assert "_set_latch(_hs, closed=True)" in body
 
     def test_an_explicit_close_latch_step_is_still_honoured(self):
         assert 'elif cmd == "HeaterShakerCloseLatch":' in self.GENERATOR

@@ -220,7 +220,13 @@ def create_hardware_router(base_dir: Path, library_dir: Path, lab_core=None) -> 
                 try:
                     d = json.loads(f.read_text(encoding="utf-8-sig"))
                     items.append({
-                        "load_name": d.get("load_name", f.stem.replace(".plate", "")),
+                        # The name the robot loads it by. Plate files have no
+                        # load_name, and their file name is not always their
+                        # id (corning_24_wellplate_3400ul_flat.plate.json is
+                        # corning_24_wellplate_3.4ml_flat), so the file name
+                        # offered here was a load name Opentrons did not know.
+                        "load_name": (d.get("load_name") or d.get("opentrons_load_name")
+                                      or d.get("id") or f.stem.replace(".plate", "")),
                         "display_name": d.get("display_name", d.get("load_name", f.stem)),
                         "category": "plate",
                         "format": d.get("format", ""),

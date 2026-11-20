@@ -437,23 +437,33 @@ def run(ctx: protocol_api.ProtocolContext):
         except: pass
 
     # 3. LOAD LABWARE (Fixed for Adapters)
+    # Loaded in dependency order: a plate on an adapter needs the adapter
+    # loaded first, whatever order the recipe lists them in.
     if "Labware" in settings:
-        for i, c in settings["Labware"].items():
-            l = c.get("DisplayName")
-            
-            if "OnModule" in c: 
-                mod = objects["Modules"][c["OnModule"]]
-                if "adapter" in c["LoadName"]:
-                    objects["Labware"][i] = mod.load_adapter(c["LoadName"])
+        pending = dict(settings["Labware"])
+        while pending:
+            ready = [i for i, c in pending.items()
+                     if not c.get("OnAdapter") or c["OnAdapter"] in objects["Labware"]]
+            if not ready:
+                raise ValueError("Labware placed on an adapter that is not in the recipe: "
+                                 + ", ".join(f"{i} on {c.get('OnAdapter')}" for i, c in pending.items()))
+            for i in ready:
+                c = pending.pop(i)
+                l = c.get("DisplayName")
+
+                if "OnModule" in c:
+                    mod = objects["Modules"][c["OnModule"]]
+                    if "adapter" in c["LoadName"]:
+                        objects["Labware"][i] = mod.load_adapter(c["LoadName"])
+                    else:
+                        objects["Labware"][i] = mod.load_labware(c["LoadName"], label=l)
+
+                elif "OnAdapter" in c:
+                    adapter = objects["Labware"][c["OnAdapter"]]
+                    objects["Labware"][i] = adapter.load_labware(c["LoadName"], label=l)
+
                 else:
-                    objects["Labware"][i] = mod.load_labware(c["LoadName"], label=l)
-            
-            elif "OnAdapter" in c: 
-                adapter = objects["Labware"][c["OnAdapter"]]
-                objects["Labware"][i] = adapter.load_labware(c["LoadName"], label=l)
-            
-            else: 
-                objects["Labware"][i] = ctx.load_labware(c["LoadName"], c["Slot"], label=l)
+                    objects["Labware"][i] = ctx.load_labware(c["LoadName"], c["Slot"], label=l)
 
     # 4. LOAD PIPETTES & OFFSET
     if "Pipettes" in settings:
@@ -497,6 +507,41 @@ def run(ctx: protocol_api.ProtocolContext):
         if mount_or_id in objects["Pipettes"]: return objects["Pipettes"][mount_or_id]
         return objects["Pipettes"].get("left") or objects["Pipettes"].get("right")
 
+    # A plate can sit on a Heater-Shaker directly or through an adapter. The
+    # robot refuses to move a pipette there while the labware latch is open
+    # ("Cannot move pipette to Heater-Shaker while labware latch is open"),
+    # and refuses to move labware on or off while it is closed. The latch is
+    # opened when the module is loaded (so plates can be put on it), so it is
+    # closed before any step that pipettes into a plate on it, and opened
+    # again before a MoveLabware takes a plate off or puts one on. Pipetting
+    # while it shakes is still refused by the robot itself, as it must be.
+    def _heater_shaker_of(x):
+        for _ in range(4):
+            if x is None or isinstance(x, str): return None
+            if hasattr(x, "close_labware_latch"): return x
+            x = getattr(x, "parent", None)
+        return None
+
+    def _labware_named_in(value, found):
+        if isinstance(value, str):
+            name = value.split(":")[0]
+            if name in objects["Labware"]: found[name] = objects["Labware"][name]
+        elif isinstance(value, (list, tuple)):
+            for v in value: _labware_named_in(v, found)
+        elif isinstance(value, dict):
+            for v in value.values(): _labware_named_in(v, found)
+        return found
+
+    def _set_latch(hs, closed):
+        try: status = str(hs.labware_latch_status)
+        except Exception: status = ""
+        if closed and status != "idle_closed":
+            ctx.comment("Closing the Heater-Shaker latch before pipetting into its plate")
+            hs.close_labware_latch()
+        elif not closed and status != "idle_open":
+            ctx.comment("Opening the Heater-Shaker latch to move a plate")
+            hs.open_labware_latch()
+
     # Remembers, per liquid-fallback candidate list (Transfer/Distribute
     # "Source" as a list + VerifyLiquid - see below), which index was last
     # found to have liquid - so a later trip for the SAME reagent resumes the
@@ -512,6 +557,12 @@ def run(ctx: protocol_api.ProtocolContext):
         
         cmd = step["Command"]
         ctx.comment(f"Step: {cmd}")
+
+        # Every step that moves a pipette names its PipetteMount.
+        if "PipetteMount" in step:
+            for _lw in _labware_named_in(step, {}).values():
+                _hs = _heater_shaker_of(_lw)
+                if _hs is not None: _set_latch(_hs, closed=True)
 
         # ═══════════════════════════════════════════════════════════════════
         #                    TIP HANDLING COMMANDS
@@ -825,13 +876,13 @@ def run(ctx: protocol_api.ProtocolContext):
         elif cmd == "MoveLabware":
             l = get_loc(step["LabwareID"])
             n = get_loc(step["NewLocation"])
-            target_to_check = n
-            if hasattr(target_to_check, "parent"):
-                if target_to_check.parent is not None:
-                    target_to_check = target_to_check.parent
-            if hasattr(target_to_check, 'open_labware_latch'):
-                ctx.comment(f"Auto-Opening Latch on {target_to_check}")
-                target_to_check.open_labware_latch()
+            # Off or onto a Heater-Shaker (directly, or onto the adapter on
+            # it): the latch has to be open. The target used to be checked
+            # only one level up, which missed a move straight onto the module
+            # (its parent is the slot name) and never looked at the source.
+            for _end in (l, n):
+                _hs = _heater_shaker_of(_end)
+                if _hs is not None: _set_latch(_hs, closed=False)
 
             move_kwargs = {"use_gripper": step.get("UseGripper", True)}
             pick_up_offset = step.get("PickUpOffset")
