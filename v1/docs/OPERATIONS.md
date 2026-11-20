@@ -4,7 +4,7 @@
 
 See [SETUP.md](SETUP.md) for a full new-PC deployment guide. Summary of prerequisites:
 
-- Windows 10/11, Python 3.10/3.11
+- Windows 10/11, Python 3.14 (the tested version on the lab PC)
 - Tecan iControl SDK installed (for the C# bridge)
 - Opentrons Flex reachable on the network
 - `pip install -r v1/requirements.txt`
@@ -37,7 +37,7 @@ or double-click `LabOS_launcher.bat` (Windows).
 
 Other launcher modes: `--servers` (SiLA2 servers only), `--webapp` (web app only), `--status` (check what's running), `--stop` (stop everything the launcher started).
 
-### Option C — Check without a browser
+### Option B — Check without a browser
 
 ```bash
 python labos.py doctor       # dependencies, config validity, schema versions
@@ -49,7 +49,7 @@ python labos.py instruments  # what was discovered, and what it can do
 validates `lab_config.yaml`, checks every dependency, counts the Library files
 and flags workflows that predate the current schema version.
 
-### Option B — Manual start (for debugging one component)
+### Option C — Manual start (for debugging one component)
 
 ```bash
 # Terminal 1
@@ -156,14 +156,18 @@ python labos.py instruments        # what the running servers actually offer
 1. `python labos.py status` — it names the address it tried
 2. Check the server's terminal/process is still running
 3. Check the port isn't taken by something else: `netstat -an | findstr 50302` (or 50051/50500)
-3. Check `config.yaml` host/port match `lab_config.yaml`
-4. Restart the server — discovery reconnects automatically within ~10 seconds
-5. If a stale server on a *different* host was previously using the same configured port, this used to cause the wrong instrument to appear under a given name — that specific bug is fixed (host-aware instrument-ID resolution), but if you ever see an instrument's identity look wrong after a network change, that's the first thing to double-check.
+4. Check `config.yaml` host/port match `lab_config.yaml`
+5. Restart the server — discovery reconnects automatically within ~10 seconds
+6. If a stale server on a *different* host was previously using the same configured port, this used to cause the wrong instrument to appear under a given name — that specific bug is fixed (host-aware instrument-ID resolution), but if you ever see an instrument's identity look wrong after a network change, that's the first thing to double-check.
 
 ### Opentrons: "Could not connect to robot"
-1. Verify the robot is powered and reachable: `ping <robot_ip from config.yaml>`
-2. Check `SiLA2/OpentronsSiLA2Server/config.yaml` → `robot.ip`
-3. Check the robot's own touchscreen for an error state
+1. **Check the ethernet cable first.** The robot is on a direct link-local
+   connection (`169.254.161.83`); a loose cable looks exactly like a wrong IP,
+   and mDNS finding nothing is the same symptom. Don't change the IP in
+   `config.yaml` before checking the cable - it is correct.
+2. Verify the robot is powered and reachable: `ping <robot_ip from config.yaml>`
+3. Check `SiLA2/OpentronsSiLA2Server/config.yaml` → `robot.ip`
+4. Check the robot's own touchscreen for an error state
 
 ### Tecan: `Connect` fails, but iControl connects fine
 
@@ -219,7 +223,10 @@ This is intentional — the bridge refuses to silently fall back to the `.mdfx`'
 1. Verify the remote Docker container is up: `docker ps` / `docker logs mobile-sila2` on `192.168.11.22`
 2. Check the `RobotConnectionStatus` property — the server's own background reconnect loop will show `Connecting`/`Disconnected` if it can't reach ROS, and self-restarts (via Docker) if the ROS master was itself restarted underneath it
 3. Confirm the ArUco marker at the target workstation is clean, lit, and unobstructed
-4. Re-run `RefreshTasks` to confirm the task registry (`AvailableTasks`) is intact before assuming a connectivity fault
+4. Re-run `RefreshTasks` to confirm the task registry (`AvailableTasks`) is intact before assuming a connectivity fault. The dashboard log lists what it found
+5. A workflow step whose task was re-created on the robot fails even though the
+   name looks right: the step stores the `TaskId`, and a re-created task gets a
+   new one. Re-pick the task in that step after `RefreshTasks`
 
 ### Workflow validation error: "Instrument(s) not found: X"
 The instrument name doesn't match a currently discovered server — check spelling and that the server is online. (The old Loop/IF/Note toolbox blocks that used to trigger this error have been removed from the Workflow Builder entirely.)

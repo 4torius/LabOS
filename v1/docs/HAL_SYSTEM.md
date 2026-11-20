@@ -109,12 +109,24 @@ adapter and/or plate).
   is shaking"): stop it first (`HeaterShakerDeactivateShaker`, or a
   `HeaterShaker` step without `KeepShaking`). The same applies to plates in the
   slots **next to** the Heater-Shaker.
-- To bring plates there with the gripper instead, declare only the adapter and
-  `MoveLabware` the plate to the adapter's name.
+- To bring plates there with the gripper instead, declare only the adapter.
+  A recipe that uses the module gets the adapters the HAL mounts on it, and a
+  `MoveLabware` onto the module puts the plate on its adapter - so the recipe
+  page's treatments, which move plates "onto HeaterShaker", land at the right
+  height. Which plates an adapter accepts is Opentrons' own rule (the Corning
+  96 is refused on `opentrons_96_flat_bottom_adapter`, accepted on
+  `opentrons_universal_flat_adapter`); the run stops with a clear error.
+- **From the recipe page:** a **🌡️ Keep warm** treatment on **Target plate**
+  (with temperature, and RPM/duration to shake) moves the plate onto the
+  Heater-Shaker and leaves it there; later phases pipette into it on the
+  module, and the cleanup step it adds at the end turns the heater off and
+  returns the plate. The cleanup follows the step's target.
 
 All of this was checked in `opentrons_simulate` (pipette then shake; shake then
-pipette; pipette then move off; move on, pipette, shake, move off; pipetting
-while shaking is refused), not yet on the robot.
+pipette; pipette then move off; move on, pipette, shake, move off; the recipe
+page's own output for `PROVA_OPENTRONS.xlsx` kept warm and shaken on the
+module, with and without an adapter; pipetting while shaking is refused), not
+yet on the robot.
 
 ### Reservoir Sharing
 

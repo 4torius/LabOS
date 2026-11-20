@@ -464,15 +464,24 @@
     <li><b>Apri il pannello "Notes"</b>, è chiuso di default: lì dentro c'è la stima dello scarto per reagente, cioè quanto in eccesso devi preparare davvero.</li>
   </ol>
 
+  <p><b>Pipettare sulla piastra mentre sta sull'heater-shaker.</b> Prima della fase (o all'inizio) aggiungi <b>🌡️ Keep warm</b>, scegli <b>Target plate</b> come destinazione, imposta temperatura e, se vuoi, velocità e durata dello shake. Il gripper porta la piastra sull'heater-shaker, la scalda (e la agita per la durata impostata), poi <b>la lascia lì in temperatura</b>: le fasi successive pipettano direttamente su di lei. In fondo alla ricetta compare da solo il passo che spegne il riscaldamento e la riporta nel suo slot.</p>
+  <ul>
+    <li>Il fermo della piastra (latch) si chiude e si apre da solo quando serve.</li>
+    <li><b>Non spuntare "Keep shaking"</b> se poi devi pipettare: il robot rifiuta di pipettare sull'heater-shaker, <b>e sugli slot accanto</b>, mentre agita.</li>
+    <li>Se sull'heater-shaker è montato un adattatore, dichiaralo nella configurazione hardware (3b): la piastra verrà posata sull'adattatore.</li>
+  </ul>
+  <p>Verificato nel simulatore Opentrons, non ancora sul robot.</p>
+
   <h3>3b · La configurazione hardware (HAL)</h3>
   <div class="note hazard">
-    <span class="tag">Questo mancava dalla tua lista</span>
+    <span class="tag">Il pezzo che manca più spesso</span>
     <p>La ricetta non nomina slot, nomina <b>etichette logiche</b>: <code>MyTips</code>, <code>TargetPlate</code>, <code>Source_1</code>. È la configurazione hardware a dire in quale slot sta ciascuna. Senza quella giusta attiva, la ricetta non parte, e se è attiva ma sbagliata il robot va a pescare nello slot sbagliato.</p>
   </div>
   <ol class="steps">
     <li>Il Recipe Generator può generare una configurazione insieme alla ricetta. Usa quella se non ne hai già una compatibile.</li>
     <li>Vai su <b>Hardware</b> (<code>/hardware</code>) e clicca <b>Set Active</b> sulla configurazione giusta. La scelta resta anche dopo un riavvio.</li>
     <li>Se compare un avviso che il robot era offline, riapplica la configurazione dopo averlo visto online: l'attivazione non gli è arrivata.</li>
+    <li><b>Cosa sta sopra un modulo.</b> Clic sullo slot del modulo → sezione <i>On top of the module</i>: l'adattatore montato (se c'è) e, se vuoi, la piastra che ci sta sopra già all'inizio. Una piastra messa lì si usa nelle ricette con il suo nome come tutte le altre.</li>
   </ol>
 
   <h3>3c · Allestire il deck e verificarlo</h3>
@@ -519,6 +528,7 @@
     <li>Salvalo come <code>.mdfx</code> dentro <code>Library/Analysis/</code>.</li>
     <li><b>Chiudi iControl</b> prima di tornare a usare il Tecan da LabOS, vedi Fase 2.</li>
     <li>Nel comando <code>RunMeasurement</code> il protocollo si sceglie da una <b>tendina</b>: l'elenco viene letto da <code>Library/Analysis/</code> e non si scrive niente a mano. Se il file nuovo non compare, ricarica la pagina.</li>
+    <li><b>Tipo di piastra</b> (<code>PlateType</code>), facoltativo: vuoto usa la piastra salvata nel <code>.mdfx</code>; altrimenti scegli dalla tendina una delle piastre di <code>Library/Labware/Plates/</code> misurabili col Tecan. Per aggiungerne una: <code>docs/NUOVA_PIASTRA.md</code>.</li>
   </ol>
 
   <p class="skip"><b>Se lo salti:</b> i parametri della misura vivono solo nel file <code>.mdfx</code>. LabOS non ha modo di impostare una lunghezza d'onda, sceglie solo quale protocollo far girare.</p>
@@ -672,7 +682,7 @@
   </ol>
 
   <div class="note hazard">
-    <span class="tag">Questo mancava dalla tua lista</span>
+    <span class="tag">Non basta localizzarlo</span>
     <p>Localizzare è solo il <b>prerequisito</b>. Serve perché il robot sappia dov'è, ma non basta per fargli fare qualcosa da LabOS: mancano l'attivazione dell'hardware e i task.</p>
   </div>
 
@@ -680,19 +690,19 @@
   <ol class="steps">
     <li>Dashboard → card <b>Mobile Robot</b>. Se è grigia, il container non risponde: controlla che sia acceso e che tu sia sulla sua rete.</li>
     <li><b>Attiva l'hardware</b> con <code>ActivateAllHardware</code>. All'accensione è tutto disattivato. Se preferisci pezzo per pezzo usa <code>SetHardwareActivationByRole</code> con <code>MobileBase</code>, <code>Arm</code>, <code>Gripper</code>, <code>Camera</code>: la base va attivata prima del braccio, e <code>ActivateAllHardware</code> lo garantisce da solo.</li>
-    <li>Lancia <code>RefreshTasks</code>: riporta dal robot la lista dei task e la salva in <code>Library/MobileTasks/</code>. Senza questo la tendina dei task nel workflow builder è vuota.</li>
+    <li>Lancia <code>RefreshTasks</code>: riporta dal robot la lista dei task e la salva in <code>Library/MobileTasks/</code>. Nella console della Dashboard compare quanti task ha trovato e quali. Senza questo la tendina dei task nel workflow builder è vuota (o ferma all'ultima lista salvata).</li>
     <li>Aggiungi uno step <code>ExecuteTask</code> per ogni task e scegli il <code>TaskId</code> dalla tendina. Il parametro <code>ExecutionMode</code> esiste ancora nell'interfaccia ma il server attuale <b>lo ignora</b>: lascialo su <code>Normal</code> e non aspettarti che <code>DryRun</code> simuli qualcosa.</li>
   </ol>
 
   <div class="note hazard">
     <span class="tag">Un trasporto non è uno step solo</span>
     <p>Ogni task fa una cosa sola. Portare una piastra dall'Opentrons al Tecan sono <b>quattro step</b> di workflow, in quest'ordine:</p>
-    <p><code>go_to_opentrons</code> → <code>pick_from_opentrons</code> → <code>go_to_tecan</code> → <code>place_on_TC</code></p>
-    <p>Al contrario, dal Tecan all'Opentrons: <code>go_to_tecan</code> → <code>pick_from_tecan</code> → <code>go_to_opentrons</code> → <code>place_on_OT</code>.</p>
+    <p><code>go_to_opentrons</code> → <code>pick_from_opentrons</code> → <code>go_to_tecan</code> → <code>place_on_Tecan</code></p>
+    <p>Al contrario, dal Tecan all'Opentrons: <code>go_to_tecan</code> → <code>pick_from_tecan</code> → <code>go_to_opentrons</code> → <code>place_on_Opentrons</code>.</p>
   </div>
 
   <h3>I task che esistono davvero</h3>
-  <p>Letti dal robot. La piastra viaggia appoggiata alla <b>dima</b> a bordo: prenderla da uno strumento significa anche posarla sulla dima, e posarla su uno strumento significa anche riportare il braccio a riposo.</p>
+  <p>Letti dal robot con <code>RefreshTasks</code> il 20/11/2026. I task si creano e si rinominano sul robot: <b>fa fede la lista che <code>RefreshTasks</code> scrive nella console</b>, non questa tabella. La piastra viaggia appoggiata alla <b>dima</b> a bordo.</p>
   <div class="tablebox">
   <table>
     <thead><tr><th>Task</th><th>Cosa fa</th></tr></thead>
@@ -701,13 +711,15 @@
       <tr><td><code>go_to_tecan</code></td><td>Naviga fino al Tecan</td></tr>
       <tr><td><code>pick_from_opentrons</code></td><td>Prende la piastra dall'Opentrons e la appoggia sulla dima</td></tr>
       <tr><td><code>pick_from_tecan</code></td><td>Prende la piastra dal Tecan</td></tr>
-      <tr><td><code>place_on_OT</code></td><td>Posa la piastra sull'Opentrons, poi il braccio torna a riposo</td></tr>
-      <tr><td><code>place_on_TC</code></td><td>Posa la piastra sul Tecan, poi il braccio torna a riposo</td></tr>
+      <tr><td><code>place_on_Opentrons</code></td><td>Posa la piastra sull'Opentrons</td></tr>
+      <tr><td><code>place_on_Tecan</code></td><td>Posa la piastra sul Tecan</td></tr>
       <tr><td><code>pick_from_dima</code></td><td>Riprende la piastra dalla dima, se è rimasta lì</td></tr>
-      <tr><td><code>docking</code></td><td>Torna alla stazione di ricarica</td></tr>
-      <tr><td><code>TestFra</code>, <code>BaseFra</code></td><td>Taratura dei frame. Non servono all'uso normale</td></tr>
+      <tr><td><code>go_to_docking</code></td><td>Torna alla stazione di ricarica</td></tr>
+      <tr><td><code>go_to_WorkingPose</code></td><td>Porta il robot nella posa di lavoro</td></tr>
+      <tr><td><code>PRENDERE_PIASTRA_FRA</code>, <code>CAPPA</code></td><td>Task creati in laboratorio: cosa fanno lo sa chi li ha creati</td></tr>
     </tbody>
   </table>
+  <p>Nomi cambiati rispetto alle versioni precedenti di questa guida: <code>place_on_OT</code> → <code>place_on_Opentrons</code>, <code>place_on_TC</code> → <code>place_on_Tecan</code>, <code>docking</code> → <code>go_to_docking</code>. <code>TestFra</code> e <code>BaseFra</code> non ci sono più. Un workflow salvato con i nomi vecchi va ricontrollato: il <code>TaskId</code> è un codice, e quello di un task ricreato è diverso.</p>
   </div>
 
   <h3>Prima di farlo muovere davvero</h3>

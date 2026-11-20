@@ -515,22 +515,31 @@ From the current `config.yaml`, the robot controller manages: an ABB GoFa arm, a
 An earlier documentation pass listed stations `Home`, `Opentrons`, `Tecan`,
 `Storage_A1`, `Storage_A2`, `Incubator` "from the remote `config.yaml`". The
 last three do not exist. What the robot actually reports, read live from
-`AvailableTasks` and `GetTaskDetails`:
+`AvailableTasks` (`RefreshTasks` on 2026-11-20; tasks are created and renamed
+on the robot, so the list `RefreshTasks` writes to the dashboard log is the
+authority, not this table):
 
 | Task | Subtasks | What it does |
 |------|----------|--------------|
-| `go_to_opentrons` | `nav` | Navigate to the Opentrons |
-| `go_to_tecan` | `nav` | Navigate to the Tecan |
-| `pick_from_opentrons` | `pick_from_opentrons`, `place_on_dima` | Lift the plate off the Opentrons and set it on the onboard jig |
-| `pick_from_tecan` | `pick_from_tecan`, `pick_from_tecan_robot_frame` | Lift the plate off the Tecan |
-| `place_on_OT` | `place_on_OT`, `home` | Set the plate on the Opentrons, then return the arm |
-| `place_on_TC` | `place_on_TC`, `home` | Set the plate on the Tecan, then return the arm |
-| `pick_from_dima` | `pick_from_dima` | Take the plate back off the onboard jig |
-| `docking` | `docking` | Return to the charging station |
-| `TestFra`, `BaseFra` | one each | Frame calibration, not for normal use |
+| `go_to_opentrons` | 1 | Navigate to the Opentrons |
+| `go_to_tecan` | 1 | Navigate to the Tecan |
+| `pick_from_opentrons` | 2 | Lift the plate off the Opentrons and set it on the onboard jig |
+| `pick_from_tecan` | 2 | Lift the plate off the Tecan |
+| `place_on_Opentrons` | 2 | Set the plate on the Opentrons |
+| `place_on_Tecan` | 2 | Set the plate on the Tecan |
+| `pick_from_dima` | 1 | Take the plate back off the onboard jig |
+| `go_to_docking` | 1 | Return to the charging station |
+| `go_to_WorkingPose` | 1 | Move to the working pose |
+| `PRENDERE_PIASTRA_FRA`, `CAPPA` | 1 each | Created in the lab; not described here |
+
+Renamed since the previous list: `place_on_OT` → `place_on_Opentrons`,
+`place_on_TC` → `place_on_Tecan`, `docking` → `go_to_docking`; `TestFra` and
+`BaseFra` are gone. A task re-created on the robot gets a new `TaskId`, so a
+saved workflow that names the old id fails - check workflows after the task
+list changes.
 
 **One task is one action.** A transport is a sequence of workflow steps:
-`go_to_opentrons` → `pick_from_opentrons` → `go_to_tecan` → `place_on_TC`.
+`go_to_opentrons` → `pick_from_opentrons` → `go_to_tecan` → `place_on_Tecan`.
 
 Hardware registered on the controller, all **deactivated at startup**: arm
 `gofa_bicocca` (ABB GoFa5), gripper `2fg7` (OnRobot 2FG7), camera `realsense`
