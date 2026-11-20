@@ -548,6 +548,9 @@ def run(ctx: protocol_api.ProtocolContext):
     # search there instead of re-probing wells already found dry.
     _fallback_progress: Dict[tuple, int] = {}
 
+    # Where MoveToWell/MoveRelative last put each pipette (see MoveRelative).
+    _last_move = {}
+
     # EXECUTE STEPS
     for step in settings.get("Steps", []):
         # Handle legacy comment-only steps
@@ -909,6 +912,10 @@ def run(ctx: protocol_api.ProtocolContext):
         elif cmd == "MoveToWell":
             pip = get_pip(step["PipetteMount"])
             loc = get_loc(step["Location"])
+            # move_to() takes a Location, not a Well ("'Well' object has no
+            # attribute 'labware'"): a well means its top.
+            if hasattr(loc, "top"): loc = loc.top()
+            _last_move[step["PipetteMount"]] = loc
             speed = step.get("Speed")
             force_direct = step.get("ForceDirect", False)
             minimum_z_height = step.get("MinimumZHeight")
@@ -922,22 +929,25 @@ def run(ctx: protocol_api.ProtocolContext):
             axis = step.get("Axis", "z")
             distance = step["Distance"]
             speed = step.get("Speed")
-            # API 2.22+ robot control - using relative coordinates
-            if hasattr(pip, 'move_to'):
-                # Get current position and move relative
-                curr = pip.current_location
-                if curr:
-                    from opentrons.types import Point
-                    offset = Point(
-                        x=distance if axis == "x" else 0,
-                        y=distance if axis == "y" else 0,
-                        z=distance if axis == "z" else 0
-                    )
-                    new_loc = curr.move(offset)
-                    if speed:
-                        pip.move_to(new_loc, speed=speed)
-                    else:
-                        pip.move_to(new_loc)
+            # Relative to where the last MoveToWell/MoveRelative left this
+            # pipette. The API has no "current location" to read back (this
+            # used pip.current_location, which does not exist, so the command
+            # never worked), so the protocol remembers it.
+            curr = _last_move.get(step["PipetteMount"])
+            if curr is None:
+                raise ValueError("MoveRelative needs a MoveToWell before it, on the same pipette")
+            from opentrons.types import Point
+            offset = Point(
+                x=distance if axis == "x" else 0,
+                y=distance if axis == "y" else 0,
+                z=distance if axis == "z" else 0
+            )
+            new_loc = curr.move(offset)
+            if speed:
+                pip.move_to(new_loc, speed=speed)
+            else:
+                pip.move_to(new_loc)
+            _last_move[step["PipetteMount"]] = new_loc
 
         # ═══════════════════════════════════════════════════════════════════
         #               HEATER-SHAKER MODULE COMMANDS

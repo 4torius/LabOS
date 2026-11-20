@@ -114,8 +114,15 @@ quella rimasta sopra torna al suo posto.
 
 **Quali piastre ci stanno sopra.** Sull'adattatore universale Opentrons accetta
 solo le piastre che lo dichiarano: Corning 96, NEST 12 e NEST 8 reservoir
-22 mL, NEST 24 10,4 mL, alcune 96/384. **Non** la Corning 48 né la EuroClone 48
-custom: il run si ferma prima di muovere con un errore chiaro.
+22 mL, NEST 24 10,4 mL, alcune 96/384. Le altre il run le rifiuta prima di
+muovere, con un errore chiaro.
+
+**Le piastre da 48 (Corning 48 e EuroClone 48 custom)** ora sono accettate,
+ma con un'altezza di appoggio **stimata** (9,17 mm, ricavata dai dati Opentrons
+della Corning 48 su un altro adattatore). **Prima di usarle davvero** lancia
+`ExecuteRecipe` con `TEST_HS_48_altezza` (una Corning 48 vuota in A2): la punta
+scende a 5 mm e poi a 2 mm dal fondo del pozzetto A1, con 20 s di pausa per
+guardare. Se le distanze non tornano, l'altezza va corretta nella definizione.
 
 ### 3b · La configurazione hardware (HAL)
 
