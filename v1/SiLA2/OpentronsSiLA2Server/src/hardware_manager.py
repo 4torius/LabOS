@@ -389,6 +389,20 @@ class HardwareManager:
         for logical_name, physical_id in (recipe.get("Requirements") or {}).items():
             logical_of.setdefault(physical_id, logical_name)
 
+        # An adapter is part of the module it is mounted on: a recipe that
+        # uses the module gets it, so a plate moved there lands on the adapter
+        # at the right height instead of on a bare module the robot thinks is
+        # empty.
+        modules_in_recipe = set(recipe["Modules"])
+        for adapter_id, node in self._config.get("Labware", {}).items():
+            if not isinstance(node, dict) or "adapter" not in str(node.get("LoadName", "")).lower():
+                continue
+            module = node.get("OnModule")
+            if module and logical_of.get(module, module) in modules_in_recipe:
+                name = logical_of.get(adapter_id, adapter_id)
+                if name not in recipe["Labware"]:
+                    recipe["Labware"][name] = dict(node)
+
         for _ in range(4):  # plate -> adapter -> module is two levels
             added = False
             for node in list(recipe["Labware"].values()):

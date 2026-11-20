@@ -90,3 +90,26 @@ def test_the_generator_loads_an_adapter_before_the_plate_on_it():
     start = source.index("# 3. LOAD LABWARE")
     body = source[start:start + 1500]
     assert 'c["OnAdapter"] in objects["Labware"]' in body
+
+
+def test_a_recipe_using_the_module_gets_the_adapter_mounted_on_it(hardware):
+    """The recipe page moves plates "onto the HeaterShaker": with an adapter
+    mounted, the protocol has to know it is there, or the gripper drops the
+    plate at the height of a bare module."""
+    recipe = _apply(hardware, {"HeaterShaker": "HeaterShaker", "Tips": "Tips"})
+    assert recipe["Labware"]["HS_Adapter"]["OnModule"] == "HeaterShaker"
+    assert "HS_Plate" not in recipe["Labware"], "plates come only when the recipe names them"
+
+
+def test_a_recipe_not_using_the_module_does_not_get_its_adapter(hardware):
+    recipe = _apply(hardware, {"Tips": "Tips"})
+    assert "HS_Adapter" not in recipe["Labware"]
+
+
+def test_a_move_onto_a_module_lands_on_its_adapter():
+    source = (V1_DIR / "SiLA2" / "OpentronsSiLA2Server" / "src"
+              / "protocol_generator.py").read_text(encoding="utf-8")
+    start = source.index('elif cmd == "MoveLabware":')
+    body = source[start:source.index('elif cmd == "MoveToWell":', start)]
+    assert 'getattr(_lw, "is_adapter", False)' in body
+    assert body.index("is_adapter") < body.index("ctx.move_labware")

@@ -883,6 +883,12 @@ def run(ctx: protocol_api.ProtocolContext):
             for _end in (l, n):
                 _hs = _heater_shaker_of(_end)
                 if _hs is not None: _set_latch(_hs, closed=False)
+            # Onto a module with an adapter on it: the plate goes on the
+            # adapter (a recipe names the module, the HAL knows the adapter).
+            for _lw in objects["Labware"].values():
+                if getattr(_lw, "parent", None) is n and getattr(_lw, "is_adapter", False):
+                    n = _lw
+                    break
 
             move_kwargs = {"use_gripper": step.get("UseGripper", True)}
             pick_up_offset = step.get("PickUpOffset")
