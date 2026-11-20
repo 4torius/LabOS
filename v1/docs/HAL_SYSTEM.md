@@ -120,13 +120,22 @@ adapter and/or plate).
   (with temperature, and RPM/duration to shake) moves the plate onto the
   Heater-Shaker and leaves it there; later phases pipette into it on the
   module, and the cleanup step it adds at the end turns the heater off and
-  returns the plate. The cleanup follows the step's target.
+  returns the plate. The cleanup follows the step's target. With a reagent
+  as target the same goes for its reservoir (pipetted from on the module).
+- **One plate on a module at a time.** When a later phase keeps another
+  reservoir warm, the one on the module goes back to its own slot first (no
+  question asked - that slot is free, it came from there); a cleanup whose
+  reservoir already went home only switches the module off.
 
 All of this was checked in `opentrons_simulate` (pipette then shake; shake then
 pipette; pipette then move off; move on, pipette, shake, move off; the recipe
 page's own output for `PROVA_OPENTRONS.xlsx` kept warm and shaken on the
 module, with and without an adapter; pipetting while shaking is refused), not
-yet on the robot.
+yet on the robot - except: **on the robot, 2026-11-20**, a Corning 96 source
+moved onto the universal adapter, held at 30 °C and shaken, 50 µL pipetted
+from it on the module into a plate in D2, then heater off and returned
+(`Library/Recipes/TEST_HS_pipetta_su_heater_shaker.json`). The two-reservoir
+swap is simulator-only.
 
 ### Reservoir Sharing
 

@@ -1,0 +1,94 @@
+{
+  "ProtocolName": "TEST_HS_pipetta_su_heater_shaker",
+  "Description": "Test al banco 2026-11-20: la sorgente (Corning 96, A2) va sull'heater-shaker (adattatore universale), 30 C + shake 300 rpm 10 s, poi resta in temperatura e si pipettano 50 uL da li' alla piastra in D2; poi riscaldamento spento e sorgente di nuovo in A2.",
+  "Modules": {
+    "HeaterShaker": {
+      "Type": "heaterShakerModuleV1",
+      "Slot": "A1"
+    }
+  },
+  "Trash": {
+    "MyTrash": {
+      "Type": "TrashBin",
+      "Slot": "A3"
+    }
+  },
+  "Labware": {
+    "HS_Adapter": {
+      "LoadName": "opentrons_universal_flat_adapter",
+      "OnModule": "HeaterShaker"
+    },
+    "TargetPlate": {
+      "LoadName": "corning_96_wellplate_360ul_flat",
+      "Slot": "D2",
+      "DisplayName": "Piastra test"
+    },
+    "Source": {
+      "LoadName": "corning_96_wellplate_360ul_flat",
+      "Slot": "A2",
+      "DisplayName": "Acqua (sorgente)"
+    }
+  },
+  "Steps": [
+    {
+      "Command": "Comment",
+      "Text": "1. La sorgente da A2 all'heater-shaker (sull'adattatore)"
+    },
+    {
+      "Command": "MoveLabware",
+      "LabwareID": "Source",
+      "NewLocation": "HeaterShaker",
+      "UseGripper": true
+    },
+    {
+      "Command": "Comment",
+      "Text": "2. Scalda a 30 C, shake 300 rpm per 10 s, poi resta in temperatura"
+    },
+    {
+      "Command": "HeaterShaker",
+      "ModuleID": "HeaterShaker",
+      "Temperature": 30,
+      "WaitForTemp": true,
+      "RPM": 300,
+      "Duration": 10,
+      "CloseLatch": true
+    },
+    {
+      "Command": "Comment",
+      "Text": "3. Pipetta 50 uL dalla sorgente sull'heater-shaker alla piastra in D2"
+    },
+    {
+      "Command": "PickUpTip",
+      "PipetteMount": "left",
+      "TipRack": "MyTips_200"
+    },
+    {
+      "Command": "Transfer",
+      "PipetteMount": "left",
+      "Volume": 50,
+      "Source": "Source:A1",
+      "Dest": "TargetPlate:A1",
+      "NewTip": "never"
+    },
+    {
+      "Command": "DropTip",
+      "PipetteMount": "left"
+    },
+    {
+      "Command": "Comment",
+      "Text": "4. Spegni il riscaldamento e riporta la sorgente in A2"
+    },
+    {
+      "Command": "HeaterShaker",
+      "ModuleID": "HeaterShaker",
+      "DeactivateHeater": true,
+      "OpenLatch": true
+    },
+    {
+      "Command": "MoveLabware",
+      "LabwareID": "Source",
+      "NewLocation": "A2",
+      "UseGripper": true
+    }
+  ]
+}

@@ -90,9 +90,9 @@ hardware, il deck fisico, l'analisi Tecan.
 5. **Apri il pannello "Notes"**, è chiuso di default: lì dentro c'è la stima
    dello scarto per reagente, cioè quanto in eccesso devi preparare davvero.
 
-**Pipettare sulla piastra mentre sta sull'heater-shaker.** Prima della fase
-(o all'inizio) aggiungi **🌡️ Keep warm**, scegli **Target plate** come
-destinazione, imposta temperatura e, se vuoi, velocità e durata dello shake.
+**Tenere al caldo una reservoir (o la piastra) sull'heater-shaker e pipettare
+da lì.** Prima della fase (o all'inizio) aggiungi **🌡️ Keep warm**, scegli
+come destinazione il reagente (la sua reservoir) o **Target plate**, imposta temperatura e, se vuoi, velocità e durata dello shake.
 Il gripper porta la piastra sull'heater-shaker, la scalda (e la agita per la
 durata impostata), poi **la lascia lì in temperatura**: le fasi successive
 pipettano direttamente su di lei. In fondo alla ricetta compare da solo il
@@ -104,7 +104,18 @@ passo che spegne il riscaldamento e la riporta nel suo slot.
 - Se sull'heater-shaker è montato un adattatore, dichiaralo nella
   configurazione hardware (3b): la piastra verrà posata sull'adattatore.
 
-Verificato nel simulatore Opentrons, non ancora sul robot.
+Provato sul robot vero il 20/11/2026 (sorgente tenuta a 30 °C sull'heater-shaker, 50 µL pipettati da lì).
+
+**Più reservoir.** Puoi tenere al caldo una reservoir in una fase e un'altra
+in una fase successiva: quando arriva il turno della seconda, quella che sta
+sull'heater-shaker **torna da sola nel suo slot di partenza**, poi la seconda
+ci va sopra. Non ti chiede niente. A fine ricetta il riscaldamento si spegne e
+quella rimasta sopra torna al suo posto.
+
+**Quali piastre ci stanno sopra.** Sull'adattatore universale Opentrons accetta
+solo le piastre che lo dichiarano: Corning 96, NEST 12 e NEST 8 reservoir
+22 mL, NEST 24 10,4 mL, alcune 96/384. **Non** la Corning 48 né la EuroClone 48
+custom: il run si ferma prima di muovere con un errore chiaro.
 
 ### 3b · La configurazione hardware (HAL)
 
