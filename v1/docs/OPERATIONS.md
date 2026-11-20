@@ -212,8 +212,8 @@ the network, the orchestrator or the workflow.
 2. Confirm Tecan iControl software is closed (it locks the USB connection)
 3. `Connect()` always re-validates against the real hardware state now (fixed) — it will no longer report "connected" after a silent USB drop. If you ever rebuild `TecanBridge.cs` in the future, remember the launcher prefers the **Release** build over Debug — rebuild Release too, or the fix you just made won't actually run (see [SERVERS.md](SERVERS.md#bridge-binary-is-up-to-date)).
 
-### Tecan: `RunMeasurement` fails with "PlateType 'X' not found in PlateTypes.json"
-This is intentional — you asked for a plate override that isn't registered yet, and the bridge refuses to silently fall back to the `.mdfx`'s own default plate (that would look like success while reading the wrong geometry). Either leave `PlateType` empty to use the protocol's default plate, or register the plate first — see [SERVERS.md](SERVERS.md#mdfx-protocol-files). Remember to restart the Tecan server after editing `PlateTypes.json` — it's loaded once at bridge startup.
+### Tecan: `RunMeasurement` fails with "PlateType 'X' non e' una piastra misurabile" or "scartata all'avvio"
+This is intentional — the bridge refuses to silently fall back to the `.mdfx`'s own default plate (that would look like success while reading the wrong geometry). Either leave `PlateType` empty to use the protocol's default plate, or make the plate measurable: give its `Library/Labware/Plates/*.plate.json` a `tecan_plate_name` whose `.pdfx` exists with the same rows × columns — see [NUOVA_PIASTRA.md](NUOVA_PIASTRA.md). "Scartata" gives the reason found at startup. Restart the Tecan server after changing a plate — plates are loaded once at bridge startup.
 
 ### Mobile robot: task fails or "Server offline" despite discovery showing it online
 1. Verify the remote Docker container is up: `docker ps` / `docker logs mobile-sila2` on `192.168.11.22`

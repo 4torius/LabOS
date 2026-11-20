@@ -167,7 +167,7 @@ Full detail and more scenarios: [OPERATIONS.md](OPERATIONS.md#troubleshooting).
 | Recipe fails against the active HAL ("missing labware mapping") | Confirm the correct HAL is active **and actually applied to the robot** — the Hardware page now warns you explicitly if it wasn't |
 | Tip count looks wrong | The automatic tip guard may have force-dropped a tip you didn't expect — check the run's archived log before assuming a bug |
 | Can't find a plate/run you're sure exists | Make sure you're on the **Database** page (SQLite-backed), on the right tab (**Plates** vs **Runs & Log**) |
-| Tecan `RunMeasurement` fails with "PlateType not found" | Expected — that plate isn't registered in `PlateTypes.json` yet, or leave `PlateType` empty to use the protocol's default plate. See [SERVERS.md](SERVERS.md#mdfx-protocol-files) |
+| Tecan `RunMeasurement` fails with "PlateType not found" | Expected — that plate has no `tecan_plate_name` in `Library/Labware/Plates` yet (or the Tecan server wasn't restarted after adding it); or leave `PlateType` empty to use the protocol's default plate. See [NUOVA_PIASTRA.md](NUOVA_PIASTRA.md) |
 
 ---
 

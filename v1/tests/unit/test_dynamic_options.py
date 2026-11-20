@@ -197,3 +197,32 @@ class TestRefreshAfterACommand:
         core._instruments = {"stacker": owner, "reader": bystander}
         core.fetch_dynamic_options = AsyncMock(return_value=[])
         assert await core._refresh_options_owned_by(bystander) == []
+
+
+class TestOnlyTheDeclaredCommandReports:
+    """RefreshTasks lists the tasks it found; other robot commands do not."""
+
+    @pytest.fixture
+    def declared(self, core):
+        core._instruments = {"stacker": _instrument(
+            declaration={**DECLARATION, "refreshed_by": "RescanSlots"})}
+        return core
+
+    def test_the_declared_command_reports(self, declared):
+        assert declared.is_refreshed_by("stacker_slot", "RescanSlots")
+        assert declared.is_refreshed_by("stacker_slot", "rescanslots")
+
+    def test_any_other_command_does_not(self, declared):
+        assert not declared.is_refreshed_by("stacker_slot", "MoveTo")
+
+    def test_without_a_declaration_nothing_reports(self, core):
+        core._instruments = {"stacker": _instrument()}
+        assert not core.is_refreshed_by("stacker_slot", "RescanSlots")
+
+    def test_lab_config_can_declare_it_for_a_remote_server(self, core):
+        core._instruments = {"stacker": _instrument(declaration={"hint": "unrelated"})}
+        core._ui_dropdowns["stacker_slot"] = {**DECLARATION, "server": "stacker",
+                                              "refreshed_by": ["RescanSlots"]}
+        assert core.is_refreshed_by("stacker_slot", "RescanSlots")
+        assert not core.is_refreshed_by("stacker_slot", "MoveTo")
+

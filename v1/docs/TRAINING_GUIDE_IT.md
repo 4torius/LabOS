@@ -165,7 +165,7 @@ Dettaglio completo e altri scenari: [OPERATIONS.md](OPERATIONS.md#troubleshootin
 | Una ricetta fallisce contro la HAL attiva ("missing labware mapping") | Conferma che la HAL corretta sia attiva **e sia stata effettivamente applicata al robot** — la pagina Hardware ora avvisa esplicitamente se non lo è stata |
 | Il conteggio dei tip sembra sbagliato | La guardia automatica anti-tip potrebbe aver forzato uno sgancio che non ti aspettavi — controlla il log archiviato della run prima di dare per scontato un bug |
 | Non trovi una piastra/run che sai esistere | Assicurati di essere sulla pagina **Database** (backend SQLite), sul tab giusto (**Plates** vs **Runs & Log**) |
-| `RunMeasurement` Tecan fallisce con "PlateType not found" | Normale — quella piastra non è ancora registrata in `PlateTypes.json`, oppure lascia `PlateType` vuoto per usare la piastra di default del protocollo. Vedi [SERVERS.md](SERVERS.md#mdfx-protocol-files) |
+| `RunMeasurement` Tecan fallisce con "PlateType not found" | Normale — quella piastra non ha ancora `tecan_plate_name` in `Library/Labware/Plates` (o il server Tecan non è stato riavviato dopo averlo aggiunto), oppure lascia `PlateType` vuoto per usare la piastra di default del protocollo. Vedi [NUOVA_PIASTRA.md](NUOVA_PIASTRA.md) |
 
 ---
 
