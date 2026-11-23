@@ -1,0 +1,40 @@
+{
+  "Name": "Leave the plate on the Opentrons",
+  "Category": "Transport",
+  "Description": "From the robot's jig onto the Opentrons deck. The plate stays there until a 'Take the plate from the Opentrons'.",
+  "Steps": [
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "go_to_opentrons"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Drive to the Opentrons"
+    },
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "pick_from_dima"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Take the plate off the jig"
+    },
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "place_on_Opentrons"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Place the plate on the deck"
+    }
+  ]
+}

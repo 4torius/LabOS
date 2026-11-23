@@ -1,0 +1,41 @@
+{
+  "Name": "Take the plate from the Tecan",
+  "Category": "Transport",
+  "Description": "From the reader onto the robot's jig, tray closed again.",
+  "Steps": [
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "go_to_tecan"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Drive to the Tecan"
+    },
+    {
+      "Instrument": "tecan",
+      "Action": "PlateOut",
+      "Parameters": {},
+      "Description": "Open the reader tray"
+    },
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "pick_from_tecan"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Take the plate off the tray, onto the jig"
+    },
+    {
+      "Instrument": "tecan",
+      "Action": "PlateIn",
+      "Parameters": {},
+      "Description": "Close the empty tray"
+    }
+  ]
+}

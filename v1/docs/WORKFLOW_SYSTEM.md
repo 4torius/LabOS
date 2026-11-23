@@ -155,6 +155,33 @@ Selecting a step shows **When does it start?** with one button per shape:
 them; the ones the selected step waits for are outlined. In the list, a dashed
 connector marks a step that does not wait for the one above it.
 
+### Blocks
+
+A block is a named sequence of steps added in one click from the **Blocks**
+section of the toolbox: *Read on the Tecan* is nine steps (drive there, take
+the plate off the jig, open the tray, place it, close it, read, open, take it
+back, close the empty tray). They become ordinary steps under the block's
+name; the first waits for the step above it, the rest follow the block's
+order, so a workflow built from blocks runs in order with no dependency set by
+hand. `Video` is three blocks: *Pipette on the Opentrons*, *Read on the
+Tecan*, *Robot to working pose*.
+
+Blocks live in `Library/Blocks/<id>.block.json` and the lab can add its own
+without touching code; the format is described at the top of `src/blocks.py`.
+Two parts of it matter when writing one:
+
+- A robot task is named, not numbered: `"TaskId": {"label": "go_to_tecan"}`.
+  The id is looked up when the block is inserted, from the task list the robot
+  last reported, so a task re-taught with a new id is still found.
+- `"Ask": ["RecipeName"]` marks a choice the person must make. The builder
+  fills a default so the step is valid, then shows the step as *choose:
+  RecipeName* and counts it in the bar above the list until it is changed.
+
+The shipped blocks are checked by `tests/unit/test_blocks.py` (every task
+exists on the robot and is declared; the tray is open whenever the robot
+reaches into it, and closed at the end), and a workflow made of them runs in
+the simulated lab (`tests/simlab/test_blocks_in_sim.py`).
+
 The builder validates as you edit (`POST /api/workflows/validate`): problems
 show on their step and in a bar above the list, before Run is pressed.
 **Simulate** runs the workflow in the simulated lab (`POST

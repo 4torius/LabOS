@@ -1,0 +1,29 @@
+{
+  "Name": "Take the plate from the Opentrons",
+  "Category": "Transport",
+  "Description": "From the Opentrons deck onto the robot's jig.",
+  "Steps": [
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "go_to_opentrons"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Drive to the Opentrons"
+    },
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "pick_from_opentrons"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Take the plate off the deck, onto the jig"
+    }
+  ]
+}

@@ -227,6 +227,14 @@
     .step-connector.parallel { border-left-style: dashed !important; opacity: .7; }
     .step-connector-label { font-size: 10px; color: #adb5bd; margin-left: 30px; }
 
+    .block-header { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+                    color: #9ec5fe; margin: 10px 0 2px 2px; display: flex; gap: 6px; align-items: center; }
+    .workflow-step.in-block { box-shadow: inset 3px 0 0 rgba(158,197,254,.35); }
+    .step-wait.ask { background: rgba(220,53,69,.18); color: #ea868f; }
+    .tool-block.block-item { font-size: 12px; justify-content: flex-start; text-align: left; }
+    .block-category { font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+                      color: #6c757d; margin: 6px 2px 2px; }
+
     .dep-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
     .dep-modes .btn { font-size: 11px; padding: 4px 6px; text-align: left; }
     .dep-help { font-size: 11px; color: #adb5bd; margin-top: 6px; }
@@ -412,6 +420,11 @@
                 <div class="text-muted small px-2" id="toolboxPlaceholder">Discovering instruments…</div>
             </div>
             
+            <div class="toolbox-section" id="toolbox-blocks">
+                <h6><i class="bi bi-boxes"></i> Blocks</h6>
+                <div class="text-muted small px-2" id="blocksPlaceholder">Loading blocks…</div>
+            </div>
+
             <div class="toolbox-section">
                 <h6><i class="bi bi-clock"></i> Timing</h6>
                 <div class="tool-block delay" data-type="delay" draggable="true">
@@ -1084,6 +1097,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     // Add View All toggle button
     addViewAllToggle();
+
+    loadBlocks();
     
     // Load available files
     loadFiles();
@@ -1300,13 +1315,24 @@ function renderSteps() {
             }
         }
         
+        // A block's steps sit under its name.
+        var previous = i > 0 ? workflowSteps[i - 1] : null;
+        if (step.block && !(previous && previous.block &&
+                previous.block.name === step.block.name && previous.block.run === step.block.run)) {
+            var header = document.createElement('div');
+            header.className = 'block-header';
+            header.innerHTML = '<i class="bi bi-box"></i>' + _escapeHtml(step.block.name);
+            stepsContainer.appendChild(header);
+        }
+
         // Create step element
         var stepEl = document.createElement('div');
         var waitedFor = selectedStepIndex !== null && selectedStepIndex !== i &&
             (workflowSteps[selectedStepIndex].dependsOn || []).indexOf(i + 1) !== -1;
         var stepErrors = _errorsOf(i);
         stepEl.className = 'workflow-step ' + step.type + (selectedStepIndex === i ? ' selected' : '') +
-            (waitedFor ? ' waited-for' : '') + (stepErrors.length ? ' has-error' : '');
+            (waitedFor ? ' waited-for' : '') + (stepErrors.length ? ' has-error' : '') +
+            (step.block ? ' in-block' : '');
         if (INSTRUMENTS[step.type] && !INSTRUMENTS[step.type].isUtility) {
             stepEl.style.borderLeft = '4px solid ' + _instrumentBorder(inst);
         }
@@ -1331,7 +1357,8 @@ function renderSteps() {
             paramsDisplay = paramParts.join(', ');
         }
         
-        var depsBadge = _waitBadge(i);
+        var depsBadge = _waitBadge(i) + ((step.ask && step.ask.length)
+            ? '<span class="step-wait ask" title="The block asks you to choose these">choose: ' + _escapeHtml(step.ask.join(', ')) + '</span>' : '');
 
         stepEl.innerHTML =
             '<div class="step-number">' + (i + 1) + '</div>' +
@@ -1762,6 +1789,9 @@ function updateCommand(cmdId) {
 function updateParam(key, value) {
     if (selectedStepIndex === null) return;
     workflowSteps[selectedStepIndex].params[key] = value;
+    // A choice the block asked for has now been made.
+    var ask = workflowSteps[selectedStepIndex].ask;
+    if (ask && ask.indexOf(key) !== -1) ask.splice(ask.indexOf(key), 1);
     workflowSteps[selectedStepIndex].params = normalizeStepParamsForCommand(
         workflowSteps[selectedStepIndex].command,
         workflowSteps[selectedStepIndex].params
@@ -1821,7 +1851,10 @@ function saveWorkflow() {
             Instrument: _instrumentFor(step),
             Action: step.command,
             Parameters: _stepParams(step),
-            DependsOn: step.dependsOn || []
+            DependsOn: step.dependsOn || [],
+            Block: step.block ? step.block.name : undefined,
+            BlockRun: step.block ? step.block.run : undefined,
+            Ask: (step.ask && step.ask.length) ? step.ask : undefined
         });
     }
     
@@ -1907,7 +1940,9 @@ function loadWorkflowFile(filename) {
                     type: type,
                     command: s.Action,
                     params: normalizeStepParamsForCommand(s.Action, s.Parameters || {}),
-                    dependsOn: s.DependsOn || []
+                    dependsOn: s.DependsOn || [],
+                block: s.Block ? { name: s.Block, run: s.BlockRun || 0 } : null,
+                ask: (s.Ask || []).slice()
                 });
             }
             
@@ -2028,7 +2063,10 @@ function _buildSteps() {
             Instrument: _instrumentFor(step),
             Action: step.command,
             Parameters: params,
-            DependsOn: step.dependsOn || []
+            DependsOn: step.dependsOn || [],
+            Block: step.block ? step.block.name : undefined,
+            BlockRun: step.block ? step.block.run : undefined,
+            Ask: (step.ask && step.ask.length) ? step.ask : undefined
         };
     });
 }
@@ -2152,7 +2190,9 @@ function _loadTemplate(templateId) {
                 type: type,
                 command: s.Action,
                 params: normalizeStepParamsForCommand(s.Action, s.Parameters || {}),
-                dependsOn: s.DependsOn || []
+                dependsOn: s.DependsOn || [],
+                block: s.Block ? { name: s.Block, run: s.BlockRun || 0 } : null,
+                ask: (s.Ask || []).slice()
             });
         });
         _applyRequiredDefaultsToAllSteps();
@@ -2183,7 +2223,10 @@ function saveCurrentAsTemplate() {
                 Instrument: _instrumentFor(step),
                 Action: step.command,
                 Parameters: _stepParams(step),
-                DependsOn: step.dependsOn || []
+                DependsOn: step.dependsOn || [],
+            Block: step.block ? step.block.name : undefined,
+            BlockRun: step.block ? step.block.run : undefined,
+            Ask: (step.ask && step.ask.length) ? step.ask : undefined
             };
         });
         fetch('/api/templates/save', {
@@ -2241,7 +2284,10 @@ function exportWorkflow() {
             Instrument: _instrumentFor(step),
             Action: step.command,
             Parameters: _stepParams(step),
-            DependsOn: step.dependsOn || []
+            DependsOn: step.dependsOn || [],
+            Block: step.block ? step.block.name : undefined,
+            BlockRun: step.block ? step.block.run : undefined,
+            Ask: (step.ask && step.ask.length) ? step.ask : undefined
         };
     });
     var workflow = { WorkflowName: name, Steps: steps, ExportedAt: new Date().toISOString() };
@@ -2271,7 +2317,9 @@ function importWorkflow(e) {
                     id: Date.now() + Math.random(),
                     type: type, command: s.Action,
                     params: normalizeStepParamsForCommand(s.Action, s.Parameters || {}),
-                    dependsOn: s.DependsOn || []
+                    dependsOn: s.DependsOn || [],
+                block: s.Block ? { name: s.Block, run: s.BlockRun || 0 } : null,
+                ask: (s.Ask || []).slice()
                 });
             });
             _applyRequiredDefaultsToAllSteps();
@@ -2474,6 +2522,11 @@ function _renderValidationBar() {
     var errors = lastValidation.errors || [];
     var warnings = lastValidation.warnings || [];
     var general = errors.filter(function (e) { return !e.step; });
+    var asked = workflowSteps.reduce(function (n, s) { return n + ((s.ask && s.ask.length) ? s.ask.length : 0); }, 0);
+    if (asked) {
+        warnings = [{ message: asked + ' choice' + (asked > 1 ? 's' : '') +
+            ' still to make: the steps marked "choose" have a value filled in by default, not by you.' }].concat(warnings);
+    }
     bar.hidden = false;
     if (errors.length) {
         bar.className = 'validation-bar bad';
@@ -2490,6 +2543,83 @@ function _renderValidationBar() {
         bar.className = 'validation-bar ok';
         bar.innerHTML = '<i class="bi bi-check-circle"></i><div>Valid: every instrument, command and parameter checks out.</div>';
     }
+}
+
+// ============================================================================
+// BLOCKS (Library/Blocks/*.block.json, src/blocks.py)
+// ============================================================================
+// A block is a named sequence of steps - "Read on the Tecan" is nine - added
+// in one click as ordinary steps. Its first step waits for the step above it,
+// the rest follow the block's own order, so a workflow built from blocks runs
+// in order with no dependency set by hand.
+
+var _blockRuns = 0;
+
+function loadBlocks() {
+    fetch('/api/blocks')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            var section = document.getElementById('toolbox-blocks');
+            var placeholder = document.getElementById('blocksPlaceholder');
+            if (placeholder) placeholder.remove();
+            var category = null;
+            (data.blocks || []).forEach(function (b) {
+                if (b.category !== category) {
+                    category = b.category;
+                    var label = document.createElement('div');
+                    label.className = 'block-category';
+                    label.textContent = category || 'Other';
+                    section.appendChild(label);
+                }
+                var item = document.createElement('div');
+                item.className = 'tool-block block-item';
+                item.title = (b.description || b.name) + ' (' + b.steps + ' steps) - click to add';
+                item.innerHTML = '<i class="bi bi-box"></i><span>' + _escapeHtml(b.name) + '</span>';
+                item.addEventListener('click', function () { insertBlock(b.id); });
+                section.appendChild(item);
+            });
+            if (!(data.blocks || []).length) {
+                section.insertAdjacentHTML('beforeend', '<div class="text-muted small px-2">No blocks in Library/Blocks</div>');
+            }
+        })
+        .catch(function () {
+            var placeholder = document.getElementById('blocksPlaceholder');
+            if (placeholder) placeholder.textContent = 'Blocks could not be loaded';
+        });
+}
+
+function insertBlock(blockId) {
+    fetch('/api/blocks/' + encodeURIComponent(blockId) + '/expand', { method: 'POST' })
+        .then(function (r) { return r.json(); })
+        .then(function (block) {
+            if (!block.steps) { showToast('error', 'Block', block.detail || 'Could not add the block'); return; }
+            var offset = workflowSteps.length;
+            var run = ++_blockRuns + Date.now() % 100000;
+            block.steps.forEach(function (s, k) {
+                var type = _instrumentKeyFor(s.Instrument);
+                var deps = (s.DependsOn || []).map(function (d) { return d + offset; });
+                // The block's first step waits for whatever is above it.
+                if (k === 0 && !deps.length && offset > 0) deps = [offset];
+                workflowSteps.push({
+                    id: Date.now() + Math.random(),
+                    type: type,
+                    command: s.Action,
+                    params: normalizeStepParamsForCommand(s.Action, s.Parameters || {}),
+                    dependsOn: deps,
+                    block: { name: block.name, run: run },
+                    ask: (s.Ask || []).slice()
+                });
+            });
+            _applyRequiredDefaultsToAllSteps();
+            renderSteps();
+            selectStep(offset);
+            if (block.errors && block.errors.length) {
+                showToast('warning', 'Block added with gaps', block.errors.join(' | '));
+            } else {
+                showNotification('Added: ' + block.name + ' (' + block.steps.length + ' steps)', 'info');
+            }
+        })
+        .catch(function (e) { showToast('error', 'Block', e.message); });
 }
 
 // ============================================================================

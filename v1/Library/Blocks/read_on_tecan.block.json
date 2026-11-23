@@ -1,0 +1,90 @@
+{
+  "Name": "Read on the Tecan",
+  "Category": "Process",
+  "Description": "The plate goes from the robot's jig into the reader, is read, and comes back onto the jig. Choose the protocol and the plate type.",
+  "Steps": [
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "go_to_tecan"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Drive to the Tecan"
+    },
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "pick_from_dima"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Take the plate off the jig"
+    },
+    {
+      "Instrument": "tecan",
+      "Action": "PlateOut",
+      "Parameters": {},
+      "Description": "Open the reader tray"
+    },
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "place_on_Tecan"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Place the plate on the tray"
+    },
+    {
+      "Instrument": "tecan",
+      "Action": "PlateIn",
+      "Parameters": {},
+      "Description": "Close the tray with the plate"
+    },
+    {
+      "Instrument": "tecan",
+      "Action": "RunMeasurement",
+      "Parameters": {
+        "ProtocolFile": "",
+        "PlateType": "",
+        "PlateID": "",
+        "SampleSetID": ""
+      },
+      "Description": "Read the plate",
+      "Ask": [
+        "ProtocolFile",
+        "PlateType"
+      ]
+    },
+    {
+      "Instrument": "tecan",
+      "Action": "PlateOut",
+      "Parameters": {},
+      "Description": "Open the reader tray"
+    },
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "pick_from_tecan"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Take the plate off the tray, onto the jig"
+    },
+    {
+      "Instrument": "tecan",
+      "Action": "PlateIn",
+      "Parameters": {},
+      "Description": "Close the empty tray"
+    }
+  ]
+}

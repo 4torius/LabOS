@@ -1,0 +1,18 @@
+{
+  "Name": "Robot back to docking",
+  "Category": "Robot",
+  "Description": "",
+  "Steps": [
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "go_to_docking"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Back to the charging station"
+    }
+  ]
+}

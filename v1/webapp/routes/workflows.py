@@ -286,6 +286,62 @@ def create_workflows_router(
                         for s in workflow.steps if s.implied_depends_on},
         }
 
+    # Blocks: named sequences of steps the builder inserts in one go
+    # (src/blocks.py, Library/Blocks/*.block.json)
+
+    @router.get("/api/blocks")
+    async def list_blocks():
+        from src.blocks import load_blocks
+        blocks, problems = load_blocks(LIBRARY_DIR / "Blocks")
+        return {"blocks": [b.summary() for b in blocks], "problems": problems}
+
+    @router.post("/api/blocks/{block_id}/expand")
+    async def expand_block(block_id: str):
+        """The block's steps, with every `{"label": ...}` turned into a value.
+
+        A label is matched against the same option list the builder's
+        dropdown shows for that parameter - for the robot, the task list it
+        last reported - so a re-taught task's new id is picked up by name.
+        """
+        from src.blocks import expand, load_blocks
+
+        blocks, _problems = load_blocks(LIBRARY_DIR / "Blocks")
+        block = next((b for b in blocks if b.id == block_id), None)
+        if block is None:
+            raise HTTPException(404, f"No block named {block_id}")
+
+        core = lab_core
+        if not core:
+            from src.lab_core import get_lab_core
+            core = get_lab_core(BASE_DIR)
+        try:
+            await core.discover()
+        except Exception as exc:  # an offline lab still gets an answer
+            logger.warning("Expanding a block without discovery: %s", exc)
+
+        def resolve_label(instrument: str, action: str, parameter: str, label: str):
+            target = core.resolve_instrument(instrument).target
+            if target is None:
+                return None, f"instrument '{instrument}' is not available"
+            command = next((c for c in target.commands if c.id == action), None)
+            spec = command and next(
+                (p for p in command.parameters if p.name == parameter), None)
+            hint = getattr(spec, "ui_hint", "") if spec else ""
+            if not hint:
+                return None, f"{parameter} of {action} has no list to pick '{label}' from"
+            pairs = core._option_pairs_for_hint(hint)
+            for pair in pairs:
+                if str(pair.get("label")) == label:
+                    return pair.get("value"), None
+            for pair in pairs:  # tolerate case, as a person writing a block might
+                if str(pair.get("label")).lower() == label.lower():
+                    return pair.get("value"), None
+            known = ", ".join(sorted(str(p.get("label")) for p in pairs)) or "none"
+            return None, f"'{label}' is not among the {parameter} options (known: {known})"
+
+        steps, errors = expand(block, resolve_label)
+        return {"id": block.id, "name": block.name, "steps": steps, "errors": errors}
+
     _simulation_lock = asyncio.Lock()
 
     @router.post("/api/workflows/simulate")
