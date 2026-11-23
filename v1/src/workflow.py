@@ -185,6 +185,10 @@ class WorkflowStep:
     #: not a result. Getting the reading to happen *on time* would be a
     #: scheduler's job; saying it did not is the executor's.
     deadline_seconds: Optional[float] = None
+    #: Dependencies LabOS added, not the author: the previous step on an
+    #: instrument that runs its steps in written order (`resources.ordered`).
+    #: Kept apart so a saved or archived workflow shows only what was written.
+    implied_depends_on: List[int] = field(default_factory=list)
     
     # Runtime state
     status: StepStatus = StepStatus.PENDING
@@ -261,7 +265,8 @@ class Workflow:
                     "Instrument": s.instrument,
                     "Action": s.action,
                     "Parameters": s.parameters,
-                    "DependsOn": s.depends_on,
+                    "DependsOn": [d for d in s.depends_on
+                                  if d not in s.implied_depends_on],
                     "RetryCount": s.retry_count,
                     "TimeoutSeconds": s.timeout_seconds,
                     "NotBeforeSeconds": s.not_before_seconds,
@@ -458,6 +463,27 @@ def topological_waves(steps: List["WorkflowStep"]) -> List[List["WorkflowStep"]]
             del remaining[step.step_number]
 
     return waves
+
+
+def apply_instrument_order(steps: List["WorkflowStep"],
+                           ordered_key: Callable[["WorkflowStep"], Optional[str]]) -> None:
+    """Make each step on an ordered instrument depend on the previous one.
+
+    `ordered_key(step)` names the instrument when its steps must run in the
+    order they are written (the mobile robot: where it is is not a resource,
+    so `pick_from_tecan` written after `go_to_tecan` must also run after it),
+    and None otherwise. Idempotent: an edge already there is not added again.
+    """
+    last: Dict[str, int] = {}
+    for step in steps:
+        key = ordered_key(step)
+        if key is None:
+            continue
+        previous = last.get(key)
+        if previous is not None and previous not in step.depends_on:
+            step.depends_on = list(step.depends_on) + [previous]
+            step.implied_depends_on.append(previous)
+        last[key] = step.step_number
 
 
 def find_dependency_cycles(steps: List["WorkflowStep"]) -> List[List[int]]:
@@ -804,6 +830,7 @@ class PnPWorkflowExecutor:
         - Parameter types match
         """
         errors = []
+        self._apply_instrument_order(workflow)
 
         # Duplicate StepNumbers make DependsOn ambiguous and silently drop steps
         # from the dependency map, so catch them before anything else.
@@ -820,11 +847,19 @@ class PnPWorkflowExecutor:
 
         # A dependency cycle would otherwise present at runtime as steps that
         # simply never become runnable — a silent hang, not an error.
+        implied = {(s.step_number, d) for s in workflow.steps for d in s.implied_depends_on}
         for cycle in find_dependency_cycles(workflow.steps):
+            message = f"Dependency cycle: {' -> '.join(str(n) for n in cycle)}"
+            if any((a, b) in implied for a, b in zip(cycle, cycle[1:])):
+                message += (
+                    ". Part of it is the order the steps are written in: an "
+                    "instrument that runs its steps in written order (the mobile "
+                    "robot) cannot have a step depend on one of its own written "
+                    "further down - move that step up instead")
             errors.append(ValidationError(
                 step_number=cycle[0],
                 field="DependsOn",
-                message=f"Dependency cycle: {' -> '.join(str(n) for n in cycle)}",
+                message=message,
             ))
 
         known_numbers = {s.step_number for s in workflow.steps}
@@ -1164,6 +1199,7 @@ class PnPWorkflowExecutor:
         self._resume_event.set()  # not paused initially
         workflow.start_time = datetime.now()
         workflow.status = StepStatus.RUNNING
+        self._apply_instrument_order(workflow)
         
         errors = []
         
@@ -1611,6 +1647,30 @@ class PnPWorkflowExecutor:
               getattr(getattr(server, "catalog", None), "resources", None))
              for key, server in self._instrument_entries()),
             get_settings(self.base_dir).resources)
+
+    def _apply_instrument_order(self, workflow: Workflow) -> None:
+        """Chain the steps of every instrument that declares `ordered`.
+
+        See `apply_instrument_order`. Done before validation, so a cycle it
+        creates is reported, and before execution, so a caller that skips
+        validation still gets the order.
+        """
+        try:
+            topology = self._topology()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Could not read instrument order: %s", exc)
+            return
+
+        def ordered_key(step: WorkflowStep) -> Optional[str]:
+            if is_locally_handled(step.instrument, step.action):
+                return None
+            server = self.registry.get_server_by_name(step.instrument)
+            if server is None:
+                return None
+            key = self._key_of(server)
+            return key if topology.is_ordered(key, step.action) else None
+
+        apply_instrument_order(workflow.steps, ordered_key)
 
     def _occupancy(self, step: WorkflowStep,
                    topology: ResourceTopology) -> Tuple[frozenset, frozenset, frozenset]:

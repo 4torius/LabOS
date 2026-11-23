@@ -1,5 +1,5 @@
 {
-  "_comment": "What the orchestrator needs to know about the mobile robot beyond its commands. resources is keyed by TASK NAME, which is what a person can read and what survives a task being re-taught; the server adds the matching TaskId entries itself from the robot's live task list when it serves this file (see src/task_resources.py), because TaskId is what a workflow actually sends. exhaustive:true means every task has to be listed here: a task that is not is refused at workflow validation rather than assumed to occupy nothing. A task that only moves the robot gets an empty entry. claims: occupied while the task runs. acquires / releases: a plate position that stays occupied after the task that puts a plate there, until the task that takes it away. See v1/docs/RESOURCE_MODEL.md.",
+  "_comment": "What the orchestrator needs to know about the mobile robot beyond its commands. resources is keyed by TASK NAME, which is what a person can read and what survives a task being re-taught; the server adds the matching TaskId entries itself from the robot's live task list when it serves this file (see src/task_resources.py), because TaskId is what a workflow actually sends. exhaustive:true means every task has to be listed here: a task that is not is refused at workflow validation rather than assumed to occupy nothing. A task that only moves the robot gets an empty entry. claims: occupied while the task runs. acquires / releases: a plate position that stays occupied after the task that puts a plate there, until the task that takes it away. ordered:true means the robot's steps in a workflow run in the order they are written, as if each depended on the robot step before it: where the robot is cannot be a resource, so pick_from_tecan is only right after go_to_tecan. See v1/docs/RESOURCE_MODEL.md.",
   "library_types": [
     {
       "hint": "mobile_task",
@@ -17,6 +17,7 @@
     "command": "CancelTask"
   },
   "resources": {
+    "ordered": true,
     "provides": [
       "instrument:mobile"
     ],

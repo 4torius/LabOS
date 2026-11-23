@@ -237,6 +237,12 @@ class ResourceDeclaration:
     #: what makes a step claim UNDECLARED. An empty-but-present section is a
     #: deliberate "I occupy nothing beyond myself" and is believed.
     declared: bool = False
+    #: The instrument has a state its commands assume - where the mobile robot
+    #: *is* - which no resource can express: `pick_from_tecan` is only right
+    #: after `go_to_tecan`. Its steps in a workflow then run in the order they
+    #: are written, as if each depended on the one before, so an author does
+    #: not have to chain them by hand (and cannot forget to).
+    ordered: bool = False
 
     def every_claim(self) -> FrozenSet[str]:
         """Every resource id mentioned anywhere, for cross-checking."""
@@ -250,6 +256,7 @@ class ResourceDeclaration:
             "provides": list(self.provides),
             "commands": {name: c.to_dict() for name, c in self.commands.items()},
             "declared": self.declared,
+            "ordered": self.ordered,
             "problems": list(self.problems),
         }
 
@@ -289,6 +296,11 @@ def parse_declaration(raw: Any, source: str = "") -> ResourceDeclaration:
         return declaration
 
     declaration.declared = True
+    ordered = raw.get("ordered", False)
+    if not isinstance(ordered, bool):
+        declaration.problems.append(f"{label}resources.ordered must be true or false")
+        ordered = False
+    declaration.ordered = ordered
     declaration.provides = _resource_ids(
         raw.get("provides"), label, "resources.provides", declaration.problems)
 
@@ -550,6 +562,17 @@ class ResourceTopology:
             found.update(self._resolve_alias(r) for r in spec.resolve(parameters))
         return frozenset(found)
 
+    def is_ordered(self, instrument_id: str, command: str) -> bool:
+        """Whether this step takes its place in the instrument's written order.
+
+        Control commands do not: a stop is never queued behind anything.
+        """
+        declaration = self.declarations.get(instrument_id)
+        if declaration is None or not declaration.ordered:
+            return False
+        spec = declaration.commands.get(command)
+        return not (spec is not None and spec.control)
+
     def _spec(self, instrument_id: str, command: str) -> Optional[CommandResources]:
         declaration = self.declarations.get(instrument_id)
         spec = declaration.commands.get(command) if declaration is not None else None
@@ -696,6 +719,7 @@ def build_topology(declarations: Mapping[str, ResourceDeclaration],
             commands=dict(supplement.commands),
             problems=list(declared.problems),
             declared=True,
+            ordered=supplement.ordered,
         )
 
     topology.declarations = merged
