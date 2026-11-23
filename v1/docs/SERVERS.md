@@ -321,19 +321,13 @@ A `.mdfx` file hardcodes which physical plate it was created for as two coupled 
 
 `file` is a plate code from Tecan's internal library (not extractable from the installed DLLs as plain data — read it out of a real `.mdfx` instead, see below); `range` is the full well range for that plate and must always match `file` (e.g. a 96-well plate needs `A1:H12`, not `A1~D6`).
 
-**`PlateType` override**: if you pass a non-empty `PlateType` to `RunMeasurement`, `TecanBridge.RewritePlateType()` looks it up in `Library/Analysis/PlateTypes.json` and rewrites both attributes in memory before the SDK loads the protocol — the `.mdfx` file on disk is never modified. Leave `PlateType` empty (the default from every UI) to use whatever plate the `.mdfx` was originally created for; this is a fully backward-compatible no-op. If the requested key isn't in `PlateTypes.json`, the measurement fails immediately with a clear error listing the known keys — it never silently falls back to the `.mdfx` default, which would look like success while reading the wrong geometry.
+**`PlateType` override**: if you pass a non-empty `PlateType` to `RunMeasurement`, `TecanBridge.RewritePlateType()` looks it up among the plates in `Library/Labware/Plates/*.plate.json` (the same files the Opentrons uses) and rewrites both attributes in memory before the SDK loads the protocol — the `.mdfx` file on disk is never modified. The value is the plate's `id`; a plate is measurable when its file has `tecan_plate_name` (the Tecan `.pdfx` name, which becomes `file`). `range` is `A1:<last row><last column>` from `rows`/`columns`, or `tecan_plate_range` when the file gives one. Leave `PlateType` empty (the default from every UI) to use whatever plate the `.mdfx` was created for. A plate that isn't measurable fails the measurement immediately with a clear error — it never silently falls back to the `.mdfx` default, which would look like success while reading the wrong geometry.
 
-**To add support for a new plate type**:
-1. In Tecan's Reader Editor (iControl), create or edit any `.mdfx` protocol and pick the new plate from its own plate picker, save it.
-2. Open that `.mdfx` in a text editor and copy the two values: `file="..."` from `<CyclePlate>` and `range="..."` from `<PlateRange>`.
-3. Add an entry to `Library/Analysis/PlateTypes.json`:
-   ```json
-   "your_plate_key": { "file": "COPIED_FILE_CODE", "range": "COPIED_RANGE" }
-   ```
-   Keys starting with `_` are treated as comments/metadata and ignored — use them for notes. Pick a key name that means something to your lab; matching an existing Opentrons `Library/Labware/Plates/*.json` `id` (e.g. `corning_24_wellplate_3.4ml_flat`) is a good convention when the same physical plate is used on both instruments, but it's just a string key, nothing enforces the match.
-4. **Restart the Tecan server** (`main.py`, which relaunches the bridge) — the library is loaded once at bridge startup, not re-read per request. The startup log prints `[PlateTypeLibrary] Caricate N definizioni piastra da ...` confirming what was loaded.
+At startup the bridge checks each plate against `C:\Users\Public\Documents\Tecan\Pdfx` (`TecanPlateDefinitionsPath` in `appsettings.json`): the `.pdfx` must exist and have the same rows × columns. A plate that fails is refused, and a measurement asking for it says why. Both folders are configurable (`LabwarePlatesPath`, `TecanPlateDefinitionsPath`); both are read once at startup, so **restart the Tecan server** after changing a plate. The startup log prints `[PlateTypeLibrary] N piastre misurabili da ...`.
 
-If `PlateTypes.json` doesn't exist or is empty, `PlateType` is a documented no-op everywhere — nothing breaks, you just can't override the plate yet.
+The Workflow Builder's plate picker comes from the same files: the Tecan server's `library_catalog.json` declares `PlateType` as `json_files: Library/Labware/Plates/*.plate.json` with `require_field: tecan_plate_name`.
+
+**To add a plate** (both instruments, including custom plates and making a `.pdfx`): see [NUOVA_PIASTRA.md](NUOVA_PIASTRA.md).
 
 ### Configuration (`config.yaml`)
 
@@ -521,22 +515,31 @@ From the current `config.yaml`, the robot controller manages: an ABB GoFa arm, a
 An earlier documentation pass listed stations `Home`, `Opentrons`, `Tecan`,
 `Storage_A1`, `Storage_A2`, `Incubator` "from the remote `config.yaml`". The
 last three do not exist. What the robot actually reports, read live from
-`AvailableTasks` and `GetTaskDetails`:
+`AvailableTasks` (`RefreshTasks` on 2026-11-20; tasks are created and renamed
+on the robot, so the list `RefreshTasks` writes to the dashboard log is the
+authority, not this table):
 
 | Task | Subtasks | What it does |
 |------|----------|--------------|
-| `go_to_opentrons` | `nav` | Navigate to the Opentrons |
-| `go_to_tecan` | `nav` | Navigate to the Tecan |
-| `pick_from_opentrons` | `pick_from_opentrons`, `place_on_dima` | Lift the plate off the Opentrons and set it on the onboard jig |
-| `pick_from_tecan` | `pick_from_tecan`, `pick_from_tecan_robot_frame` | Lift the plate off the Tecan |
-| `place_on_OT` | `place_on_OT`, `home` | Set the plate on the Opentrons, then return the arm |
-| `place_on_TC` | `place_on_TC`, `home` | Set the plate on the Tecan, then return the arm |
-| `pick_from_dima` | `pick_from_dima` | Take the plate back off the onboard jig |
-| `docking` | `docking` | Return to the charging station |
-| `TestFra`, `BaseFra` | one each | Frame calibration, not for normal use |
+| `go_to_opentrons` | 1 | Navigate to the Opentrons |
+| `go_to_tecan` | 1 | Navigate to the Tecan |
+| `pick_from_opentrons` | 2 | Lift the plate off the Opentrons and set it on the onboard jig |
+| `pick_from_tecan` | 2 | Lift the plate off the Tecan |
+| `place_on_Opentrons` | 2 | Set the plate on the Opentrons |
+| `place_on_Tecan` | 2 | Set the plate on the Tecan |
+| `pick_from_dima` | 1 | Take the plate back off the onboard jig |
+| `go_to_docking` | 1 | Return to the charging station |
+| `go_to_WorkingPose` | 1 | Move to the working pose |
+| `PRENDERE_PIASTRA_FRA`, `CAPPA` | 1 each | Created in the lab; not described here |
+
+Renamed since the previous list: `place_on_OT` → `place_on_Opentrons`,
+`place_on_TC` → `place_on_Tecan`, `docking` → `go_to_docking`; `TestFra` and
+`BaseFra` are gone. A task re-created on the robot gets a new `TaskId`, so a
+saved workflow that names the old id fails - check workflows after the task
+list changes.
 
 **One task is one action.** A transport is a sequence of workflow steps:
-`go_to_opentrons` → `pick_from_opentrons` → `go_to_tecan` → `place_on_TC`.
+`go_to_opentrons` → `pick_from_opentrons` → `go_to_tecan` → `place_on_Tecan`.
 
 Hardware registered on the controller, all **deactivated at startup**: arm
 `gofa_bicocca` (ABB GoFa5), gripper `2fg7` (OnRobot 2FG7), camera `realsense`

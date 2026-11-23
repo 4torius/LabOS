@@ -1,0 +1,156 @@
+{
+  "WorkflowName": "Video",
+  "SchemaVersion": "1.0",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "eymnhzlaatqzobafwcbbdazkrcwninfh",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "udgldepfnpbyteaybebdacfyxdifdygt",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 3,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 4,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "dxvadjvibetfceaybdybsqsqcmzimdfj",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 5,
+      "Instrument": "opentrons",
+      "Action": "ExecuteRecipe",
+      "Parameters": {
+        "RecipeName": "test_6.json"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 6,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "qufptekmeyycpckgbvcpudozfdfkctba",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 7,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "eebzzndefzrktbrqbammcxfjikbmqpaa",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 8,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 9,
+      "Instrument": "tecan",
+      "Action": "PlateOut",
+      "Parameters": {},
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 10,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "rxzeeofvewbamneadgvdafucvefidfgb",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 11,
+      "Instrument": "tecan",
+      "Action": "PlateIn",
+      "Parameters": {},
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 12,
+      "Instrument": "tecan",
+      "Action": "RunMeasurement",
+      "Parameters": {
+        "ProtocolFile": "Script1",
+        "PlateType": "greiner_96_wellplate_382ul",
+        "PlateID": "",
+        "SampleSetID": ""
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 13,
+      "Instrument": "tecan",
+      "Action": "PlateOut",
+      "Parameters": {},
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 14,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "nnegfohactaltbahtxfnejaaycafskaq",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 15,
+      "Instrument": "tecan",
+      "Action": "PlateIn",
+      "Parameters": {},
+      "DependsOn": []
+    },
+    {
+      "StepNumber": 16,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "eymnhzlaatqzobafwcbbdazkrcwninfh",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": []
+    }
+  ],
+  "CreatedAt": "2026-11-20T15:16:15.917557"
+}

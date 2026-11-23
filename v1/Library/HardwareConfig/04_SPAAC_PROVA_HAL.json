@@ -1,0 +1,41 @@
+{
+  "ConfigName": "04_SPAAC_PROVA_HAL",
+  "Description": "Generic HAL with 1 source slots. Reusable for multiple recipes.",
+  "Modules": {
+    "HeaterShaker": {
+      "Type": "heaterShakerModuleV1",
+      "Slot": "A1"
+    }
+  },
+  "Trash": {
+    "MyTrash": {
+      "Type": "TrashBin",
+      "Slot": "A3"
+    }
+  },
+  "Labware": {
+    "MyTips_50": {
+      "LoadName": "opentrons_flex_96_tiprack_50ul",
+      "Slot": "B3"
+    },
+    "MyTips_200": {
+      "LoadName": "opentrons_flex_96_tiprack_200ul",
+      "Slot": "C3"
+    },
+    "TargetPlate": {
+      "LoadName": "corning_96_wellplate_360ul_flat",
+      "Slot": "D2"
+    },
+    "Source_1": {
+      "LoadName": "CUSTOM_primo_euroclone_48_wellplate_1000.plate_CUSTOM",
+      "Slot": "A2"
+    },
+    "MyTips_1000": {
+      "LoadName": "opentrons_flex_96_filtertiprack_1000ul",
+      "Slot": "D3"
+    }
+  },
+  "Pipettes": {
+    "left": "flex_1channel_1000"
+  }
+}

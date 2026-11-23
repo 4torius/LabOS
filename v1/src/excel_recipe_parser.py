@@ -568,6 +568,33 @@ def _emit_treatment(
     home_slot = home_slots.get(target_key, target_key)
     current_location.setdefault(target_key, home_slot)
 
+    # A cleanup step (the one "Keep warm" adds at the end) whose labware has
+    # already gone back - another one took its place on the module - only
+    # has the module to switch off; moving it back on just to move it off
+    # again is pointless.
+    if treatment.get("linked_to") and current_location[target_key] != requirement_key:
+        field_names = {f["name"] for f in catalog_entry["fields"]}
+        params = {k: v for k, v in (treatment.get("params") or {}).items()
+                  if k in field_names and v not in (None, "")}
+        if params:
+            steps.append({"Command": catalog_entry["command"], "ModuleID": requirement_key, **params})
+        return
+
+    # One plate on a module at a time: whatever sits there now (a reservoir
+    # kept warm by an earlier phase, say) goes back to its own slot - always
+    # free, it came from there - before this one is put on. Without this the
+    # second MoveLabware landed on an occupied module and the robot refused it.
+    if current_location[target_key] != requirement_key:
+        for other, where in list(current_location.items()):
+            if other != target_key and where == requirement_key:
+                steps.append({
+                    "Command": "MoveLabware",
+                    "LabwareID": other,
+                    "NewLocation": home_slots.get(other, other),
+                    "UseGripper": True,
+                })
+                current_location[other] = home_slots.get(other, other)
+
     # Move the labware onto the module only if it isn't already there.
     if current_location[target_key] != requirement_key:
         move_cmd = {

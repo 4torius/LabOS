@@ -28,6 +28,9 @@ The old ephemeral `/api/logs` and `/api/history` endpoints (backing the removed 
 | GET | `/api/instruments/commands` | Instrument + command catalog (feeds the Workflow Builder toolbox) |
 | GET | `/api/dynamic-options/{ui_hint}` | Dropdown options for a parameter hint (`recipe`, `hal_config`, `liquid_class`, `location`, …) — driven by each server's `LabOSLibraryProvider` catalog. `location` returns the instruments discovery actually found |
 | GET | `/api/files/hal\|recipes\|protocols\|analyses\|workflows\|liquidclasses` | Raw file listings from the matching `Library/` subfolder |
+| GET | `/api/analyses` | Tecan analysis protocols (`.mdfx`) in `Library/Analysis/` |
+| GET | `/api/library/plates` (`?category=`), `/api/library/plates/{plate_id}` | Plate definitions from `Library/Labware/Plates/*.plate.json`; one plate by `id` or file name |
+| GET | `/api/pipettes`, `/api/tipracks` | Opentrons pipette and tip-rack definitions (`Library/Labware/Pipettes`, `TipRacks`) |
 | POST | `/api/opentrons/refill-tips` | Mark a tip rack refilled |
 | GET | `/api/opentrons/tip-status` | Current tip consumption |
 
@@ -91,6 +94,7 @@ moving.
 |---|---|---|
 | GET | `/api/workflows` / `/api/workflows/{id}` | List / load workflow files |
 | POST | `/api/workflows/save` | Save a workflow |
+| POST | `/api/workflows/import` | Upload a workflow JSON file (multipart `file`); rejected unless it has `WorkflowName` or `Steps` |
 | POST | `/api/workflows/scan-variables` | Detect `${var}` placeholders in a workflow |
 | POST | `/api/workflows/execute` | Start a run; returns immediately with `run_id` (see Runs above) |
 | POST | `/api/workflows/pause` \| `/resume` \| `/abort` | Control the active run; aliases of the `/api/runs/{id}` forms |
@@ -171,12 +175,23 @@ All messages are JSON with a `type` field.
 
 **`workflow_progress`** — sent on every step-state change:
 ```json
-{ "type": "workflow_progress", "step_id": 3, "step_status": "success",
-  "instrument": "tecan", "action": "RunMeasurement",
-  "total_steps": 7, "completed_steps": 3 }
+{ "type": "workflow_progress", "workflow_name": "Test_Bicocca",
+  "step": 3, "total": 7, "instrument": "tecan", "action": "RunMeasurement",
+  "status": "success", "message": "...", "percent": 43 }
 ```
 
-**`workflow_complete`** / **`workflow_error`** — terminal events with `steps_completed`/`steps_failed` and, on error, `failed_step`/`error`.
+**`workflow_start`**, **`workflow_paused`**, **`workflow_resumed`** — run lifecycle, with `run_id` and `workflow_name`.
+
+**`workflow_complete`** — `steps_completed`, `duration_seconds`, `message`.
+**`workflow_failed`** — `error` (or `errors`), and for an abort also
+`abort_report` and `requires_attention` (the abort could not confirm every
+instrument stopped). There is no `workflow_error` event.
+
+**`command_executed`** / **`command_failed`** — a single command run from the
+Dashboard finished (`device_name`, `command`, `message` or `error`). After a
+command declared to refresh a list (`refreshed_by`, e.g. `RefreshTasks`) the
+HTTP response of `POST /api/devices/{id}/command` also carries `options`:
+`[{hint, count, names, from_server}]`, which the Dashboard writes to its log.
 
 **`device_update`** — instrument status change (`idle`/`running`/`error`/`offline`).
 
@@ -193,9 +208,19 @@ observable properties. Pushed by the instrument, not polled for:
 `source` is `subscription` when the instrument pushed it and `poll` when the
 property is not observable and had to be read.
 
-**`manual_intervention`** — a `RequestOperatorTask`-style step is waiting; drives both the Operator page's Pending Actions list and any active notification toast.
+**`operator_notification`** — something needs a person (a manual step, a tip
+refill): `title`, `message`, `priority`, `requires_action`. Drives the Operator
+page's Pending Actions and the notification toast.
 
-**`intervention_required`** — a step failed and is waiting for a Retry/Skip/Abort decision (full-screen modal).
+**`intervention_required`** — a step failed and is waiting for a Retry/Skip/Abort
+decision (full-screen modal); **`intervention_resolved`** /
+**`intervention_timeout`** when it is answered or nobody answered in time.
+
+**`emergency_stop`**, **`tip_refill_complete`** — as named.
+
+**`batch_start`**, **`batch_sample_start`**, **`batch_sample_complete`**,
+**`batch_sample_failed`**, **`batch_complete`** — progress of
+`POST /api/workflows/batch-execute`.
 
 ---
 

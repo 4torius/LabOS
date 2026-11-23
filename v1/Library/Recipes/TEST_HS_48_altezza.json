@@ -1,0 +1,31 @@
+{
+  "ProtocolName": "TEST_HS_48_altezza",
+  "Description": "Verifica al banco 2026-11-20 dell'altezza della Corning 48 sull'adattatore universale dell'heater-shaker (stackingOffsetWithLabware z=9.17, stimato). Senza liquido: la punta scende a 5 mm e poi a 2 mm dal fondo del pozzetto A1 secondo la definizione, con 20 s di pausa a ogni quota per guardare.",
+  "Modules": {
+    "HeaterShaker": { "Type": "heaterShakerModuleV1", "Slot": "A1" }
+  },
+  "Trash": {
+    "MyTrash": { "Type": "TrashBin", "Slot": "A3" }
+  },
+  "Labware": {
+    "HS_Adapter": { "LoadName": "opentrons_universal_flat_adapter", "OnModule": "HeaterShaker" },
+    "Plate48": { "LoadName": "corning_48_wellplate_1.6ml_flat", "Slot": "A2", "DisplayName": "Corning 48 (verifica)" }
+  },
+  "Steps": [
+    { "Command": "Comment", "Text": "1. Corning 48 da A2 all'heater-shaker" },
+    { "Command": "MoveLabware", "LabwareID": "Plate48", "NewLocation": "HeaterShaker", "UseGripper": true },
+    { "Command": "PickUpTip", "PipetteMount": "left", "TipRack": "MyTips_200" },
+    { "Command": "Comment", "Text": "2. Sopra il pozzetto A1" },
+    { "Command": "MoveToWell", "PipetteMount": "left", "Location": "Plate48:A1" },
+    { "Command": "Comment", "Text": "3. Piano fino a 5 mm dal fondo (secondo la definizione): guarda" },
+    { "Command": "MoveRelative", "PipetteMount": "left", "Axis": "z", "Distance": -12.4, "Speed": 5 },
+    { "Command": "Delay", "Seconds": 20 },
+    { "Command": "Comment", "Text": "4. Piano fino a 2 mm dal fondo: guarda" },
+    { "Command": "MoveRelative", "PipetteMount": "left", "Axis": "z", "Distance": -3, "Speed": 2 },
+    { "Command": "Delay", "Seconds": 20 },
+    { "Command": "Comment", "Text": "5. Su, puntale nel cestino, piastra di nuovo in A2" },
+    { "Command": "MoveRelative", "PipetteMount": "left", "Axis": "z", "Distance": 20, "Speed": 10 },
+    { "Command": "DropTip", "PipetteMount": "left" },
+    { "Command": "MoveLabware", "LabwareID": "Plate48", "NewLocation": "A2", "UseGripper": true }
+  ]
+}

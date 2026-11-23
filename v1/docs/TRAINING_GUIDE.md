@@ -82,6 +82,8 @@ One card per instrument, live status, and a button to run any of its commands di
 ### Recipe Generator (`/batch`, also reachable as `/recipes` — same page)
 The normal way to create a recipe: upload or pick an Excel pipetting plan, group columns into phases, pick liquid classes and reservoir sharing per reagent, optionally insert module treatments (heater-shaker, temperature). Click Generate. **Point out explicitly**: the waste estimate is there, but it's inside the collapsible "Notes" panel, not a headline number — expand it or trainees will think it's missing.
 
+**Pipetting on the Heater-Shaker** (people will ask): add **🌡️ Keep warm** before a phase with **Target plate** as target, set temperature (and speed/duration if it should shake). The gripper moves the plate onto the module, heats and shakes it, then **leaves it there, warm**; the next phases pipette straight into it, and a final step turns the heater off and returns the plate. The latch is handled automatically. Leave "Keep shaking" unticked: the robot refuses to pipette on (or next to) a shaking Heater-Shaker. Checked in the Opentrons simulator, not yet on the robot. Details: [HAL_SYSTEM.md](HAL_SYSTEM.md#plates-on-a-module-pipetting-on-the-heater-shaker).
+
 **How the waste estimate is calculated, and how much extra to prepare** (this will come up — it's exactly what tells you how much excess solution to make):
 The system doesn't aspirate once per well. With the "Distribute" strategy, it loads the pipette **once** and dispenses into as many wells as fit before the tip runs low, then reloads (a "trip"). Every time it reloads, a small fixed amount — the pipette's own minimum documented volume, e.g. 5 µL for the Flex 1-Channel 1000 µL pipette (a real spec-sheet number, not arbitrary) — stays in the tip as a safety margin and is never dispensed. That's the waste.
 So: more trips needed (more destination wells, or a tip whose capacity is small relative to the total volume) means more waste. It isn't a fixed percentage — it depends on how many reloads that specific reagent needs.
@@ -90,6 +92,8 @@ So: more trips needed (more destination wells, or a tip whose capacity is small 
 
 ### Hardware (`/hardware`)
 Pick which HAL config (deck layout) is active. This persists across restarts. **Point out**: clicking "Set Active" now shows a warning toast if the robot itself was offline and never actually got the update (versus a plain success toast when it did) — if you see the warning, re-apply once the robot is confirmed online.
+
+A module's slot also says what sits on it (*On top of the module*): the adapter mounted on it, and optionally a plate that starts there — recipes then use that plate by name like any other.
 
 ### Workflow Builder (`/workflows`)
 Drag instruments onto a canvas, set parameters, connect dependencies, save. Click Execute to run. A live status bar appears at the bottom of **every page** (not just this one) with Pause/Resume/Abort whenever something is running. **Point out**: there's no loop or IF/Else block — LabOS only supports linear step dependencies, not control flow.
@@ -167,7 +171,7 @@ Full detail and more scenarios: [OPERATIONS.md](OPERATIONS.md#troubleshooting).
 | Recipe fails against the active HAL ("missing labware mapping") | Confirm the correct HAL is active **and actually applied to the robot** — the Hardware page now warns you explicitly if it wasn't |
 | Tip count looks wrong | The automatic tip guard may have force-dropped a tip you didn't expect — check the run's archived log before assuming a bug |
 | Can't find a plate/run you're sure exists | Make sure you're on the **Database** page (SQLite-backed), on the right tab (**Plates** vs **Runs & Log**) |
-| Tecan `RunMeasurement` fails with "PlateType not found" | Expected — that plate isn't registered in `PlateTypes.json` yet, or leave `PlateType` empty to use the protocol's default plate. See [SERVERS.md](SERVERS.md#mdfx-protocol-files) |
+| Tecan `RunMeasurement` fails with "PlateType not found" | Expected — that plate has no `tecan_plate_name` in `Library/Labware/Plates` yet (or the Tecan server wasn't restarted after adding it); or leave `PlateType` empty to use the protocol's default plate. See [NUOVA_PIASTRA.md](NUOVA_PIASTRA.md) |
 
 ---
 

@@ -667,6 +667,14 @@ function executeDeviceCommand(device, command, params) {
             var resultStr = result.result != null ? JSON.stringify(result.result) : '';
             var displayStr = resultStr.length > 200 ? resultStr.substring(0, 200) + '…' : resultStr;
             log('✅ ' + command + ' completed' + (displayStr ? ': ' + displayStr : ''), 'success');
+            // A command declared to refresh a list (RefreshTasks) answers only
+            // "success"; the server adds what the list now holds.
+            (result.options || []).forEach(function (o) {
+                var head = '📋 ' + o.count + ' ' + o.hint + ' found'
+                    + (o.from_server ? '' : ' (server not read - last saved list)');
+                log(head, o.from_server ? 'info' : 'warning');
+                o.names.forEach(function (n, i) { log('&nbsp;&nbsp;' + (i + 1) + '. ' + LabOS.escapeHtml(n), 'info'); });
+            });
         } else {
             log('❌ ' + command + ' failed: ' + result.error, 'error');
         }
