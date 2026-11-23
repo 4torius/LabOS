@@ -175,7 +175,8 @@ class TecanBridgeClient:
                     }
                     break
         except grpc.RpcError as exc:
-            yield {"error": exc.details() or str(exc)}
+            yield {"error": exc.details() or str(exc),
+                   "aborted": exc.code() == grpc.StatusCode.ABORTED}
 
     def get_animl_result(self, plate_id: str) -> Tuple[bool, str]:
         try:
@@ -185,6 +186,34 @@ class TecanBridgeClient:
             if exc.code() == grpc.StatusCode.NOT_FOUND:
                 return False, f"Result not found for plate {plate_id}"
             return False, str(exc)
+
+    # ── run control ─────────────────────────────────────────────────────────
+
+    def abort_measurement(self) -> Tuple[bool, bool, str]:
+        """(reader idle now, a measurement was interrupted, message).
+
+        The bridge waits for the SDK's measurement thread to end, which it
+        allows up to two minutes for, so the deadline here is longer.
+        """
+        try:
+            r = self._stub.AbortMeasurement(pb2.AbortMeasurementRequest(), timeout=170.0)
+            return r.success, r.aborted, r.message
+        except grpc.RpcError as exc:
+            return False, False, exc.details() or str(exc)
+
+    def pause_measurement(self) -> Tuple[bool, str]:
+        try:
+            r = self._stub.PauseMeasurement(pb2.PauseMeasurementRequest(), timeout=10.0)
+            return r.success, r.message
+        except grpc.RpcError as exc:
+            return False, exc.details() or str(exc)
+
+    def resume_measurement(self) -> Tuple[bool, str]:
+        try:
+            r = self._stub.ResumeMeasurement(pb2.ResumeMeasurementRequest(), timeout=10.0)
+            return r.success, r.message
+        except grpc.RpcError as exc:
+            return False, exc.details() or str(exc)
 
     def list_protocols(self) -> list:
         try:

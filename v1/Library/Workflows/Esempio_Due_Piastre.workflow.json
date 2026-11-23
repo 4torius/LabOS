@@ -1,0 +1,486 @@
+{
+  "WorkflowName": "Esempio_Due_Piastre",
+  "SchemaVersion": "1.0",
+  "Description": "ESEMPIO, da provare nel laboratorio simulato prima del banco. Due piastre: la piastra B viene pipettata mentre la A è nel lettore. I passi del robot formano un'unica catena (il robot è in un posto solo e la sua posizione non è una risorsa); Opentrons e Tecan pendono da quella catena e lavorano in parallelo. Richiede max_concurrency 0 o almeno 3 per vedere il parallelo.",
+  "Steps": [
+    {
+      "StepNumber": 1,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "eymnhzlaatqzobafwcbbdazkrcwninfh",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [],
+      "Description": "Robot: posa di lavoro (go_to_WorkingPose)"
+    },
+    {
+      "StepNumber": 2,
+      "Instrument": "manual_station",
+      "Action": "RequestOperatorTask",
+      "Parameters": {
+        "TaskType": "manual_operation",
+        "Priority": "low",
+        "TaskDescription": "Caricare piastra A sulla dima",
+        "SourceInstrument": ""
+      },
+      "DependsOn": [
+        1
+      ],
+      "Description": "A: l'operatore carica la piastra A",
+      "Plate": "A",
+      "PlateMove": "onto:mobile"
+    },
+    {
+      "StepNumber": 3,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "udgldepfnpbyteaybebdacfyxdifdygt",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        2
+      ],
+      "Description": "Robot: all'Opentrons (go_to_opentrons)"
+    },
+    {
+      "StepNumber": 4,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        3
+      ],
+      "Description": "A: presa dalla dima (pick_from_dima)",
+      "Plate": "A"
+    },
+    {
+      "StepNumber": 5,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "dxvadjvibetfceaybdybsqsqcmzimdfj",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        4
+      ],
+      "Description": "A: posata sul deck (place_on_Opentrons)",
+      "Plate": "A"
+    },
+    {
+      "StepNumber": 6,
+      "Instrument": "opentrons",
+      "Action": "ExecuteRecipe",
+      "Parameters": {
+        "RecipeName": "test_6.json"
+      },
+      "DependsOn": [
+        5
+      ],
+      "Description": "A: ricetta di pipettaggio",
+      "Plate": "A"
+    },
+    {
+      "StepNumber": 7,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "qufptekmeyycpckgbvcpudozfdfkctba",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        6
+      ],
+      "Description": "A: ripresa dal deck, sulla dima (pick_from_opentrons)",
+      "Plate": "A"
+    },
+    {
+      "StepNumber": 8,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "eebzzndefzrktbrqbammcxfjikbmqpaa",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        7
+      ],
+      "Description": "Robot: al Tecan (go_to_tecan)"
+    },
+    {
+      "StepNumber": 9,
+      "Instrument": "tecan",
+      "Action": "PlateOut",
+      "Parameters": {},
+      "DependsOn": [
+        8
+      ],
+      "Description": "Tecan: apre il cassetto"
+    },
+    {
+      "StepNumber": 10,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        9
+      ],
+      "Description": "A: presa dalla dima (pick_from_dima)",
+      "Plate": "A"
+    },
+    {
+      "StepNumber": 11,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "rxzeeofvewbamneadgvdafucvefidfgb",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        10
+      ],
+      "Description": "A: posata sul cassetto (place_on_Tecan)",
+      "Plate": "A"
+    },
+    {
+      "StepNumber": 12,
+      "Instrument": "tecan",
+      "Action": "PlateIn",
+      "Parameters": {},
+      "DependsOn": [
+        11
+      ],
+      "Description": "Tecan: chiude il cassetto con A"
+    },
+    {
+      "StepNumber": 13,
+      "Instrument": "tecan",
+      "Action": "RunMeasurement",
+      "Parameters": {
+        "ProtocolFile": "Script1",
+        "PlateType": "greiner_96_wellplate_382ul",
+        "PlateID": "",
+        "SampleSetID": ""
+      },
+      "DependsOn": [
+        12
+      ],
+      "Description": "A: lettura (in parallelo con la piastra B)",
+      "Plate": "A"
+    },
+    {
+      "StepNumber": 14,
+      "Instrument": "manual_station",
+      "Action": "RequestOperatorTask",
+      "Parameters": {
+        "TaskType": "manual_operation",
+        "Priority": "low",
+        "TaskDescription": "Caricare piastra B sulla dima",
+        "SourceInstrument": ""
+      },
+      "DependsOn": [
+        11
+      ],
+      "Description": "B: l'operatore carica la piastra B (A è già nel lettore)",
+      "Plate": "B",
+      "PlateMove": "onto:mobile"
+    },
+    {
+      "StepNumber": 15,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "udgldepfnpbyteaybebdacfyxdifdygt",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        14
+      ],
+      "Description": "Robot: all'Opentrons (go_to_opentrons)"
+    },
+    {
+      "StepNumber": 16,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        15
+      ],
+      "Description": "B: presa dalla dima (pick_from_dima)",
+      "Plate": "B"
+    },
+    {
+      "StepNumber": 17,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "dxvadjvibetfceaybdybsqsqcmzimdfj",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        16
+      ],
+      "Description": "B: posata sul deck (place_on_Opentrons)",
+      "Plate": "B"
+    },
+    {
+      "StepNumber": 18,
+      "Instrument": "opentrons",
+      "Action": "ExecuteRecipe",
+      "Parameters": {
+        "RecipeName": "test_6.json"
+      },
+      "DependsOn": [
+        17
+      ],
+      "Description": "B: ricetta di pipettaggio (in parallelo con la lettura di A)",
+      "Plate": "B"
+    },
+    {
+      "StepNumber": 19,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "eebzzndefzrktbrqbammcxfjikbmqpaa",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        17
+      ],
+      "Description": "Robot: torna al Tecan mentre B viene pipettata (go_to_tecan)"
+    },
+    {
+      "StepNumber": 20,
+      "Instrument": "tecan",
+      "Action": "PlateOut",
+      "Parameters": {},
+      "DependsOn": [
+        13,
+        19
+      ],
+      "Description": "Tecan: apre il cassetto (lettura A finita, robot arrivato)"
+    },
+    {
+      "StepNumber": 21,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "nnegfohactaltbahtxfnejaaycafskaq",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        20
+      ],
+      "Description": "A: ripresa dal cassetto, sulla dima (pick_from_tecan)",
+      "Plate": "A"
+    },
+    {
+      "StepNumber": 22,
+      "Instrument": "tecan",
+      "Action": "PlateIn",
+      "Parameters": {},
+      "DependsOn": [
+        21
+      ],
+      "Description": "Tecan: chiude il cassetto vuoto"
+    },
+    {
+      "StepNumber": 23,
+      "Instrument": "manual_station",
+      "Action": "RequestOperatorTask",
+      "Parameters": {
+        "TaskType": "manual_operation",
+        "Priority": "low",
+        "TaskDescription": "Ritirare piastra A dalla dima",
+        "SourceInstrument": ""
+      },
+      "DependsOn": [
+        21
+      ],
+      "Description": "A: l'operatore ritira la piastra A",
+      "Plate": "A",
+      "PlateMove": "off"
+    },
+    {
+      "StepNumber": 24,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "udgldepfnpbyteaybebdacfyxdifdygt",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        23
+      ],
+      "Description": "Robot: all'Opentrons (go_to_opentrons)"
+    },
+    {
+      "StepNumber": 25,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "qufptekmeyycpckgbvcpudozfdfkctba",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        18,
+        24
+      ],
+      "Description": "B: ripresa dal deck (ricetta finita), sulla dima (pick_from_opentrons)",
+      "Plate": "B"
+    },
+    {
+      "StepNumber": 26,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "eebzzndefzrktbrqbammcxfjikbmqpaa",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        25
+      ],
+      "Description": "Robot: al Tecan (go_to_tecan)"
+    },
+    {
+      "StepNumber": 27,
+      "Instrument": "tecan",
+      "Action": "PlateOut",
+      "Parameters": {},
+      "DependsOn": [
+        22,
+        26
+      ],
+      "Description": "Tecan: apre il cassetto"
+    },
+    {
+      "StepNumber": 28,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        27
+      ],
+      "Description": "B: presa dalla dima (pick_from_dima)",
+      "Plate": "B"
+    },
+    {
+      "StepNumber": 29,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "rxzeeofvewbamneadgvdafucvefidfgb",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        28
+      ],
+      "Description": "B: posata sul cassetto (place_on_Tecan)",
+      "Plate": "B"
+    },
+    {
+      "StepNumber": 30,
+      "Instrument": "tecan",
+      "Action": "PlateIn",
+      "Parameters": {},
+      "DependsOn": [
+        29
+      ],
+      "Description": "Tecan: chiude il cassetto con B"
+    },
+    {
+      "StepNumber": 31,
+      "Instrument": "tecan",
+      "Action": "RunMeasurement",
+      "Parameters": {
+        "ProtocolFile": "Script1",
+        "PlateType": "greiner_96_wellplate_382ul",
+        "PlateID": "",
+        "SampleSetID": ""
+      },
+      "DependsOn": [
+        30
+      ],
+      "Description": "B: lettura",
+      "Plate": "B"
+    },
+    {
+      "StepNumber": 32,
+      "Instrument": "tecan",
+      "Action": "PlateOut",
+      "Parameters": {},
+      "DependsOn": [
+        31
+      ],
+      "Description": "Tecan: apre il cassetto"
+    },
+    {
+      "StepNumber": 33,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "nnegfohactaltbahtxfnejaaycafskaq",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        32
+      ],
+      "Description": "B: ripresa dal cassetto, sulla dima (pick_from_tecan)",
+      "Plate": "B"
+    },
+    {
+      "StepNumber": 34,
+      "Instrument": "tecan",
+      "Action": "PlateIn",
+      "Parameters": {},
+      "DependsOn": [
+        33
+      ],
+      "Description": "Tecan: chiude il cassetto vuoto"
+    },
+    {
+      "StepNumber": 35,
+      "Instrument": "manual_station",
+      "Action": "RequestOperatorTask",
+      "Parameters": {
+        "TaskType": "manual_operation",
+        "Priority": "low",
+        "TaskDescription": "Ritirare piastra B dalla dima",
+        "SourceInstrument": ""
+      },
+      "DependsOn": [
+        33
+      ],
+      "Description": "B: l'operatore ritira la piastra B",
+      "Plate": "B",
+      "PlateMove": "off"
+    },
+    {
+      "StepNumber": 36,
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": "eymnhzlaatqzobafwcbbdazkrcwninfh",
+        "ExecutionMode": "Normal"
+      },
+      "DependsOn": [
+        35
+      ],
+      "Description": "Robot: posa di lavoro (go_to_WorkingPose)"
+    }
+  ]
+}

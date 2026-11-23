@@ -209,6 +209,170 @@
         return toast;
     };
 
+
+    // ── Workflow step dependencies ──────────────────────────────────────────
+    // A step's `dependsOn` holds 1-based POSITIONS, not stable ids, and the
+    // builder lets steps be reordered and deleted by splicing the array. Those
+    // two facts used to be left to disagree: deleting step 1 turned "depends on
+    // 2" into a reference to what had been step 3.
+    //
+    // That was cosmetic while nothing read the dependencies. It is not any
+    // more — DependsOn is what orders execution, so a stale number silently
+    // reorders or drops physical steps. These two helpers keep the numbers
+    // pointing at the steps the author picked, and they are pure so they can
+    // be tested.
+
+    /**
+     * Dependencies after the step at `removedIndex` (0-based) is deleted.
+     *
+     * Whatever depended on the removed step inherits what *it* depended on, so
+     * deleting the middle of 1→2→3 leaves 1→3 rather than leaving 3 with no
+     * predecessor. Simply dropping the reference would have been more literal
+     * and worse: in a sequential workflow it removes an ordering constraint, so
+     * deleting one step would quietly make two physical steps eligible to run
+     * at the same time. This is the ordinary way to delete a node from a DAG —
+     * close over it, preserving reachability.
+     *
+     * @returns {Array<Array<number>>} one dependency list per surviving step
+     */
+    LabOS.dependenciesAfterRemove = function (steps, removedIndex) {
+        var removedNumber = removedIndex + 1;
+        var inherited = (steps[removedIndex] && steps[removedIndex].dependsOn) || [];
+        var shift = function (n) { return n > removedNumber ? n - 1 : n; };
+
+        return steps
+            .filter(function (_s, i) { return i !== removedIndex; })
+            .map(function (step, newIndex) {
+                var deps = step.dependsOn || [];
+                var kept = deps.filter(function (n) { return n !== removedNumber; }).map(shift);
+                if (deps.indexOf(removedNumber) !== -1) {
+                    inherited.map(shift).forEach(function (n) {
+                        // Never let a step inherit a reference to itself: that
+                        // happens when the removed step depended on this one.
+                        if (n !== newIndex + 1 && kept.indexOf(n) === -1) kept.push(n);
+                    });
+                }
+                return kept.sort(function (a, b) { return a - b; });
+            });
+    };
+
+    /**
+     * Dependencies after the step at `from` (0-based) moves to `to`.
+     * Every reference follows the step it pointed at, so the graph the author
+     * drew survives a reorder even when it now runs in a different order.
+     * @returns {Array<Array<number>>} one dependency list per step, in the new order
+     */
+    LabOS.dependenciesAfterMove = function (steps, from, to) {
+        var order = steps.map(function (_s, i) { return i; });
+        order.splice(to, 0, order.splice(from, 1)[0]);
+        // old 1-based number -> new 1-based number
+        var renumbered = {};
+        order.forEach(function (oldIndex, newIndex) {
+            renumbered[oldIndex + 1] = newIndex + 1;
+        });
+        return order.map(function (oldIndex) {
+            return (steps[oldIndex].dependsOn || []).map(function (n) {
+                return renumbered[n] || n;
+            });
+        });
+    };
+
+    /**
+     * Dependencies of the existing steps after `count` steps are inserted
+     * below the first `at` steps (so the new ones take positions at+1..at+count).
+     *
+     * Every reference to a step that moved down follows it. The step that was
+     * just below the insertion point and waited for the step just above it now
+     * waits for the last inserted step instead: inserting a block into a chain
+     * puts it *in* the chain (selected -> block -> next) rather than beside it.
+     * @returns {Array<Array<number>>} one dependency list per existing step, in order
+     */
+    LabOS.dependenciesAfterInsert = function (steps, at, count) {
+        return steps.map(function (step, i) {
+            var deps = (step.dependsOn || []).map(function (n) { return n > at ? n + count : n; });
+            if (i === at && at > 0 && count > 0) {
+                var k = deps.indexOf(at);
+                if (k !== -1) deps[k] = at + count;
+            }
+            return deps.sort(function (a, b) { return a - b; });
+        });
+    };
+
+    // ── Choosing what a step waits for ──────────────────────────────────────
+    // Ticking boxes in a list of every step is how DependsOn used to be set,
+    // and nearly every real case is one of four shapes. Each is one click:
+    //
+    //   after  — waits for the step written just before it (the default)
+    //   with   — waits for what the previous step waits for, so it runs
+    //            alongside it: the branch of a fork
+    //   join   — waits for every open branch above it: where two plates meet
+    //   start  — waits for nothing
+    //
+    // Anything else is "custom", chosen by clicking steps in the list.
+
+    function _sorted(list) {
+        return (list || []).slice().sort(function (a, b) { return a - b; });
+    }
+    function _same(a, b) {
+        a = _sorted(a); b = _sorted(b);
+        return a.length === b.length && a.every(function (n, i) { return n === b[i]; });
+    }
+
+    /**
+     * Positions (1-based) above `index` that nothing else above it waits for:
+     * the ends of the branches still open at that point.
+     */
+    LabOS.openBranches = function (steps, index) {
+        var waitedFor = {};
+        for (var i = 0; i < index; i++) {
+            (steps[i].dependsOn || []).forEach(function (n) { waitedFor[n] = true; });
+        }
+        var open = [];
+        for (var p = 1; p <= index; p++) if (!waitedFor[p]) open.push(p);
+        return open;
+    };
+
+    /**
+     * Position (1-based) of the closest step above `index` on the same plate,
+     * or 0 when there is none (or the step names no plate).
+     */
+    LabOS.previousOfPlate = function (steps, index) {
+        var plate = steps[index] && steps[index].plate;
+        if (!plate) return 0;
+        for (var i = index - 1; i >= 0; i--) if (steps[i].plate === plate) return i + 1;
+        return 0;
+    };
+
+    /** The dependency list a mode gives the step at `index` (0-based). */
+    LabOS.dependenciesFor = function (steps, index, mode) {
+        if (index <= 0 || mode === 'start') return [];
+        if (mode === 'after') return [index];
+        // plate - waits for the step above it on the same plate only, so two
+        // plates' steps written interleaved can still run side by side.
+        if (mode === 'plate') {
+            var previous = LabOS.previousOfPlate(steps, index);
+            return previous ? [previous] : [];
+        }
+        if (mode === 'with') return _sorted(steps[index - 1].dependsOn);
+        if (mode === 'join') return LabOS.openBranches(steps, index);
+        return _sorted(steps[index].dependsOn);
+    };
+
+    /** Which of the four shapes a step's dependencies are, or 'custom'. */
+    LabOS.dependencyMode = function (steps, index) {
+        var deps = steps[index].dependsOn || [];
+        if (index === 0) return deps.length ? 'custom' : 'start';
+        var order = ['after', 'plate', 'with', 'join', 'start'];
+        for (var i = 0; i < order.length; i++) {
+            var candidate = LabOS.dependenciesFor(steps, index, order[i]);
+            // "with" a step that itself starts at the beginning is just "start";
+            // a step with no earlier step on its plate has no "plate" shape.
+            if ((order[i] === 'with' || order[i] === 'plate') && candidate.length === 0) continue;
+            if (_same(deps, candidate)) return order[i];
+        }
+        return 'custom';
+    };
+
     // ── Page log ────────────────────────────────────────────────────────────
     // Several pages have a scrolling activity log with the same shape.
 

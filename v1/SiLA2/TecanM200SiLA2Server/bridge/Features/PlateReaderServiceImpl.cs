@@ -334,7 +334,7 @@ namespace TecanSiLA2Server.Features
                     "NotConnected: Instrument is not connected"));
             }
 
-            if (_tecanBridge.CurrentStatus == "Busy")
+            if (_tecanBridge.CurrentStatus == "Busy" || _tecanBridge.CurrentStatus == "Paused")
             {
                 throw new RpcException(new Status(
                     StatusCode.Unavailable,
@@ -380,6 +380,14 @@ namespace TecanSiLA2Server.Features
 
             if (!result.Success)
             {
+                // An abort is not a failure of the instrument, and the caller
+                // has to be able to tell the two apart.
+                if (result.Aborted)
+                {
+                    throw new RpcException(new Status(
+                        StatusCode.Aborted,
+                        $"MeasurementAborted: {result.ErrorMessage}"));
+                }
                 throw new RpcException(new Status(
                     StatusCode.Internal,
                     $"MeasurementFailed: {result.ErrorMessage}"));
@@ -468,6 +476,63 @@ namespace TecanSiLA2Server.Features
             response.Protocols.AddRange(protocols);
 
             return Task.FromResult(response);
+        }
+
+        /// <summary>
+        /// Command: AbortMeasurement. What i-control's Stop button does.
+        /// Returns when the measurement has actually ended, which the SDK
+        /// allows up to two minutes for - hence off the gRPC thread.
+        /// </summary>
+        public override async Task<AbortMeasurementResponse> AbortMeasurement(
+            AbortMeasurementRequest request,
+            ServerCallContext context)
+        {
+            _logger.LogWarning("AbortMeasurement command received");
+
+            var outcome = await Task.Run(() => _tecanBridge.AbortMeasurement());
+
+            return new AbortMeasurementResponse
+            {
+                Success = outcome.Success,
+                Aborted = outcome.Aborted,
+                Message = outcome.Message
+            };
+        }
+
+        /// <summary>
+        /// Command: PauseMeasurement. Takes effect between two kinetic cycles.
+        /// </summary>
+        public override Task<PauseMeasurementResponse> PauseMeasurement(
+            PauseMeasurementRequest request,
+            ServerCallContext context)
+        {
+            _logger.LogInformation("PauseMeasurement command received");
+
+            var outcome = _tecanBridge.PauseMeasurement();
+
+            return Task.FromResult(new PauseMeasurementResponse
+            {
+                Success = outcome.Success,
+                Message = outcome.Message
+            });
+        }
+
+        /// <summary>
+        /// Command: ResumeMeasurement
+        /// </summary>
+        public override Task<ResumeMeasurementResponse> ResumeMeasurement(
+            ResumeMeasurementRequest request,
+            ServerCallContext context)
+        {
+            _logger.LogInformation("ResumeMeasurement command received");
+
+            var outcome = _tecanBridge.ResumeMeasurement();
+
+            return Task.FromResult(new ResumeMeasurementResponse
+            {
+                Success = outcome.Success,
+                Message = outcome.Message
+            });
         }
 
         #endregion

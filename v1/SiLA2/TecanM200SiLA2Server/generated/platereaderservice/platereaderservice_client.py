@@ -13,12 +13,15 @@ if TYPE_CHECKING:
     from typing import Iterable, Optional
 
     from platereaderservice_types import (
+        AbortMeasurement_Responses,
         Connect_Responses,
         Disconnect_Responses,
         GetAnIMLResult_Responses,
         ListProtocols_Responses,
+        PauseMeasurement_Responses,
         PlateIn_Responses,
         PlateOut_Responses,
+        ResumeMeasurement_Responses,
         RunMeasurement_IntermediateResponses,
         RunMeasurement_Responses,
         SetTemperature_Responses,
@@ -115,6 +118,30 @@ class PlateReaderServiceClient:
     def ListProtocols(self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None) -> ListProtocols_Responses:
         """
         List all available .mdfx protocol names as a JSON array.
+        """
+        ...
+
+    def AbortMeasurement(
+        self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
+    ) -> AbortMeasurement_Responses:
+        """
+        Stop the running measurement now, as the Stop button in i-control does. Returns when the measurement has ended; the instrument is sent its abort sequence and re-initialised. Asking a reader that is not measuring succeeds and reports that nothing was aborted, so an emergency stop can always be sent.
+        """
+        ...
+
+    def PauseMeasurement(
+        self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
+    ) -> PauseMeasurement_Responses:
+        """
+        Pause the running measurement. Takes effect between two kinetic cycles, as the Pause button in i-control does; a measurement without kinetic cycles cannot be paused, only aborted.
+        """
+        ...
+
+    def ResumeMeasurement(
+        self, *, metadata: Optional[Iterable[ClientMetadataInstance]] = None
+    ) -> ResumeMeasurement_Responses:
+        """
+        Continue a paused measurement, or withdraw a pause that has not taken effect yet.
         """
         ...
 

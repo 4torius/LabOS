@@ -1,0 +1,62 @@
+{
+  "Name": "Pipette on the Opentrons",
+  "Category": "Process",
+  "Description": "The plate goes from the robot's jig onto the deck, the recipe runs, and the plate comes back onto the jig. Choose the recipe.",
+  "Steps": [
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "go_to_opentrons"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Drive to the Opentrons"
+    },
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "pick_from_dima"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Take the plate off the jig"
+    },
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "place_on_Opentrons"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Place the plate on the deck"
+    },
+    {
+      "Instrument": "opentrons",
+      "Action": "ExecuteRecipe",
+      "Parameters": {
+        "RecipeName": ""
+      },
+      "Description": "Run the pipetting recipe",
+      "Ask": [
+        "RecipeName"
+      ]
+    },
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "pick_from_opentrons"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Take the plate off the deck, onto the jig"
+    }
+  ]
+}

@@ -129,8 +129,8 @@ class TestTheOtherTwoFieldsWereNeverBroken:
         assert 'if step.on_failure == "continue":' in waves
 
     def test_retry_count_sets_the_attempt_budget(self):
-        assert ("retry_count = step.retry_count if step.retry_count is not None "
-                "else self._error_config.max_retries") in SOURCE
+        assert "retry_count = step.retry_count" in SOURCE
+        assert "retry_count = self._error_config.max_retries" in SOURCE
         assert "max_attempts = retry_count + 1" in SOURCE
 
     def test_neither_sits_behind_the_custom_executor_branch(self):

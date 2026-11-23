@@ -9,12 +9,15 @@ from typing import TYPE_CHECKING, Optional, Union
 from sila2.server import FeatureImplementationBase, MetadataDict, ObservableCommandInstanceWithIntermediateResponses
 
 from .platereaderservice_types import (
+    AbortMeasurement_Responses,
     Connect_Responses,
     Disconnect_Responses,
     GetAnIMLResult_Responses,
     ListProtocols_Responses,
+    PauseMeasurement_Responses,
     PlateIn_Responses,
     PlateOut_Responses,
+    ResumeMeasurement_Responses,
     RunMeasurement_IntermediateResponses,
     RunMeasurement_Responses,
     SetTemperature_Responses,
@@ -320,6 +323,53 @@ class PlateReaderServiceBase(FeatureImplementationBase, ABC):
         :return:
 
             - ProtocolsJson: JSON array of protocol file names.
+
+
+        """
+
+    @abstractmethod
+    def AbortMeasurement(self, *, metadata: MetadataDict) -> AbortMeasurement_Responses:
+        """
+        Stop the running measurement now, as the Stop button in i-control does. Returns when the measurement has ended; the instrument is sent its abort sequence and re-initialised. Asking a reader that is not measuring succeeds and reports that nothing was aborted, so an emergency stop can always be sent.
+
+
+        :param metadata: The SiLA Client Metadata attached to the call
+
+        :return:
+
+            - Aborted: True if a measurement was actually interrupted.
+
+            - Message: What happened.
+
+
+        """
+
+    @abstractmethod
+    def PauseMeasurement(self, *, metadata: MetadataDict) -> PauseMeasurement_Responses:
+        """
+        Pause the running measurement. Takes effect between two kinetic cycles, as the Pause button in i-control does; a measurement without kinetic cycles cannot be paused, only aborted.
+
+
+        :param metadata: The SiLA Client Metadata attached to the call
+
+        :return:
+
+            - Message: Whether the reader is paused now or will pause at the next cycle boundary.
+
+
+        """
+
+    @abstractmethod
+    def ResumeMeasurement(self, *, metadata: MetadataDict) -> ResumeMeasurement_Responses:
+        """
+        Continue a paused measurement, or withdraw a pause that has not taken effect yet.
+
+
+        :param metadata: The SiLA Client Metadata attached to the call
+
+        :return:
+
+            - Message: What happened.
 
 
         """

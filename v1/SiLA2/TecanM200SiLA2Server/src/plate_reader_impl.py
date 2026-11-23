@@ -20,22 +20,28 @@ if _SERVER_DIR not in sys.path:
 
 from generated.platereaderservice.platereaderservice_base import PlateReaderServiceBase
 from generated.platereaderservice.platereaderservice_errors import (
+    AbortFailed,
     ConnectionFailed,
     InstrumentBusy,
+    MeasurementAborted,
     MeasurementFailed,
     MovementFailed,
+    NoMeasurementRunning,
     NotConnected,
     ProtocolNotFound,
     ResultNotFound,
     TemperatureOutOfRange,
 )
 from generated.platereaderservice.platereaderservice_types import (
+    AbortMeasurement_Responses,
     Connect_Responses,
     Disconnect_Responses,
     GetAnIMLResult_Responses,
     ListProtocols_Responses,
     PlateIn_Responses,
+    PauseMeasurement_Responses,
     PlateOut_Responses,
+    ResumeMeasurement_Responses,
     RunMeasurement_IntermediateResponses,
     RunMeasurement_Responses,
     SetTemperature_Responses,
@@ -228,7 +234,7 @@ class PlateReaderImpl(PlateReaderServiceBase):
             raise NotConnected()
 
         op_status = self._bridge.get_operational_status()
-        if op_status == "Busy":
+        if op_status in ("Busy", "Paused"):
             raise InstrumentBusy()
 
         instance.begin_execution()
@@ -239,6 +245,8 @@ class PlateReaderImpl(PlateReaderServiceBase):
         for chunk in self._bridge.run_measurement(ProtocolFile, PlateID, SampleSetID, PlateType):
             if "error" in chunk:
                 err = chunk["error"]
+                if chunk.get("aborted"):
+                    raise MeasurementAborted(err)
                 if "not found" in err.lower() or "protocol" in err.lower():
                     raise ProtocolNotFound(err)
                 raise MeasurementFailed(err)
@@ -261,6 +269,29 @@ class PlateReaderImpl(PlateReaderServiceBase):
         if not found:
             raise ResultNotFound(path_or_err)
         return GetAnIMLResult_Responses(AnIMLFilePath=path_or_err)
+
+    # ── run control: what i-control's Stop / Pause / Continue do ───────────
+
+    def AbortMeasurement(self, *, metadata: MetadataDict) -> AbortMeasurement_Responses:
+        # Deliberately no NotConnected check: this is the emergency stop's
+        # command for this instrument, and must answer whatever state the
+        # reader is in. The bridge answers "nothing to abort" when idle.
+        idle, aborted, message = self._bridge.abort_measurement()
+        if not idle:
+            raise AbortFailed(message)
+        return AbortMeasurement_Responses(Aborted=aborted, Message=message)
+
+    def PauseMeasurement(self, *, metadata: MetadataDict) -> PauseMeasurement_Responses:
+        ok, message = self._bridge.pause_measurement()
+        if not ok:
+            raise NoMeasurementRunning(message)
+        return PauseMeasurement_Responses(Message=message)
+
+    def ResumeMeasurement(self, *, metadata: MetadataDict) -> ResumeMeasurement_Responses:
+        ok, message = self._bridge.resume_measurement()
+        if not ok:
+            raise NoMeasurementRunning(message)
+        return ResumeMeasurement_Responses(Message=message)
 
     def ListProtocols(self, *, metadata: MetadataDict) -> ListProtocols_Responses:
         protocols = self._bridge.list_protocols()

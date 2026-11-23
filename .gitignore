@@ -52,3 +52,10 @@ project.nuget.cache
 
 # graphify knowledge-graph outputs (regenerable via `graphify update .`)
 graphify-out/
+
+# The simulated lab's own run database (see v1/docs/SIMULATED_LAB.md)
+*.sim.db
+*.sim.db-journal
+
+# The simulated lab's working files (v1/sim_lab)
+v1/sim_lab/.run/

@@ -1,0 +1,18 @@
+{
+  "Name": "Robot to working pose",
+  "Category": "Robot",
+  "Description": "",
+  "Steps": [
+    {
+      "Instrument": "mobile",
+      "Action": "ExecuteTask",
+      "Parameters": {
+        "TaskId": {
+          "label": "go_to_WorkingPose"
+        },
+        "ExecutionMode": "Normal"
+      },
+      "Description": "Arm to the working pose"
+    }
+  ]
+}

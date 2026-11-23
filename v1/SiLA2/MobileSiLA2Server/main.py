@@ -35,6 +35,7 @@ from generated.taskmanagement.taskmanagement_feature import TaskManagementFeatur
 from ros_task_bridge import ROSTaskBridge
 from generated.laboslibraryprovider import LabOSLibraryProviderFeature
 from src.library_provider_impl import LibraryProviderImpl
+from src.task_resources import bridge_tasks, expand_task_names, tasks_from_file
 from src.task_management_impl import TaskManagementImpl
 
 
@@ -126,6 +127,17 @@ def main() -> int:
         tasks_path=tasks_path,
     )
 
+    # Simulation only: stand in for the robot's task list with one from a file,
+    # so a simulated run can use the same task ids as the real workflows.
+    sim_tasks_file = os.environ.get("MOBILE_SIM_TASKS") or cfg.get("simulation", {}).get("tasks_file", "")
+    if simulate and sim_tasks_file:
+        from ros_task_bridge import SubtaskInfo, TaskInfo
+        bridge._simulated_tasks = [
+            TaskInfo(root_id=task_id, root_name=task_name,
+                     subtasks=[SubtaskInfo(task_id, task_name, "simulated", 0.2)])
+            for task_id, task_name in tasks_from_file(sim_tasks_file)
+        ]
+
     # ── Build SiLA2 server ────────────────────────────────────────────────────
     sila_server = SilaServer(
         server_name=server_name,
@@ -138,7 +150,16 @@ def main() -> int:
 
     impl = TaskManagementImpl(sila_server, bridge=bridge, task_timeout=task_timeout)
     sila_server.set_feature_implementation(TaskManagementFeature, impl)
-    sila_server.set_feature_implementation(LabOSLibraryProviderFeature, LibraryProviderImpl(sila_server))
+    # The catalog declares what each task occupies by task NAME; a workflow
+    # sends the task ID. The id entries are added here, from the tasks the
+    # robot has right now - see src/task_resources.py.
+    sila_server.set_feature_implementation(
+        LabOSLibraryProviderFeature,
+        LibraryProviderImpl(
+            sila_server,
+            augment=lambda catalog: expand_task_names(catalog, bridge_tasks(bridge)),
+        ),
+    )
 
     # ── Start ─────────────────────────────────────────────────────────────────
     enable_discovery = not args.no_discovery

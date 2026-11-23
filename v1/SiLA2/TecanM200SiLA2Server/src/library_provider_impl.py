@@ -18,6 +18,13 @@ this server runs on another computer.
 
 Folders are relative to the LabOS root: the directory holding `SiLA2/`, or
 `LABOS_ROOT` when this server has been copied somewhere else.
+
+A server whose declaration depends on something it only knows while running
+passes `augment`: a function that takes the catalog as a dict and returns the
+dict to serve. The mobile robot uses it to add, next to the task *names* its
+catalog is written in, the task *ids* the robot assigned them - which is what
+a workflow sends, and which change whenever a task is taught again. If the
+function fails, the file is served as written.
 """
 
 import json
@@ -84,9 +91,10 @@ def ensure_declared_folders(catalog: dict, root: Path) -> list:
 
 
 class LibraryProviderImpl(LabOSLibraryProviderBase):
-    def __init__(self, parent_server):
+    def __init__(self, parent_server, augment=None):
         super().__init__(parent_server=parent_server)
         self._catalog_path = Path(__file__).parent.parent / "library_catalog.json"
+        self._augment = augment
         try:
             ensure_declared_folders(self._read_catalog(), labos_root())
         except Exception as exc:  # a folder problem must not stop the instrument
@@ -106,7 +114,14 @@ class LibraryProviderImpl(LabOSLibraryProviderBase):
         if not self._catalog_path.exists():
             return _EMPTY_CATALOG
         try:
-            return self._catalog_path.read_text(encoding="utf-8")
+            text = self._catalog_path.read_text(encoding="utf-8")
         except OSError as exc:
             logger.error(f"Failed to read library catalog {self._catalog_path}: {exc}")
             return _EMPTY_CATALOG
+        if self._augment is None:
+            return text
+        try:
+            return json.dumps(self._augment(json.loads(text)))
+        except Exception as exc:
+            logger.error(f"Could not augment the library catalog, serving it as written: {exc}")
+            return text

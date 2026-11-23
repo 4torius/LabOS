@@ -26,6 +26,24 @@ _BRIDGE_EXE_DEBUG   = _BRIDGE_DIR / "bin" / "Debug"   / "net48" / "TecanSiLA2Ser
 _BRIDGE_EXE = _BRIDGE_EXE_RELEASE if _BRIDGE_EXE_RELEASE.exists() else _BRIDGE_EXE_DEBUG
 
 
+def _sources_newer_than_exe() -> bool:
+    """True if any C# source or .proto of the bridge changed after the exe was built."""
+    try:
+        built = _BRIDGE_EXE.stat().st_mtime
+    except OSError:
+        return False
+    for pattern in ("**/*.cs", "Protos/*.proto", "*.csproj"):
+        for source in _BRIDGE_DIR.glob(pattern):
+            if any(part in ("bin", "obj") for part in source.relative_to(_BRIDGE_DIR).parts):
+                continue
+            try:
+                if source.stat().st_mtime > built + 1:
+                    return True
+            except OSError:
+                continue
+    return False
+
+
 class BridgeLauncher:
     """Manages the lifecycle of the C# COM bridge subprocess."""
 
@@ -91,6 +109,19 @@ class BridgeLauncher:
             logger.info("Bridge exe not found — building with dotnet...")
             if not self._build():
                 return False
+        elif _sources_newer_than_exe():
+            # The exe is committed, so a `git pull` that changes the C# code
+            # leaves the old binary in place - one that lacks whatever the new
+            # code added (AbortMeasurement, for instance) - and nothing said so.
+            logger.warning(
+                "The bridge's C# sources are newer than %s - rebuilding with dotnet...",
+                _BRIDGE_EXE.name)
+            if not self._build():
+                logger.error(
+                    "Rebuilding the bridge failed, so the OLD binary is started. "
+                    "Commands added since it was built (AbortMeasurement, "
+                    "PauseMeasurement, ResumeMeasurement) will not work until "
+                    "'dotnet build' succeeds in %s.", _BRIDGE_DIR)
 
         logger.info("Starting C# bridge: %s", _BRIDGE_EXE)
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -306,12 +337,18 @@ class BridgeLauncher:
     def _build(self) -> bool:
         config = "Release" if _BRIDGE_EXE == _BRIDGE_EXE_RELEASE else "Debug"
         logger.info("Building bridge with 'dotnet build -c %s' in %s ...", config, _BRIDGE_DIR)
-        result = subprocess.run(
-            ["dotnet", "build", "-c", config],
-            cwd=str(_BRIDGE_DIR),
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                ["dotnet", "build", "-c", config],
+                cwd=str(_BRIDGE_DIR),
+                capture_output=True,
+                text=True,
+            )
+        except OSError as exc:
+            # No .NET SDK on this PC: say so, and let the caller decide
+            # whether an existing binary is good enough.
+            logger.error("Could not run 'dotnet build' (is the .NET SDK installed?): %s", exc)
+            return False
         if result.returncode != 0:
             logger.error("dotnet build failed:\n%s", result.stderr)
             return False

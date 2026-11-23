@@ -87,3 +87,25 @@ def test_describe_options_reports_count_names_and_where_they_came_from(core):
         {"hint": "mobile_task", "count": 2, "names": ["go_home", "x2"], "from_server": True},
         {"hint": "never_read", "count": 0, "names": [], "from_server": False},
     ]
+
+
+def test_the_option_registry_reads_json_files_too(tmp_path):
+    """The layered reader (src/options.py) accepts the same declaration, so a
+    server's `json_files` entry is a source there rather than a problem."""
+    from src.options import build_registry
+
+    plates = tmp_path / "Library" / "Labware" / "Plates"
+    _plate(plates, "a", id="corning_24", tecan_plate_name="COS24ft")
+    _plate(plates, "b", id="ot_only")
+    registry = build_registry({"Reader": [
+        {"hint": "reader_plate_type", "parameter_names": ["PlateType"], **DECLARED}]})
+    assert registry.problems == []
+    assert registry.options(tmp_path, "reader_plate_type") == ["corning_24"]
+
+
+def test_json_files_outside_library_and_results_is_refused():
+    from src.options import build_registry
+
+    registry = build_registry({"Reader": [
+        {"hint": "reader_plate_type", "json_files": "../secrets/*.json"}]})
+    assert any("json_files" in p for p in registry.problems)

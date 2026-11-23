@@ -71,12 +71,12 @@ A workflow in LabOS is a JSON file that chains instrument commands into a comple
 | `OnFailure` | no | `"stop"` (default), `"skip"`, or `"continue"` |
 
 The file also carries `SchemaVersion` (currently `"1.0"`). Files without it
-still load and run under the same rules. The Workflow Builder does not write it
-yet, and it saves instruments under their display names (`TecanM200Pro`,
-`GoFaGo Mobile Robot`), so a workflow saved from the web app has neither.
+still load and run under the same rules. The Workflow Builder writes both
+`SchemaVersion` and the canonical instrument keys. Files saved by an older
+builder carry display names (`TecanM200Pro`, `GoFaGo Mobile Robot`):
 `python scripts/migrate_workflows.py --apply` adds `SchemaVersion` and
-rewrites instrument names to their canonical form; run it after saving a
-workflow you intend to commit. Without `--apply` it only reports.
+rewrites instrument names to their canonical form. Without `--apply` it only
+reports.
 
 ### Instrument names
 
@@ -127,13 +127,107 @@ top to bottom and mark a step SKIPPED when its dependency happened to be
 written further down, so a valid workflow silently lost steps because of the
 order it was typed in.
 
-**Declare your dependencies.** With `parallel_execution: true`, a file whose
-steps declare none dispatches all of them at once — for a workflow that passes
-one plate between a mobile robot, a liquid handler and a plate reader, that is
-a collision. The Workflow Builder saves `DependsOn: []` unless you tick the
-boxes, so a workflow built there runs in file order only because parallel
-execution is off. `python scripts/migrate_workflows.py --apply --chain-linear`
-gives such a file the sequential chain explicitly.
+**Declare your dependencies.** With `max_concurrency` above 1, a file whose
+steps declare none may start all of them at once. Resources stop two steps
+colliding on an instrument; they do not know that the recipe comes *after* the
+plate is placed. `python scripts/migrate_workflows.py --apply --chain-linear`
+gives an old file the sequential chain explicitly.
+
+**The robot keeps its written order by itself.** Where the mobile robot is
+cannot be a resource, so its catalog declares `"ordered": true`: each robot
+step depends on the robot step written before it, without anybody writing it.
+The edges are added at validation and at run time, kept out of the saved file,
+and shown in the builder as "robot order: after N". A robot step that
+explicitly depends on one written further down is a cycle and is refused.
+
+### Setting dependencies in the Workflow Builder
+
+Selecting a step shows **When does it start?** with one button per shape:
+
+| Button | Waits for | Use it for |
+|---|---|---|
+| After previous | the step just above (default for a new step) | the normal sequence |
+| With previous | what the step above waits for | a step that may run alongside the one above, on another instrument |
+| Join branches | every branch still open above it | where two lines of work meet |
+| At start | nothing | a step that needs nothing before it |
+
+**Choose steps…** switches the list to picking: click steps to add or remove
+them; the ones the selected step waits for are outlined. In the list, a dashed
+connector marks a step that does not wait for the one above it.
+
+### Blocks
+
+A block is a named sequence of steps added in one click from the **Blocks**
+section of the toolbox: *Read on the Tecan* is nine steps (drive there, take
+the plate off the jig, open the tray, place it, close it, read, open, take it
+back, close the empty tray). They become ordinary steps under the block's
+name; the first waits for the step above it, the rest follow the block's
+order, so a workflow built from blocks runs in order with no dependency set by
+hand. `Video` is three blocks: *Pipette on the Opentrons*, *Read on the
+Tecan*, *Robot to working pose*.
+
+Blocks live in `Library/Blocks/<id>.block.json` and the lab can add its own
+without touching code; the format is described at the top of `src/blocks.py`.
+Two parts of it matter when writing one:
+
+- A robot task is named, not numbered: `"TaskId": {"label": "go_to_tecan"}`.
+  The id is looked up when the block is inserted, from the task list the robot
+  last reported, so a task re-taught with a new id is still found.
+- `"Ask": ["RecipeName"]` marks a choice the person must make. The step shows
+  *choose: RecipeName* and the bar above the list counts it until a value is
+  picked; until then **Run** refuses (the value is empty, or a default nobody
+  chose) while **Simulate** still works.
+
+A block is added **below the selected step**, or at the end when none is
+selected, and goes into the chain: the step that was below it now waits for
+the block's last step. After adding, the block's last step is selected, so
+clicking blocks one after another builds them in that order.
+
+The shipped blocks are checked by `tests/unit/test_blocks.py` (every task
+exists on the robot and is declared; the tray is open whenever the robot
+reaches into it, and closed at the end), and a workflow made of them runs in
+the simulated lab (`tests/simlab/test_blocks_in_sim.py`).
+
+### Plates
+
+A step may name the plate it concerns: `"Plate": "A"`. The executor ignores
+it; the builder uses it in three ways.
+
+- **New steps go to** (above the list) sets the plate every step or block
+  added from then on belongs to; *+ new plate* creates the next letter. A
+  robot-only block (working pose, docking) gets no plate. In the Properties
+  panel a step's plate can be changed; for a step of a block it changes the
+  whole block.
+- **Plates** view: one column per plate and one for steps on no plate. Rows
+  stay in written order - which is also the robot's order - so reading across
+  a row shows what happens to every plate at that point.
+- **Where each plate is.** Following the steps in written order, LabOS works
+  out where each labelled plate is from what the instruments declare (a step
+  that *acquires* `slot:tecan` puts its plate in the reader, one that
+  *releases* it takes it out onto the robot, and `RunMeasurement` *needs*
+  `slot:tecan`). Under a step that moved its plate the list shows where it is
+  now ("A in tecan"), and a step that cannot make sense there is marked in
+  yellow: reading A while A is still on the deck, putting B on the deck while
+  A is on it, taking A out of the reader when it was never put there, the
+  robot carrying two plates at once. A person's move no catalog can declare
+  is said by the step: *Moved by hand in this step* (`"PlateMove": "onto:mobile"`
+  or `"off"`); the operator blocks carry it.
+
+These are warnings, never refusals: the written order is not always the run
+order, and a plate loaded by hand is somewhere no step said, so a plate nobody
+has moved yet draws no warning. The logic is `src/plates.py`.
+
+**After its plate's previous** is a fifth dependency shape, offered on a step
+that has a plate: it waits only for the step above it on the same plate. It
+is how two plates' steps, written interleaved, run side by side - the
+default stays *After previous*.
+
+The builder validates as you edit (`POST /api/workflows/validate`): problems
+show on their step and in a bar above the list, before Run is pressed.
+**Simulate** runs the workflow in the simulated lab (`POST
+/api/workflows/simulate`, see SIMULATED_LAB.md) and draws what each instrument
+did; nothing reaches the real instruments. It cannot run while `python -m
+sim_lab up` is holding the simulated ports.
 
 ---
 
@@ -256,6 +350,42 @@ There is currently no loop or conditional (IF/Else) mechanism in LabOS beyond li
 `POST /api/workflows/batch-execute` runs the same workflow N times with per-sample variable substitution (`${var}` placeholders in step parameters, auto-detected via `/api/workflows/scan-variables`). This is currently **API-only** — no dedicated webapp form was found wired to it as of this writing; use it via a direct API call, or via the "Workflow Variables" modal for a single run.
 
 ---
+
+## Timing a step
+
+Two optional fields express a time constraint. Both are measured from the
+moment the step's **last dependency finished** — or from the start of the run,
+for a step with no dependencies.
+
+```json
+{
+  "StepNumber": 14, "Instrument": "tecan", "Action": "RunMeasurement",
+  "DependsOn": [7],
+  "NotBeforeSeconds": 1800,
+  "DeadlineSeconds": 1920
+}
+```
+
+`NotBeforeSeconds` is a guarantee: the step waits. This is how an incubation is
+expressed — the reading does not go out until thirty minutes after the step
+that set the plate up completed. The wait happens **before** the step takes any
+resource claim, so a run waiting out an incubation is not sitting on a deck or
+a reader tray it is not using. An abort during a long wait takes effect
+promptly rather than waiting the incubation out.
+
+`DeadlineSeconds` is deliberately **not** a guarantee, and the distinction
+matters. Nothing here can promise the reader is free at exactly thirty minutes;
+making that happen would be a scheduler's job, and there is no scheduler (see
+[RESOURCE_MODEL.md](RESOURCE_MODEL.md) for why that is a deliberate division).
+What the executor can do is tell you the truth: if the step starts late it
+still runs — the measurement happened and the data is real — and the overrun is
+written into the step's result as `deadline_exceeded_by_seconds` and reported
+in the run's errors. A plate read at 45 minutes when the protocol said 30 is a
+result with a caveat, not a result, and the caveat should not be something you
+have to reconstruct from timestamps afterwards.
+
+Omitting both is the normal case and changes nothing.
+
 
 ## Workflow Library
 

@@ -1,0 +1,46 @@
+[
+  {
+    "id": "cxnqdonaaeasamlnxeffccbezmydxdwz",
+    "name": "PRENDERE_PIASTRA_FRA"
+  },
+  {
+    "id": "dxvadjvibetfceaybdybsqsqcmzimdfj",
+    "name": "place_on_Opentrons"
+  },
+  {
+    "id": "eebzzndefzrktbrqbammcxfjikbmqpaa",
+    "name": "go_to_tecan"
+  },
+  {
+    "id": "efbcereejzxiycfdvccbbcvealdjdmbf",
+    "name": "go_to_docking"
+  },
+  {
+    "id": "eymnhzlaatqzobafwcbbdazkrcwninfh",
+    "name": "go_to_WorkingPose"
+  },
+  {
+    "id": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
+    "name": "pick_from_dima"
+  },
+  {
+    "id": "lfesetxmbebkafkuxdsyebfckfnaaghe",
+    "name": "CAPPA"
+  },
+  {
+    "id": "nnegfohactaltbahtxfnejaaycafskaq",
+    "name": "pick_from_tecan"
+  },
+  {
+    "id": "qufptekmeyycpckgbvcpudozfdfkctba",
+    "name": "pick_from_opentrons"
+  },
+  {
+    "id": "rxzeeofvewbamneadgvdafucvefidfgb",
+    "name": "place_on_Tecan"
+  },
+  {
+    "id": "udgldepfnpbyteaybebdacfyxdifdygt",
+    "name": "go_to_opentrons"
+  }
+]

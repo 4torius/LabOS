@@ -221,6 +221,200 @@ def create_workflows_router(
         user_vars = [v for v in variables if not v.startswith("workflow.")]
         return {"variables": user_vars, "count": len(user_vars)}
 
+    # Checking a workflow from the editor, without running it
+
+    async def _validation_executor():
+        """An executor over the instruments discovered now, or over none.
+
+        No instrument reachable is a real answer: every step then reports its
+        instrument as not found, which is what running it would say too.
+        """
+        from src.client import PnPRegistry
+        from src.workflow import PnPWorkflowExecutor
+
+        registry = PnPRegistry(BASE_DIR)
+        core = lab_core
+        if not core:
+            from src.lab_core import get_lab_core
+            core = get_lab_core(BASE_DIR)
+        if core:
+            try:
+                await core.discover()
+            except Exception as exc:  # an offline lab is not an editor error
+                logger.warning("Validation could not discover instruments: %s", exc)
+            for instr in core.list_instruments():
+                if getattr(instr, "_server", None):
+                    registry.register(instr.id, instr._server)
+        return PnPWorkflowExecutor(registry, base_dir=BASE_DIR)
+
+    @router.post("/api/workflows/validate")
+    async def validate_workflow_route(request: Request):
+        """Check a workflow as the editor holds it, without running anything.
+
+        Returns the same errors a run would refuse with, per step, plus the
+        order LabOS adds by itself (`implied`: the robot's steps in written
+        order) so the editor can draw it, and `warnings` for what is legal
+        but almost certainly not meant.
+        """
+        from src.workflow import Workflow
+
+        data = await request.json()
+        try:
+            workflow = Workflow.from_dict(data)
+        except Exception as exc:
+            return {"valid": False, "errors": [
+                {"step": None, "field": "", "message": f"Invalid workflow format: {exc}"}],
+                "warnings": [], "implied": {}}
+
+        executor = await _validation_executor()
+        errors = await executor.validate_workflow(workflow)
+        warnings = []
+        if len(workflow.steps) > 1 and not any(
+                s.depends_on for s in workflow.steps):
+            warnings.append({
+                "step": None, "field": "DependsOn",
+                "message": ("No step depends on any other: apart from the robot, "
+                            "which keeps its written order, every step may start at once "
+                            "when max_concurrency is above 1."),
+            })
+        plates = _plate_report(executor, data.get("Steps") or [])
+        for number, entry in plates.items():
+            for message in entry["warnings"]:
+                warnings.append({"step": int(number), "field": "Plate", "message": message})
+        return {
+            "valid": not errors,
+            "errors": [{"step": e.step_number, "field": e.field, "message": e.message}
+                       for e in errors],
+            "warnings": warnings,
+            "implied": {str(s.step_number): list(s.implied_depends_on)
+                        for s in workflow.steps if s.implied_depends_on},
+            "plates": plates,
+        }
+
+    def _plate_report(executor, raw_steps) -> dict:
+        """Where each labelled plate is after each step (src/plates.py)."""
+        from src.plates import report_workflow
+
+        try:
+            topology = executor._topology()
+        except Exception as exc:  # advice only: no topology, no advice
+            logger.warning("Plate check skipped: %s", exc)
+            return {}
+
+        def key_of(instrument: str, action: str) -> str:
+            if is_locally_handled(instrument, action):
+                return ""
+            server = executor.registry.get_server_by_name(instrument)
+            return executor._key_of(server) if server is not None else ""
+
+        return report_workflow(raw_steps, key_of, topology)
+
+    # Blocks: named sequences of steps the builder inserts in one go
+    # (src/blocks.py, Library/Blocks/*.block.json)
+
+    @router.get("/api/blocks")
+    async def list_blocks():
+        from src.blocks import load_blocks
+        blocks, problems = load_blocks(LIBRARY_DIR / "Blocks")
+        return {"blocks": [b.summary() for b in blocks], "problems": problems}
+
+    @router.post("/api/blocks/{block_id}/expand")
+    async def expand_block(block_id: str):
+        """The block's steps, with every `{"label": ...}` turned into a value.
+
+        A label is matched against the same option list the builder's
+        dropdown shows for that parameter - for the robot, the task list it
+        last reported - so a re-taught task's new id is picked up by name.
+        """
+        from src.blocks import expand, load_blocks
+
+        blocks, _problems = load_blocks(LIBRARY_DIR / "Blocks")
+        block = next((b for b in blocks if b.id == block_id), None)
+        if block is None:
+            raise HTTPException(404, f"No block named {block_id}")
+
+        core = lab_core
+        if not core:
+            from src.lab_core import get_lab_core
+            core = get_lab_core(BASE_DIR)
+        try:
+            await core.discover()
+        except Exception as exc:  # an offline lab still gets an answer
+            logger.warning("Expanding a block without discovery: %s", exc)
+
+        def resolve_label(instrument: str, action: str, parameter: str, label: str):
+            target = core.resolve_instrument(instrument).target
+            if target is None:
+                return None, f"instrument '{instrument}' is not available"
+            command = next((c for c in target.commands if c.id == action), None)
+            spec = command and next(
+                (p for p in command.parameters if p.name == parameter), None)
+            hint = getattr(spec, "ui_hint", "") if spec else ""
+            if not hint:
+                return None, f"{parameter} of {action} has no list to pick '{label}' from"
+            pairs = core._option_pairs_for_hint(hint)
+            for pair in pairs:
+                if str(pair.get("label")) == label:
+                    return pair.get("value"), None
+            for pair in pairs:  # tolerate case, as a person writing a block might
+                if str(pair.get("label")).lower() == label.lower():
+                    return pair.get("value"), None
+            known = ", ".join(sorted(str(p.get("label")) for p in pairs)) or "none"
+            return None, f"'{label}' is not among the {parameter} options (known: {known})"
+
+        steps, errors = expand(block, resolve_label)
+        return {"id": block.id, "name": block.name, "category": block.category,
+                "steps": steps, "errors": errors}
+
+    _simulation_lock = asyncio.Lock()
+
+    @router.post("/api/workflows/simulate")
+    async def simulate_workflow(request: Request):
+        """Run a workflow in the simulated lab and return what the instruments did.
+
+        The simulated lab starts its own stand-in servers on 127.0.0.1 and
+        points a copy of the configuration at them (see docs/SIMULATED_LAB.md);
+        nothing here can reach a real instrument. One simulation at a time:
+        they share a working folder and ports.
+        """
+        import sys
+        import tempfile
+
+        data = await request.json()
+        workflow = data.get("workflow") if isinstance(data.get("workflow"), dict) else data
+        cap = data.get("max_concurrency", 0) if "workflow" in data else 0
+        try:
+            cap = max(0, int(cap))
+        except (TypeError, ValueError):
+            cap = 0
+        if _simulation_lock.locked():
+            return {"status": "busy", "error": "A simulation is already running; try again when it ends."}
+        async with _simulation_lock:
+            with tempfile.TemporaryDirectory(prefix="labos_sim_") as tmp:
+                path = Path(tmp) / "editor.workflow.json"
+                path.write_text(json.dumps(workflow), encoding="utf-8")
+                process = await asyncio.create_subprocess_exec(
+                    sys.executable, "-m", "sim_lab", "--max-concurrency", str(cap),
+                    "run", str(path), "--json",
+                    cwd=str(BASE_DIR),
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                try:
+                    out, err = await asyncio.wait_for(process.communicate(), timeout=300)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
+                    return {"status": "error", "error": "The simulation took longer than 5 minutes and was stopped."}
+        lines = [line for line in out.decode("utf-8", "replace").splitlines() if line.strip()]
+        try:
+            report = json.loads(lines[-1])
+        except (IndexError, ValueError):
+            tail = err.decode("utf-8", "replace").strip().splitlines()[-5:]
+            return {"status": "error",
+                    "error": "The simulated lab did not start: " + (" | ".join(tail) or "no output")}
+        report["status"] = "ok"
+        report["max_concurrency"] = cap
+        return report
+
     # Intervention API
 
     @router.post("/api/intervention/respond")
@@ -673,12 +867,11 @@ def create_workflows_router(
 
         executor.set_intervention_callback(on_intervention)
 
-        _parallel = get_settings(BASE_DIR).workflow.parallel_execution
 
         try:
             # Validate upfront so dependency/instrument/command issues are explicit
             # instead of being silently skipped at runtime.
-            result = await executor.execute(workflow_obj, validate=True, parallel=_parallel)
+            result = await executor.execute(workflow_obj, validate=True)
         except Exception as e:
             state.add_log("error", f"Workflow error: {e}", "workflow")
             await _broadcast_workflow({"type": "workflow_failed", "workflow_name": workflow_name, "error": str(e)})
@@ -946,7 +1139,6 @@ def create_workflows_router(
         batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         workflow_name = workflow_def.get("WorkflowName", "Batch")
 
-        _parallel = get_settings(BASE_DIR).workflow.parallel_execution
 
         state.add_log("info", f"Batch started: {batch_id} ({len(samples)} samples)", "workflow")
         await ws_manager.broadcast({
@@ -1063,7 +1255,7 @@ def create_workflows_router(
                     executor.set_step_executor(_sample_step)
                     executor.add_progress_callback(on_batch_progress)
                     executor.set_intervention_callback(on_batch_intervention)
-                    result = await executor.execute(wf_obj, validate=False, parallel=_parallel)
+                    result = await executor.execute(wf_obj, validate=False)
                     run_id = _save_run_archive(BASE_DIR, sample_wf["WorkflowName"], result, shared_ctx["step_results"])
                     if run_id:
                         # Tag run with batch metadata

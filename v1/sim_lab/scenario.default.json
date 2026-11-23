@@ -1,0 +1,16 @@
+{
+  "_comment": "How long each simulated command takes, in seconds, and what it returns. Anything not listed takes default_duration. Per command you may also set: fail (an error message - the command fails), fail_times (how many times it fails before it succeeds; default 1 when fail is set), hang (true - it never returns until the instrument is stopped), response (values for the command's response fields). properties gives values for a server's properties. See docs/SIMULATED_LAB.md.",
+  "default_duration": 0.3,
+  "opentrons": {
+    "ExecuteRecipe": {"duration": 2.0}
+  },
+  "tecan": {
+    "RunMeasurement": {"duration": 1.5}
+  },
+  "mobile": {
+    "ExecuteTask": {"duration": 0.8}
+  },
+  "manual_station": {
+    "RequestOperatorTask": {"duration": 0.2}
+  }
+}

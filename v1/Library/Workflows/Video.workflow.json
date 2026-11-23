@@ -10,7 +10,8 @@
         "TaskId": "eymnhzlaatqzobafwcbbdazkrcwninfh",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [],
+      "Description": "Arm to working pose (go_to_WorkingPose)"
     },
     {
       "StepNumber": 2,
@@ -20,7 +21,10 @@
         "TaskId": "udgldepfnpbyteaybebdacfyxdifdygt",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        1
+      ],
+      "Description": "Drive to the Opentrons (go_to_opentrons)"
     },
     {
       "StepNumber": 3,
@@ -30,7 +34,10 @@
         "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        2
+      ],
+      "Description": "Pick the plate off the jig (pick_from_dima)"
     },
     {
       "StepNumber": 4,
@@ -40,7 +47,10 @@
         "TaskId": "dxvadjvibetfceaybdybsqsqcmzimdfj",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        3
+      ],
+      "Description": "Place it on the Opentrons deck (place_on_Opentrons)"
     },
     {
       "StepNumber": 5,
@@ -49,7 +59,10 @@
       "Parameters": {
         "RecipeName": "test_6.json"
       },
-      "DependsOn": []
+      "DependsOn": [
+        4
+      ],
+      "Description": "Run the pipetting recipe"
     },
     {
       "StepNumber": 6,
@@ -59,7 +72,10 @@
         "TaskId": "qufptekmeyycpckgbvcpudozfdfkctba",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        5
+      ],
+      "Description": "Pick the plate off the Opentrons deck (pick_from_opentrons)"
     },
     {
       "StepNumber": 7,
@@ -69,7 +85,10 @@
         "TaskId": "eebzzndefzrktbrqbammcxfjikbmqpaa",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        6
+      ],
+      "Description": "Drive to the Tecan (go_to_tecan)"
     },
     {
       "StepNumber": 8,
@@ -79,14 +98,20 @@
         "TaskId": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        7
+      ],
+      "Description": "Pick the plate off the jig (pick_from_dima)"
     },
     {
       "StepNumber": 9,
       "Instrument": "tecan",
       "Action": "PlateOut",
       "Parameters": {},
-      "DependsOn": []
+      "DependsOn": [
+        8
+      ],
+      "Description": "Open the reader tray"
     },
     {
       "StepNumber": 10,
@@ -96,14 +121,20 @@
         "TaskId": "rxzeeofvewbamneadgvdafucvefidfgb",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        9
+      ],
+      "Description": "Place it on the reader tray (place_on_Tecan)"
     },
     {
       "StepNumber": 11,
       "Instrument": "tecan",
       "Action": "PlateIn",
       "Parameters": {},
-      "DependsOn": []
+      "DependsOn": [
+        10
+      ],
+      "Description": "Close the tray"
     },
     {
       "StepNumber": 12,
@@ -115,14 +146,20 @@
         "PlateID": "",
         "SampleSetID": ""
       },
-      "DependsOn": []
+      "DependsOn": [
+        11
+      ],
+      "Description": "Read the plate"
     },
     {
       "StepNumber": 13,
       "Instrument": "tecan",
       "Action": "PlateOut",
       "Parameters": {},
-      "DependsOn": []
+      "DependsOn": [
+        12
+      ],
+      "Description": "Open the tray"
     },
     {
       "StepNumber": 14,
@@ -132,14 +169,20 @@
         "TaskId": "nnegfohactaltbahtxfnejaaycafskaq",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        13
+      ],
+      "Description": "Pick the plate off the tray (pick_from_tecan)"
     },
     {
       "StepNumber": 15,
       "Instrument": "tecan",
       "Action": "PlateIn",
       "Parameters": {},
-      "DependsOn": []
+      "DependsOn": [
+        14
+      ],
+      "Description": "Close the empty tray"
     },
     {
       "StepNumber": 16,
@@ -149,8 +192,12 @@
         "TaskId": "eymnhzlaatqzobafwcbbdazkrcwninfh",
         "ExecutionMode": "Normal"
       },
-      "DependsOn": []
+      "DependsOn": [
+        15
+      ],
+      "Description": "Arm back to working pose (go_to_WorkingPose)"
     }
   ],
-  "CreatedAt": "2026-11-20T15:16:15.917557"
+  "CreatedAt": "2026-11-20T15:16:15.917557",
+  "Description": "One plate through Opentrons and Tecan, carried by the mobile robot. Every step depends on the one before: a single plate cannot be in two places. Without DependsOn the steps had no order at all, and with max_concurrency above 1 they would have started together. Relaxing a specific edge (opening the tray while the robot drives, say) is a physical claim to make at the bench."
 }

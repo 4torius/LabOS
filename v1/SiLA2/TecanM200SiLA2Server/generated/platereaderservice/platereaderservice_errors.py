@@ -62,3 +62,24 @@ class ResultNotFound(DefinedExecutionError):
         if message is None:
             message = "No result found for the requested plate ID."
         super().__init__(PlateReaderServiceFeature.defined_execution_errors["ResultNotFound"], message=message)
+
+
+class MeasurementAborted(DefinedExecutionError):
+    def __init__(self, message: Optional[str] = None):
+        if message is None:
+            message = "The measurement was aborted on request (AbortMeasurement, or Stop in i-control). The instrument is idle, not in error."
+        super().__init__(PlateReaderServiceFeature.defined_execution_errors["MeasurementAborted"], message=message)
+
+
+class AbortFailed(DefinedExecutionError):
+    def __init__(self, message: Optional[str] = None):
+        if message is None:
+            message = "The measurement could not be stopped. Switch the reader off."
+        super().__init__(PlateReaderServiceFeature.defined_execution_errors["AbortFailed"], message=message)
+
+
+class NoMeasurementRunning(DefinedExecutionError):
+    def __init__(self, message: Optional[str] = None):
+        if message is None:
+            message = "There is no running (or paused) measurement to act on."
+        super().__init__(PlateReaderServiceFeature.defined_execution_errors["NoMeasurementRunning"], message=message)

@@ -1,0 +1,19 @@
+{
+  "Name": "Operator loads a plate onto the robot",
+  "Category": "Operator",
+  "Description": "Asks the operator to put a plate on the robot's jig and waits for confirmation.",
+  "Steps": [
+    {
+      "Instrument": "manual_station",
+      "Action": "RequestOperatorTask",
+      "Parameters": {
+        "TaskType": "manual_operation",
+        "Priority": "low",
+        "TaskDescription": "Caricare la piastra sulla dima del robot",
+        "SourceInstrument": ""
+      },
+      "Description": "The operator loads the plate onto the jig",
+      "PlateMove": "onto:mobile"
+    }
+  ]
+}
