@@ -47,3 +47,19 @@ def test_the_task_is_declared(workflow, task_id):
         pytest.skip("not on the robot; reported by the test above")
     assert name in DECLARED, (
         f"{workflow} uses {name}, which the robot's catalog does not declare")
+
+
+WORKFLOWS = sorted((V1 / "Library/Workflows").glob("*.json"))
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
+def test_a_saved_workflow_says_what_waits_for_what(path):
+    """A workflow of several steps with no DependsOn anywhere has no order:
+    with max_concurrency above 1 every step would start at once (Video did,
+    until 2026-11-23). One step that genuinely needs nothing is fine; all of
+    them is a workflow nobody ordered."""
+    steps = _load(path).get("Steps") or []
+    if len(steps) < 2:
+        pytest.skip("one step needs no order")
+    assert any(s.get("DependsOn") for s in steps), (
+        f"{path.name}: no step depends on any other, so nothing keeps them in order")
