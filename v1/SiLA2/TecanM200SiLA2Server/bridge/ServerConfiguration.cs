@@ -22,12 +22,16 @@ namespace TecanSiLA2Server
         public string ProtocolsPath { get; set; } = "";
         public string ResultsPath { get; set; } = "";
 
-        // Piastra->{file,range} lookup used to override the plate type
-        // hardcoded in a .mdfx protocol (see PlateTypeLibrary.cs). Empty by
-        // default: RunMeasurement's PlateType parameter stays a no-op (the
-        // .mdfx's own hardcoded plate is used) unless this points at a real
-        // file.
-        public string PlateTypesPath { get; set; } = "";
+        // The plates RunMeasurement's PlateType may name (see
+        // PlateTypeLibrary.cs): Library/Labware/Plates/*.plate.json, the same
+        // ones the Opentrons uses, those with a "tecan_plate_name". Empty =
+        // Library/Labware/Plates next to ProtocolsPath (Library/Analysis).
+        public string LabwarePlatesPath { get; set; } = "";
+
+        // Where the Tecan software keeps its plate definitions (.pdfx), used
+        // to check that each tecan_plate_name exists and has the same rows
+        // and columns. Empty = <Public Documents>\Tecan\Pdfx.
+        public string TecanPlateDefinitionsPath { get; set; } = "";
         
         // Connection
         public string DefaultConnectionString { get; set; } = "";
@@ -62,12 +66,19 @@ namespace TecanSiLA2Server
             else if (!Path.IsPathRooted(ResultsPath))
                 ResultsPath = Path.Combine(basePath, ResultsPath);
 
-            // Default: alongside the .mdfx protocols themselves, so the lab
-            // manages/backs up both together.
-            if (string.IsNullOrEmpty(PlateTypesPath))
-                PlateTypesPath = Path.Combine(ProtocolsPath, "PlateTypes.json");
-            else if (!Path.IsPathRooted(PlateTypesPath))
-                PlateTypesPath = Path.Combine(basePath, PlateTypesPath);
+            // Default: Library/Labware/Plates, Library being the folder that
+            // holds the .mdfx protocols' Library/Analysis.
+            if (string.IsNullOrEmpty(LabwarePlatesPath))
+                LabwarePlatesPath = Path.Combine(
+                    Path.GetDirectoryName(Path.GetFullPath(ProtocolsPath)) ?? basePath, "Labware", "Plates");
+            else if (!Path.IsPathRooted(LabwarePlatesPath))
+                LabwarePlatesPath = Path.Combine(basePath, LabwarePlatesPath);
+
+            if (string.IsNullOrEmpty(TecanPlateDefinitionsPath))
+                TecanPlateDefinitionsPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments), "Tecan", "Pdfx");
+            else if (!Path.IsPathRooted(TecanPlateDefinitionsPath))
+                TecanPlateDefinitionsPath = Path.Combine(basePath, TecanPlateDefinitionsPath);
         }
         
         /// <summary>

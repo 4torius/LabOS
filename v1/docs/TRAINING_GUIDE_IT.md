@@ -80,6 +80,8 @@ Una card per strumento, stato in tempo reale, e un pulsante per eseguire diretta
 ### Recipe Generator (`/batch`, raggiungibile anche come `/recipes` — stessa pagina)
 Il modo normale per creare una ricetta: carica o seleziona un piano di pipettaggio Excel, raggruppa le colonne in fasi, scegli classe di liquido e condivisione reservoir per reagente, opzionalmente inserisci trattamenti su modulo (heater-shaker, temperatura). Clicca Generate. **Da sottolineare esplicitamente**: la stima dello scarto (waste) c'è, ma è dentro il pannello "Notes" comprimibile, non un numero in evidenza — aprilo, altrimenti i partecipanti penseranno che manchi.
 
+**Pipettare sull'heater-shaker** (la domanda arriverà): aggiungi **🌡️ Keep warm** prima di una fase con destinazione **Target plate**, imposta la temperatura (e velocità/durata se deve agitare). Il gripper porta la piastra sul modulo, la scalda e la agita, poi **la lascia lì in temperatura**; le fasi successive pipettano direttamente su di lei, e un passo finale spegne il riscaldamento e la riporta al suo posto. Il latch è gestito da solo. Lascia "Keep shaking" non spuntato: il robot rifiuta di pipettare sull'heater-shaker (o accanto) mentre agita. Verificato nel simulatore Opentrons, non ancora sul robot. Dettagli: [HAL_SYSTEM.md](HAL_SYSTEM.md#plates-on-a-module-pipetting-on-the-heater-shaker).
+
 **Come si calcola lo scarto, e quanto eccesso preparare** (questa domanda arriverà — è esattamente da qui che deriva quanta soluzione in eccesso serve):
 Il sistema non aspira una volta per pozzetto. Con la strategia "Distribute", carica la pipetta **una volta sola** e dispensa in più pozzetti finché il volume caricato non finisce, poi ricarica ("viaggio" successivo). Ogni volta che ricarica, una piccola quantità fissa — il volume minimo reale della pipetta, es. 5 µL per la Flex 1-Channel 1000 µL (un dato di targa Opentrons vero, non un numero a caso) — resta nella punta come margine di sicurezza e non viene mai dispensata. Quello è lo scarto.
 Quindi: più viaggi servono (più pozzetti destinazione, o una punta con capacità piccola rispetto al volume totale), più scarto c'è. Non è una percentuale fissa — dipende da quanti "ricarichi" servono per quel reagente specifico.
@@ -88,6 +90,8 @@ Quindi: più viaggi servono (più pozzetti destinazione, o una punta con capacit
 
 ### Hardware (`/hardware`)
 Seleziona quale config HAL (layout del deck) è attiva. Persiste tra i riavvii. **Da sottolineare**: cliccare "Set Active" ora mostra un toast di avviso se il robot era offline e non ha effettivamente ricevuto l'aggiornamento (contro un semplice toast di successo quando invece l'ha ricevuto) — se vedi l'avviso, riapplica la config una volta confermato che il robot è online.
+
+Nello slot di un modulo si indica anche cosa ci sta sopra (*On top of the module*): l'adattatore montato e, se serve, una piastra che parte già lì — le ricette la usano per nome come tutte le altre.
 
 ### Workflow Builder (`/workflows`)
 Trascina strumenti su un canvas, imposta i parametri, collega le dipendenze, salva. Clicca Execute per lanciare. Una barra di stato globale compare in fondo a **ogni pagina** (non solo questa) con Pause/Resume/Abort ogni volta che qualcosa è in esecuzione. **Da sottolineare**: non esiste alcun blocco loop o IF/Else — LabOS supporta solo dipendenze lineari tra step, non controllo di flusso.
@@ -165,7 +169,7 @@ Dettaglio completo e altri scenari: [OPERATIONS.md](OPERATIONS.md#troubleshootin
 | Una ricetta fallisce contro la HAL attiva ("missing labware mapping") | Conferma che la HAL corretta sia attiva **e sia stata effettivamente applicata al robot** — la pagina Hardware ora avvisa esplicitamente se non lo è stata |
 | Il conteggio dei tip sembra sbagliato | La guardia automatica anti-tip potrebbe aver forzato uno sgancio che non ti aspettavi — controlla il log archiviato della run prima di dare per scontato un bug |
 | Non trovi una piastra/run che sai esistere | Assicurati di essere sulla pagina **Database** (backend SQLite), sul tab giusto (**Plates** vs **Runs & Log**) |
-| `RunMeasurement` Tecan fallisce con "PlateType not found" | Normale — quella piastra non è ancora registrata in `PlateTypes.json`, oppure lascia `PlateType` vuoto per usare la piastra di default del protocollo. Vedi [SERVERS.md](SERVERS.md#mdfx-protocol-files) |
+| `RunMeasurement` Tecan fallisce con "PlateType not found" | Normale — quella piastra non ha ancora `tecan_plate_name` in `Library/Labware/Plates` (o il server Tecan non è stato riavviato dopo averlo aggiunto), oppure lascia `PlateType` vuoto per usare la piastra di default del protocollo. Vedi [NUOVA_PIASTRA.md](NUOVA_PIASTRA.md) |
 
 ---
 

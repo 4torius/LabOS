@@ -108,7 +108,9 @@ namespace TecanSiLA2Server.Instrument
 
         // RunMeasurement's PlateType parameter stays a documented no-op.
 
-        private readonly Dictionary<string, PlateTypeDefinition> _plateTypes;
+        // (Plates come from Library/Labware/Plates/*.plate.json with a
+        // "tecan_plate_name"; see docs/NUOVA_PIASTRA.md.)
+        private readonly PlateTypeCatalog _plateTypes;
 
 
 
@@ -126,7 +128,7 @@ namespace TecanSiLA2Server.Instrument
 
             _resultsPath = config.ResultsPath;
 
-            _plateTypes = PlateTypeLibrary.Load(config.PlateTypesPath, _logger);
+            _plateTypes = PlateTypeLibrary.Load(config.LabwarePlatesPath, config.TecanPlateDefinitionsPath, _logger);
 
 
 
@@ -1295,15 +1297,21 @@ namespace TecanSiLA2Server.Instrument
 
                     string plateTypeKey = plateType!;
 
-                    if (!_plateTypes.TryGetValue(plateTypeKey, out var plateDef))
+                    if (_plateTypes.Rejected.TryGetValue(plateTypeKey, out var rejectedReason))
+                    {
+                        throw new Exception(
+                            $"PlateType '{plateTypeKey}' scartata all'avvio del bridge: {rejectedReason}. " +
+                            "Correggi la piastra in Library/Labware/Plates e riavvia il server Tecan (docs/NUOVA_PIASTRA.md).");
+                    }
+                    if (!_plateTypes.Plates.TryGetValue(plateTypeKey, out var plateDef))
 
                     {
 
-                        var known = _plateTypes.Count > 0 ? string.Join(", ", _plateTypes.Keys) : "(nessuna)";
+                        var known = _plateTypes.Plates.Count > 0 ? string.Join(", ", _plateTypes.Plates.Keys) : "(nessuna)";
 
                         throw new Exception(
 
-                            $"PlateType '{plateTypeKey}' non trovato in PlateTypes.json. Piastre note: {known}. " +
+                            $"PlateType '{plateTypeKey}' non e' una piastra misurabile col Tecan (manca 'tecan_plate_name' in Library/Labware/Plates, oppure il server non e' stato riavviato dopo averlo aggiunto). Piastre note: {known}. " +
 
                             "Lascia PlateType vuoto per usare il default del protocollo.");
 

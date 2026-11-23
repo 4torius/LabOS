@@ -33,6 +33,7 @@
   ],
   "opentrons_load_name": "greiner_96_wellplate_382ul",
   "tecan_compatible": true,
+  "tecan_plate_name": "GRE96ft",
   "brand": "Greiner Bio-One",
   "catalog_numbers": [
     "655101",

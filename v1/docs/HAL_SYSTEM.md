@@ -76,6 +76,67 @@ a recipe file, however short.
 
 The Recipe Generator's "+ Add step" UI lets you insert a module treatment (e.g. heater-shaker mix, temperature hold) before the first phase, after any phase, or after the last. This is backed by a treatment catalog in `src/excel_recipe_parser.py` and is **fully wired into the UI** — this is the one advanced feature that's genuinely easy to use without editing JSON by hand.
 
+### Plates on a module (pipetting on the Heater-Shaker)
+
+A plate can sit on a module, directly or on an adapter, and recipes pipette
+into it by its name like any other plate. In the HAL:
+
+```json
+"Modules": { "HeaterShaker": { "Type": "heaterShakerModuleV1", "Slot": "D1" } },
+"Labware": {
+  "HS_Adapter": { "LoadName": "opentrons_96_flat_bottom_adapter", "OnModule": "HeaterShaker" },
+  "HS_Plate":   { "LoadName": "nest_96_wellplate_200ul_flat", "OnAdapter": "HS_Adapter" }
+}
+```
+
+The Hardware page sets this up in a module's slot ("On top of the module":
+adapter and/or plate).
+
+- A recipe only needs to name the plate (`"HS_Plate": "HS_Plate"` in
+  `Requirements`). The adapter and the module under it are added from the HAL
+  (`HardwareManager._bring_in_what_labware_sits_on`), under the recipe's name
+  for them if it has one, and labware is loaded adapter-first whatever the
+  order.
+- **Latch.** The robot refuses to move a pipette to a Heater-Shaker whose
+  labware latch is open, and refuses to move labware on or off with it closed.
+  The latch is opened when the module is loaded (so plates can be put on it).
+  The generated protocol therefore **closes it before any step that pipettes
+  into a plate on it** (any step with a `PipetteMount` that names such a
+  plate), and opens it before a `MoveLabware` onto or off the module or its
+  adapter. No recipe step is needed for either.
+- **Shaking.** Pipetting while the module shakes is refused by the robot
+  itself ("Cannot move pipette to Heater-Shaker or adjacent slot while module
+  is shaking"): stop it first (`HeaterShakerDeactivateShaker`, or a
+  `HeaterShaker` step without `KeepShaking`). The same applies to plates in the
+  slots **next to** the Heater-Shaker.
+- To bring plates there with the gripper instead, declare only the adapter.
+  A recipe that uses the module gets the adapters the HAL mounts on it, and a
+  `MoveLabware` onto the module puts the plate on its adapter - so the recipe
+  page's treatments, which move plates "onto HeaterShaker", land at the right
+  height. Which plates an adapter accepts is Opentrons' own rule (the Corning
+  96 is refused on `opentrons_96_flat_bottom_adapter`, accepted on
+  `opentrons_universal_flat_adapter`); the run stops with a clear error.
+- **From the recipe page:** a **🌡️ Keep warm** treatment on **Target plate**
+  (with temperature, and RPM/duration to shake) moves the plate onto the
+  Heater-Shaker and leaves it there; later phases pipette into it on the
+  module, and the cleanup step it adds at the end turns the heater off and
+  returns the plate. The cleanup follows the step's target. With a reagent
+  as target the same goes for its reservoir (pipetted from on the module).
+- **One plate on a module at a time.** When a later phase keeps another
+  reservoir warm, the one on the module goes back to its own slot first (no
+  question asked - that slot is free, it came from there); a cleanup whose
+  reservoir already went home only switches the module off.
+
+All of this was checked in `opentrons_simulate` (pipette then shake; shake then
+pipette; pipette then move off; move on, pipette, shake, move off; the recipe
+page's own output for `PROVA_OPENTRONS.xlsx` kept warm and shaken on the
+module, with and without an adapter; pipetting while shaking is refused), not
+yet on the robot - except: **on the robot, 2026-11-20**, a Corning 96 source
+moved onto the universal adapter, held at 30 °C and shaken, 50 µL pipetted
+from it on the module into a plate in D2, then heater off and returned
+(`Library/Recipes/TEST_HS_pipetta_su_heater_shaker.json`). The two-reservoir
+swap is simulator-only.
+
 ### Reservoir Sharing
 
 When multiple reagents share a physical reservoir type, the Recipe Generator's `reservoirType`/`numReservoirs` controls (also UI-wired) split reagent distribution into per-reservoir chunks automatically, inserting a module treatment between chunks if configured.

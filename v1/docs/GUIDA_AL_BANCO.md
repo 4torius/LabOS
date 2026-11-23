@@ -90,6 +90,40 @@ hardware, il deck fisico, l'analisi Tecan.
 5. **Apri il pannello "Notes"**, è chiuso di default: lì dentro c'è la stima
    dello scarto per reagente, cioè quanto in eccesso devi preparare davvero.
 
+**Tenere al caldo una reservoir (o la piastra) sull'heater-shaker e pipettare
+da lì.** Prima della fase (o all'inizio) aggiungi **🌡️ Keep warm**, scegli
+come destinazione il reagente (la sua reservoir) o **Target plate**, imposta temperatura e, se vuoi, velocità e durata dello shake.
+Il gripper porta la piastra sull'heater-shaker, la scalda (e la agita per la
+durata impostata), poi **la lascia lì in temperatura**: le fasi successive
+pipettano direttamente su di lei. In fondo alla ricetta compare da solo il
+passo che spegne il riscaldamento e la riporta nel suo slot.
+
+- Il fermo della piastra (latch) si chiude e si apre da solo quando serve.
+- **Non spuntare "Keep shaking"** se poi devi pipettare: il robot rifiuta di
+  pipettare sull'heater-shaker, **e sugli slot accanto**, mentre agita.
+- Se sull'heater-shaker è montato un adattatore, dichiaralo nella
+  configurazione hardware (3b): la piastra verrà posata sull'adattatore.
+
+Provato sul robot vero il 20/11/2026 (sorgente tenuta a 30 °C sull'heater-shaker, 50 µL pipettati da lì).
+
+**Più reservoir.** Puoi tenere al caldo una reservoir in una fase e un'altra
+in una fase successiva: quando arriva il turno della seconda, quella che sta
+sull'heater-shaker **torna da sola nel suo slot di partenza**, poi la seconda
+ci va sopra. Non ti chiede niente. A fine ricetta il riscaldamento si spegne e
+quella rimasta sopra torna al suo posto.
+
+**Quali piastre ci stanno sopra.** Sull'adattatore universale Opentrons accetta
+solo le piastre che lo dichiarano: Corning 96, NEST 12 e NEST 8 reservoir
+22 mL, NEST 24 10,4 mL, alcune 96/384. Le altre il run le rifiuta prima di
+muovere, con un errore chiaro.
+
+**Le piastre da 48 (Corning 48 e EuroClone 48 custom)** ora sono accettate,
+ma con un'altezza di appoggio **stimata** (9,17 mm, ricavata dai dati Opentrons
+della Corning 48 su un altro adattatore). **Prima di usarle davvero** lancia
+`ExecuteRecipe` con `TEST_HS_48_altezza` (una Corning 48 vuota in A2): la punta
+scende a 5 mm e poi a 2 mm dal fondo del pozzetto A1, con 20 s di pausa per
+guardare. Se le distanze non tornano, l'altezza va corretta nella definizione.
+
 ### 3b · La configurazione hardware (HAL)
 
 > **Il pezzo che manca più spesso.** La ricetta non nomina slot, nomina
@@ -104,6 +138,10 @@ hardware, il deck fisico, l'analisi Tecan.
    giusta. La scelta resta anche dopo un riavvio.
 3. Se compare un avviso che il robot era offline, riapplica la configurazione
    dopo averlo visto online: l'attivazione non gli è arrivata.
+4. **Cosa sta sopra un modulo.** Clic sullo slot del modulo → sezione *On top
+   of the module*: l'adattatore montato (se c'è) e, se vuoi, la piastra che ci
+   sta sopra già all'inizio. Una piastra messa lì si usa nelle ricette con il
+   suo nome come tutte le altre.
 
 ### 3c · Allestire il deck e verificarlo
 
@@ -140,6 +178,10 @@ un heater-shaker che non c'è, il comando si rifiuta di partire e te lo dice.
 4. Nel comando `RunMeasurement` il protocollo si sceglie da una **tendina**:
    l'elenco viene letto da `Library/Analysis/` e non si scrive niente a mano. Se
    il file nuovo non compare, ricarica la pagina.
+5. **Tipo di piastra** (`PlateType`), facoltativo: vuoto usa la piastra salvata
+   nel `.mdfx`; altrimenti scegli dalla tendina una delle piastre di
+   `Library/Labware/Plates/` misurabili col Tecan. Per aggiungerne una:
+   [NUOVA_PIASTRA.md](NUOVA_PIASTRA.md).
 
 > **Se lo salti:** i parametri della misura vivono solo nel file `.mdfx`. LabOS
 > non ha modo di impostare una lunghezza d'onda, sceglie solo quale protocollo
@@ -335,8 +377,9 @@ su quello del laboratorio.
    con `MobileBase`, `Arm`, `Gripper`, `Camera`: la base va attivata prima del
    braccio, e `ActivateAllHardware` lo garantisce da solo.
 3. Lancia `RefreshTasks`: riporta dal robot la lista dei task e la salva in
-   `Library/MobileTasks/`. Senza questo la tendina dei task nel workflow builder
-   è vuota.
+   `Library/MobileTasks/`. Nella console della Dashboard compare quanti task ha
+   trovato e quali. Senza questo la tendina dei task nel workflow builder è
+   vuota (o ferma all'ultima lista salvata).
 4. Aggiungi uno step `ExecuteTask` per ogni task e scegli il `TaskId` dalla
    tendina. Il parametro `ExecutionMode` esiste ancora nell'interfaccia ma il
    server attuale **lo ignora**: lascialo su `Normal` e non aspettarti che
@@ -346,16 +389,16 @@ su quello del laboratorio.
 > piastra dall'Opentrons al Tecan sono **quattro step** di workflow, in
 > quest'ordine:
 >
-> `go_to_opentrons` → `pick_from_opentrons` → `go_to_tecan` → `place_on_TC`
+> `go_to_opentrons` → `pick_from_opentrons` → `go_to_tecan` → `place_on_Tecan`
 >
 > Al contrario, dal Tecan all'Opentrons: `go_to_tecan` → `pick_from_tecan` →
-> `go_to_opentrons` → `place_on_OT`.
+> `go_to_opentrons` → `place_on_Opentrons`.
 
 ### I task che esistono davvero
 
-Letti dal robot. La piastra viaggia appoggiata alla **dima** a bordo: prenderla
-da uno strumento significa anche posarla sulla dima, e posarla su uno strumento
-significa anche riportare il braccio a riposo.
+Letti dal robot con `RefreshTasks` il 20/11/2026. I task si creano e si
+rinominano sul robot: **fa fede la lista che `RefreshTasks` scrive nella console**,
+non questa tabella. La piastra viaggia appoggiata alla **dima** a bordo.
 
 | Task | Cosa fa |
 |------|---------|
@@ -363,11 +406,18 @@ significa anche riportare il braccio a riposo.
 | `go_to_tecan` | Naviga fino al Tecan |
 | `pick_from_opentrons` | Prende la piastra dall'Opentrons e la appoggia sulla dima |
 | `pick_from_tecan` | Prende la piastra dal Tecan |
-| `place_on_OT` | Posa la piastra sull'Opentrons, poi il braccio torna a riposo |
-| `place_on_TC` | Posa la piastra sul Tecan, poi il braccio torna a riposo |
+| `place_on_Opentrons` | Posa la piastra sull'Opentrons |
+| `place_on_Tecan` | Posa la piastra sul Tecan |
 | `pick_from_dima` | Riprende la piastra dalla dima, se è rimasta lì |
-| `docking` | Torna alla stazione di ricarica |
-| `TestFra`, `BaseFra` | Taratura dei frame. Non servono all'uso normale |
+| `go_to_docking` | Torna alla stazione di ricarica |
+| `go_to_WorkingPose` | Porta il robot nella posa di lavoro |
+| `PRENDERE_PIASTRA_FRA`, `CAPPA` | Task creati in laboratorio: cosa fanno lo sa chi li ha creati |
+
+Nomi cambiati rispetto alle versioni precedenti di questa guida: `place_on_OT` →
+`place_on_Opentrons`, `place_on_TC` → `place_on_Tecan`, `docking` →
+`go_to_docking`. `TestFra` e `BaseFra` non ci sono più. Un workflow salvato con i
+nomi vecchi va ricontrollato: il `TaskId` è un codice, e quello di un task
+ricreato è diverso.
 
 ### Prima di farlo muovere davvero
 
