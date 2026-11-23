@@ -28,7 +28,7 @@
         "exhaustive": true,
         "by_parameter": {
           "TaskName": {
-            "place_on_OT": {
+            "place_on_Opentrons": {
               "claims": [
                 "deck:opentrons"
               ],
@@ -44,7 +44,7 @@
                 "slot:opentrons"
               ]
             },
-            "place_on_TC": {
+            "place_on_Tecan": {
               "claims": [
                 "tray:tecan"
               ],
@@ -60,11 +60,10 @@
                 "slot:tecan"
               ]
             },
-            "go_to_Opentrons": [],
             "go_to_opentrons": [],
-            "go_to_Tecan": [],
-            "Docking": [],
-            "WorkingPose": [],
+            "go_to_tecan": [],
+            "go_to_docking": [],
+            "go_to_WorkingPose": [],
             "pick_from_dima": []
           }
         }

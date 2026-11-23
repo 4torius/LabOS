@@ -15,9 +15,9 @@ python -m sim_lab run Test_Bicocca
 COMPLETED: 19 completed, 0 failed, 0 skipped, 14.6s
 
 What the instruments did (seconds from the first command):
-    0.00 ->   0.80  ok       mobile.ExecuteTask(WorkingPose)
+    0.00 ->   0.80  ok       mobile.ExecuteTask(go_to_WorkingPose)
     ...
-    3.64 ->   4.44  ok       mobile.ExecuteTask(place_on_OT)
+    3.64 ->   4.44  ok       mobile.ExecuteTask(place_on_Opentrons)
     4.50 ->   6.51  ok       opentrons.ExecuteRecipe(test_6.json)
     ...
 Commands on different instruments in flight together: 0
@@ -39,7 +39,7 @@ their own clocks, and overlaps are read from that — not from the scheduler's
 account of what it scheduled.
 
 What it therefore cannot tell you is whether a declaration is **physically
-true**. If `place_on_OT` really reaches into the deck and the catalog does not
+true**. If `place_on_Opentrons` really reaches into the deck and the catalog does not
 say so, the simulated lab will happily run it alongside a recipe and report no
 overlap. That is what the bench is for.
 
@@ -160,9 +160,16 @@ python labos.py resources
 ```
 
 `resources` must show no problems, nothing under "declaring nothing", and the
-robot's `place_on_OT` claiming `deck:opentrons`. If a task is reported as not
+robot's `place_on_Opentrons` claiming `deck:opentrons`. If a task is reported as not
 declared, add it to the robot's `library_catalog.json` — with what it really
-occupies.
+occupies. Two tasks on the robot are deliberately **not** declared,
+`CAPPA` and `PRENDERE_PIASTRA_FRA`: nobody here knows what they reach into, so a
+workflow using them is refused until whoever created them declares it.
+
+After any `RefreshTasks` that shows renamed or re-taught tasks,
+`python -m pytest tests/unit/test_workflow_tasks_declared.py` says which saved
+workflow names a task the robot no longer has, or one the catalog does not
+declare.
 
 **2b. The Tecan's bridge.** The launcher rebuilds `TecanSiLA2Server.exe` when
 its C# sources are newer than the binary, so the PC needs the .NET SDK
@@ -192,7 +199,7 @@ either order — the Tecan's `PlateOut` and `PlateIn`. They must run one after
 the other. Then two that share nothing — `PlateOut` and the Opentrons `Home`.
 They must overlap.
 
-**6. The real one.** `place_on_OT` and a recipe with no `DependsOn` between
+**6. The real one.** `place_on_Opentrons` and a recipe with no `DependsOn` between
 them, empty labware, a hand on the hardware stop. The recipe must not start
 until the arm is clear.
 

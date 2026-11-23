@@ -1,7 +1,7 @@
 """Task names in the catalog, task ids on the wire.
 
 `library_catalog.json` declares what each robot task occupies under the task's
-*name* - `place_on_OT`, `pick_from_tecan` - because that is what a person can
+*name* - `place_on_Opentrons`, `pick_from_tecan` - because that is what a person can
 read and review, and it survives a task being taught again.
 
 A workflow does not send the name. It sends `TaskId`, the opaque id the robot's

@@ -1,23 +1,35 @@
 [
   {
-    "id": "dygcadtafeigrdpnagztfdaececwotng",
-    "name": "WorkingPose"
+    "id": "cxnqdonaaeasamlnxeffccbezmydxdwz",
+    "name": "PRENDERE_PIASTRA_FRA"
   },
   {
-    "id": "xkeqmsaqecoaxpclaefiebursgddrbff",
-    "name": "go_to_Tecan"
+    "id": "dxvadjvibetfceaybdybsqsqcmzimdfj",
+    "name": "place_on_Opentrons"
   },
   {
-    "id": "cupxdbwrdxtcbxrybaxekhfticuhekfc",
-    "name": "go_to_Opentrons"
+    "id": "eebzzndefzrktbrqbammcxfjikbmqpaa",
+    "name": "go_to_tecan"
+  },
+  {
+    "id": "efbcereejzxiycfdvccbbcvealdjdmbf",
+    "name": "go_to_docking"
+  },
+  {
+    "id": "eymnhzlaatqzobafwcbbdazkrcwninfh",
+    "name": "go_to_WorkingPose"
   },
   {
     "id": "fanlcmxjczrdjkjwvaqdqxradfcrbexh",
     "name": "pick_from_dima"
   },
   {
-    "id": "dxvadjvibetfceaybdybsqsqcmzimdfj",
-    "name": "place_on_OT"
+    "id": "lfesetxmbebkafkuxdsyebfckfnaaghe",
+    "name": "CAPPA"
+  },
+  {
+    "id": "nnegfohactaltbahtxfnejaaycafskaq",
+    "name": "pick_from_tecan"
   },
   {
     "id": "qufptekmeyycpckgbvcpudozfdfkctba",
@@ -25,18 +37,10 @@
   },
   {
     "id": "rxzeeofvewbamneadgvdafucvefidfgb",
-    "name": "place_on_TC"
+    "name": "place_on_Tecan"
   },
   {
-    "id": "nnegfohactaltbahtxfnejaaycafskaq",
-    "name": "pick_from_tecan"
-  },
-  {
-    "id": "opfbbcdwkdfpvftuabototnjcedyqfbf",
-    "name": "Docking"
-  },
-  {
-    "id": "obwlfxkzdevvwcueaeekddafeaabccyb",
+    "id": "udgldepfnpbyteaybebdacfyxdifdygt",
     "name": "go_to_opentrons"
   }
 ]

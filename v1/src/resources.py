@@ -5,7 +5,7 @@ not say what those commands physically occupy, and the orchestrator needs that
 to know when two steps must not run together.
 
 The instrument is not a fine enough unit. The mobile robot's tasks are called
-`place_on_OT`, `pick_from_tecan`, `place_on_tecan` — a step **on the robot**
+`place_on_Opentrons`, `pick_from_tecan`, `place_on_Tecan` — a step **on the robot**
 that occupies **somebody else's deck or tray**. Keyed on the step's instrument,
 a lock would let the Opentrons pipette into a deck with an arm inside it and be
 working as designed while it happened. So the unit of exclusion is the physical
@@ -79,7 +79,7 @@ class CommandResources:
     Three different things, kept apart because they end at different moments:
 
     * `claims` - occupied **while the command runs** and given back when it
-      returns. The arm inside the deck during `place_on_OT`.
+      returns. The arm inside the deck during `place_on_Opentrons`.
     * `acquires` - taken when the command runs and **kept after it returns**,
       until some later step releases it. The plate sitting in the reader once
       the robot has put it there.

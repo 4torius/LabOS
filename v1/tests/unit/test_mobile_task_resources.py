@@ -23,7 +23,7 @@ def _module():
 
 
 CATALOG = json.loads((MOBILE_DIR / "library_catalog.json").read_text(encoding="utf-8"))
-TASKS = [("id-place-ot", "place_on_OT"), ("id-go", "go_to_Tecan"),
+TASKS = [("id-place-ot", "place_on_Opentrons"), ("id-go", "go_to_tecan"),
          ("id-new", "place_on_incubator")]
 
 

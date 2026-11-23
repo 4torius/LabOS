@@ -86,9 +86,9 @@ class TestTheShippedDeclarationsAreCoherent:
 class TestTheHazardTheModelExistsFor:
 
     @pytest.mark.parametrize("task,instrument,command", [
-        ("place_on_OT", "opentrons", "ExecuteRecipe"),
+        ("place_on_Opentrons", "opentrons", "ExecuteRecipe"),
         ("pick_from_opentrons", "opentrons", "ExecuteRecipe"),
-        ("place_on_TC", "tecan", "RunMeasurement"),
+        ("place_on_Tecan", "tecan", "RunMeasurement"),
         ("pick_from_tecan", "tecan", "PlateIn"),
     ])
     def test_a_transport_task_excludes_the_instrument_it_reaches_into(
@@ -100,7 +100,7 @@ class TestTheHazardTheModelExistsFor:
         )
 
     @pytest.mark.parametrize("task", [
-        "go_to_Opentrons", "go_to_Tecan", "Docking", "WorkingPose", "pick_from_dima",
+        "go_to_opentrons", "go_to_tecan", "go_to_docking", "go_to_WorkingPose", "pick_from_dima",
     ])
     def test_moving_without_entering_anything_blocks_nobody(self, topology, task):
         moving = topology.claims_for("mobile", "ExecuteTask", {"TaskName": task})
@@ -150,8 +150,8 @@ class TestAPlateStaysWhereTheRobotPutIt:
     """
 
     @pytest.mark.parametrize("place,pick,slot", [
-        ("place_on_OT", "pick_from_opentrons", "slot:opentrons"),
-        ("place_on_TC", "pick_from_tecan", "slot:tecan"),
+        ("place_on_Opentrons", "pick_from_opentrons", "slot:opentrons"),
+        ("place_on_Tecan", "pick_from_tecan", "slot:tecan"),
     ])
     def test_placing_acquires_and_picking_releases(self, topology, place, pick, slot):
         assert topology.acquires_for("mobile", "ExecuteTask", {"TaskName": place}) == {slot}
@@ -167,7 +167,7 @@ class TestAPlateStaysWhereTheRobotPutIt:
         assert topology.unlisted_for(
             "mobile", "ExecuteTask", {"TaskId": "an-id-the-server-did-not-expand"})
         assert not topology.unlisted_for(
-            "mobile", "ExecuteTask", {"TaskName": "go_to_Tecan"})
+            "mobile", "ExecuteTask", {"TaskName": "go_to_tecan"})
 
 
 class TestEveryInstrumentSaysHowItIsStopped:

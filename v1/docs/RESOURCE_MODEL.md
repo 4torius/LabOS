@@ -28,10 +28,10 @@ That last one is the case that matters most, and it is the reason an
 instrument-level lock is not enough. Look at what the robot's tasks are called:
 
 ```
-place_on_OT      pick_from_OT      pick_from_tecan      place_on_tecan
+place_on_Opentrons      pick_from_opentrons      pick_from_tecan      place_on_Tecan
 ```
 
-`place_on_OT` is a step **on the mobile robot** that physically occupies **the
+`place_on_Opentrons` is a step **on the mobile robot** that physically occupies **the
 Opentrons' deck**. Nothing in the step says "opentrons". A lock keyed on the
 step's instrument would let the Opentrons pipette into a deck that has a robot
 arm in it, and would be working exactly as designed while it happened.
@@ -47,7 +47,7 @@ it is already expressible as `DependsOn`, and it is unused.
 
 **Physical exclusion** — what cannot happen at the same time. This is safety.
 It does not belong in the workflow: the person composing an experiment should
-not have to know that the robot's `place_on_OT` and the Opentrons' recipe
+not have to know that the robot's `place_on_Opentrons` and the Opentrons' recipe
 contend for one space. It belongs with the instruments, and it did not exist.
 
 They are independent, and both are required:
@@ -58,7 +58,7 @@ They are independent, and both are required:
 | **with dependencies** | right sequence, **collisions inside a wave** | correct |
 
 Resources alone do not save `Test_Bicocca`: with claims but no dependencies,
-`pick_from_tecan` could be serialised *before* `place_on_OT`. No collision, and
+`pick_from_tecan` could be serialised *before* `place_on_Opentrons`. No collision, and
 a ruined experiment that reports success — the worst available outcome. Hence
 both halves of this document: declared claims, and a real DAG.
 
@@ -107,9 +107,9 @@ is not in this repository.
       "claims": ["instrument:mobile"],
       "by_parameter": {
         "TaskName": {
-          "place_on_OT":     ["deck:opentrons"],
-          "pick_from_OT":    ["deck:opentrons"],
-          "place_on_tecan":  ["tray:tecan"],
+          "place_on_Opentrons":     ["deck:opentrons"],
+          "pick_from_opentrons":    ["deck:opentrons"],
+          "place_on_Tecan":  ["tray:tecan"],
           "pick_from_tecan": ["tray:tecan"]
         }
       }
@@ -249,7 +249,7 @@ the following were nonetheless true, and each is now pinned by a test.
 **The robot's claims never reached the executor.** The executor keyed its
 topology by the name a server announces; `resources.declare.mobile` is keyed
 the way a workflow is written. The robot announces `GoFaGo Mobile Robot`, so
-its declaration matched nothing and `place_on_OT` claimed only the robot — the
+its declaration matched nothing and `place_on_Opentrons` claimed only the robot — the
 motivating exclusion of this whole document did not engage. The Settings page,
 which keyed by `mobile`, showed it as applied; the tests used doubles whose key
 and name were the same string. Executor, API and CLI now build the topology
@@ -279,7 +279,7 @@ second instrument would have freed the first one's resource.
 The section below records why a hold on `PlateIn` was backed out. The overload
 it describes was a symptom; the hold was on the wrong command. `PlateIn` moves
 the tray. The plate enters the reader when the **robot** puts it there
-(`place_on_TC`) and leaves when the robot picks it up (`pick_from_tecan`) —
+(`place_on_Tecan`) and leaves when the robot picks it up (`pick_from_tecan`) —
 with a hold on `PlateIn` there was even a gap, between the robot letting go and
 the tray closing, in which a plate sat on a tray the model called free.
 
@@ -288,16 +288,16 @@ So there are two resources, and the robot's tasks declare the second:
 | | what it is | who occupies it | for how long |
 |---|---|---|---|
 | `tray:tecan` | the tray as a space something moves in | `PlateIn`, `PlateOut`, a measurement, the robot's place/pick | one step (`claims`) |
-| `slot:tecan` | "a plate is in the reader" | acquired by `place_on_TC`, released by `pick_from_tecan` | from one step to another (`acquires` / `releases`) |
+| `slot:tecan` | "a plate is in the reader" | acquired by `place_on_Tecan`, released by `pick_from_tecan` | from one step to another (`acquires` / `releases`) |
 
 ```json
 "ExecuteTask": {
   "claims": ["instrument:mobile"],
   "exhaustive": true,
   "by_parameter": { "TaskName": {
-    "place_on_TC":     { "claims": ["tray:tecan"], "acquires": ["slot:tecan"] },
+    "place_on_Tecan":     { "claims": ["tray:tecan"], "acquires": ["slot:tecan"] },
     "pick_from_tecan": { "claims": ["tray:tecan"], "releases": ["slot:tecan"] },
-    "go_to_Tecan":     []
+    "go_to_tecan":     []
   } }
 }
 ```

@@ -361,7 +361,7 @@ _TASK_NAMES: Optional[Dict[str, str]] = None
 
 
 def _task_names() -> Dict[str, str]:
-    """Robot task id -> its name, so a timeline reads `place_on_OT`."""
+    """Robot task id -> its name, so a timeline reads `place_on_Opentrons`."""
     global _TASK_NAMES
     if _TASK_NAMES is None:
         try:
