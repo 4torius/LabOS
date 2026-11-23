@@ -43,7 +43,10 @@
     {
       "hint": "reader_plate_type",
       "display_name": "Plate type",
-      "json_keys_file": "Library/Analysis/PlateTypes.json",
+      "json_files": "Library/Labware/Plates/*.plate.json",
+      "require_field": "tecan_plate_name",
+      "value_field": "id",
+      "label_field": "display_name",
       "parameter_names": [
         "PlateType"
       ]

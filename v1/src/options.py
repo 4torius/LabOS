@@ -105,6 +105,9 @@ class OptionSource:
     * `file` + `list_key`  — a list inside one JSON file
     * `file` + `items_key` — a list of objects inside one JSON file, each
                              rendered through `key_template` (e.g. `{channel}/{model}`)
+    * `json_files`      — one value per matching JSON file (`value_field`,
+                          default `id`), leaving out files where
+                          `require_field` is missing or empty
     * `json_keys_file`  — the top-level keys of one JSON file
     * `folder` (+ `extension`) — the file stems in a folder
     """
@@ -116,6 +119,9 @@ class OptionSource:
     list_key: str = ""
     items_key: str = ""
     key_template: str = ""
+    json_files: str = ""
+    value_field: str = ""
+    require_field: str = ""
     json_keys_file: str = ""
     folder: str = ""
     extension: str = ""
@@ -162,6 +168,19 @@ class OptionSource:
                         out.append(rendered)
                 return out
             return []
+
+        if self.json_files:
+            found = []
+            for path in sorted(base_dir.glob(self.json_files)):
+                data = _read_json(path)
+                if not isinstance(data, Mapping):
+                    continue
+                if self.require_field and not data.get(self.require_field):
+                    continue
+                value = data.get(self.value_field or "id")
+                if value not in (None, "") and str(value) not in found:
+                    found.append(str(value))
+            return found
 
         if self.json_keys_file:
             data = _read_json(base_dir / self.json_keys_file)
@@ -237,6 +256,14 @@ def parse_source(raw: Any, label: str, problems: List[str]) -> Optional[OptionSo
         problems.append(f"{label}.file needs either list_key or items_key")
         return None
 
+    if raw.get("json_files"):
+        pattern = _path("json_files")
+        if pattern is None:
+            return None
+        return OptionSource(json_files=pattern,
+                            value_field=str(raw.get("value_field") or ""),
+                            require_field=str(raw.get("require_field") or ""))
+
     if raw.get("json_keys_file"):
         path = _path("json_keys_file")
         return OptionSource(json_keys_file=path) if path else None
@@ -252,7 +279,7 @@ def parse_source(raw: Any, label: str, problems: List[str]) -> Optional[OptionSo
 
     problems.append(
         f"{label} declares no source (expected one of: values, glob, file, "
-        "json_keys_file, folder)")
+        "json_files, json_keys_file, folder)")
     return None
 
 
@@ -370,7 +397,8 @@ def parse_hint(raw: Any, origin: str, problems: List[str]) -> Optional[HintSpec]
                 if source is not None:
                     sources.append(source)
     elif any(raw.get(k) is not None
-             for k in ("values", "options", "glob", "file", "json_keys_file")) or (
+             for k in ("values", "options", "glob", "file", "json_files",
+                       "json_keys_file")) or (
                  raw.get("folder") and not spec.snapshot_folder):
         source = parse_source(raw, label, problems)
         if source is not None:

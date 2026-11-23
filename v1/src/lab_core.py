@@ -215,6 +215,9 @@ class ExecutionResult:
     error: str = ""
     #: Picker lists re-read after this command, so the UI can refresh them.
     options_changed: List[str] = field(default_factory=list)
+    #: Of those, the lists this command is declared to refresh
+    #: (`refreshed_by`), whose contents are shown to the operator.
+    options_reported: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict:
         return {
@@ -365,6 +368,9 @@ class LabCore:
         # ids: the picker has to show "pick_from_tecan" while submitting the
         # task id, so the label has to survive the trip.
         self._dynamic_options_cache: Dict[str, List[Dict[str, Any]]] = {}
+        # Whether that last list came from the server (True) or the snapshot
+        # on disk because the server could not be read (False).
+        self._dynamic_options_from_server: Dict[str, bool] = {}
 
         # Discovery cache: avoid re-running gRPC discovery on every API call
         self._last_discovery_time: float = 0.0
@@ -432,6 +438,12 @@ class LabCore:
             # entry's `folder` is the offline snapshot, not a source.
             return [o["id"] for o in self._dynamic_option_items(ui_hint)]
 
+        # One option per Library JSON file carrying a field (the plates with a
+        # tecan_plate_name, which the plate reader accepts). Read here rather
+        # than by the registry because the labels come from the same files.
+        if dropdown_config.get("json_files"):
+            return [o["value"] for o in self._json_file_options(dropdown_config)]
+
         spec = self._hint_registry().get(ui_hint)
         if spec is not None:
             if spec.dynamic:
@@ -480,6 +492,8 @@ class LabCore:
         if declared.get("options") is not None and labels:
             return [{"value": v, "label": labels.get(v, v) or v}
                     for v in declared["options"]]
+        if declared.get("json_files"):
+            return self._json_file_options(declared)
 
         # A property-backed list arrives as {id, name}: the mobile robot's
         # tasks are ids like "bsffcndfdddchyrrbefecdanbcscfddy", and an
@@ -528,6 +542,37 @@ class LabCore:
         if not isinstance(data, dict):
             return []
         return [k for k, v in data.items() if not k.startswith("_") and isinstance(v, dict)]
+
+    def _json_file_options(self, declared: Dict[str, Any]) -> List[Dict[str, str]]:
+        """{value,label} for each Library JSON file matching `json_files`.
+
+        `value_field` (default "id") is the value; `label_field` (default
+        "display_name") what the operator reads; `require_field`, if given,
+        leaves out files where it is missing or empty. Files outside Library/
+        are never read.
+        """
+        pattern = str(declared.get("json_files") or "").replace("\\", "/")
+        if not pattern:
+            return []
+        library = get_settings(self.base_dir).library_dir.resolve()
+        value_field = str(declared.get("value_field") or "id")
+        label_field = str(declared.get("label_field") or "display_name")
+        required = declared.get("require_field")
+        options: Dict[str, Dict[str, str]] = {}
+        for path in sorted(self.base_dir.glob(pattern)):
+            try:
+                path.resolve().relative_to(library)
+                data = json.loads(path.read_text(encoding="utf-8-sig"))
+            except (ValueError, OSError):
+                continue
+            if not isinstance(data, dict) or (required and not data.get(required)):
+                continue
+            value = data.get(value_field)
+            if value in (None, "") or str(value) in options:
+                continue
+            options[str(value)] = {"value": str(value),
+                                   "label": str(data.get(label_field) or value)}
+        return list(options.values())
 
     #: File a property-backed option list is kept in, inside its declared folder.
     OPTIONS_SNAPSHOT = "_options.json"
@@ -644,13 +689,50 @@ class LabCore:
                 logger.warning("Reading %s.%s for '%s' failed: %s",
                                instrument.name, prop_name, ui_hint, exc)
 
+        from_server = options is not None
         if options is None:
             options = self._read_options_snapshot(folder) if folder else []
         elif folder:
             self._write_options_snapshot(folder, options)
 
         self._dynamic_options_cache[ui_hint] = options
+        self._dynamic_options_from_server[ui_hint] = from_server
         return options
+
+    def is_refreshed_by(self, ui_hint: str, command_id: str) -> bool:
+        """Whether `command_id` is the command declared to refresh this list.
+
+        Declared as `refreshed_by` (a name or a list) next to
+        `source_property` - the mobile robot's tasks by RefreshTasks. Every
+        command re-reads the list (the core cannot know which one changed
+        it), but only the declared one reports what it found.
+        """
+        source = self._option_source(ui_hint)
+        if source is None:
+            return False
+        declared = source[1].get("refreshed_by") or []
+        if isinstance(declared, str):
+            declared = [declared]
+        return command_id.lower() in {str(c).lower() for c in declared}
+
+    def describe_options(self, hints: List[str]) -> List[Dict[str, Any]]:
+        """What the last read of each picker found, for showing to the operator.
+
+        A command like the mobile robot's RefreshTasks only answers "success";
+        the list it changed is what the operator actually wants to see.
+        `from_server` is False when the server could not be read and the
+        names are the snapshot kept on disk.
+        """
+        described = []
+        for hint in hints:
+            items = self._dynamic_options_cache.get(hint) or []
+            described.append({
+                "hint": hint,
+                "count": len(items),
+                "names": [str(o.get("name") or o.get("id")) for o in items],
+                "from_server": self._dynamic_options_from_server.get(hint, False),
+            })
+        return described
 
     @staticmethod
     def _options_from_value(value: Any, value_field: str, label_field: str) -> List[Dict[str, Any]]:
@@ -855,9 +937,16 @@ class LabCore:
             if lib_type.get("json_keys_file"):
                 self._ui_dropdowns[hint] = {"json_keys_file": lib_type["json_keys_file"]}
                 continue
+            if lib_type.get("json_files"):
+                self._ui_dropdowns[hint] = {
+                    k: lib_type[k] for k in ("json_files", "value_field", "label_field", "require_field")
+                    if lib_type.get(k)
+                }
+                continue
             if lib_type.get("source_property"):
                 self._ui_dropdowns[hint] = {
-                    k: lib_type[k] for k in ("source_property", "value_field", "label_field", "folder")
+                    k: lib_type[k] for k in ("source_property", "value_field", "label_field",
+                                             "folder", "refreshed_by")
                     if lib_type.get(k)
                 }
                 continue
@@ -1232,6 +1321,8 @@ class LabCore:
                 options_changed = await self._refresh_options_owned_by(instrument)
             except Exception as e:
                 self._log("warning", f"Could not refresh option lists from {instrument.name}: {e}")
+            options_reported = [h for h in options_changed
+                                if self.is_refreshed_by(h, command_id)]
 
             # Notify complete
             if self._on_command_complete:
@@ -1244,6 +1335,7 @@ class LabCore:
                 message=f"{command_id} completed",
                 data=result.data,
                 options_changed=options_changed,
+                options_reported=options_reported,
             )
             
         except Exception as e:

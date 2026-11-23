@@ -9,7 +9,7 @@ This guide covers deploying LabOS on a new Windows computer from scratch.
 | Requirement | Notes |
 |-------------|-------|
 | Windows 10/11 64-bit | The orchestrator and all servers except the mobile robot run on Windows |
-| Python 3.10 or 3.11 | 3.12 is not recommended (some grpcio wheels lag behind) |
+| Python 3.14 | The lab PC runs 3.14.5 with the current `requirements.txt`; that is the tested version. (An earlier note said 3.10/3.11 and advised against 3.12 - no longer true of this installation.) |
 | Git | To clone the repository |
 | Tecan iControl software | Required for the Tecan C# bridge (Tecan SDK) |
 | Opentrons App | Required for Opentrons Flex |
@@ -59,7 +59,7 @@ The bridge is a C# console application (`TecanSiLA2Server.exe`) that wraps the T
 
 TecanBridge requires `Tecan.iControl.SDK.dll` installed with iControl. If it is not in the GAC, copy it into the project directory alongside the exe.
 
-**Important**: `src/bridge_launcher.py` always prefers the **Release** build over Debug if both exist. If you rebuild only in Debug configuration while an older Release exe is still present, your changes will silently not run — either rebuild Release too, or delete the stale Release build. See [SERVERS.md](SERVERS.md#bridge-binary-is-up-to-date) for a concrete case of this happening.
+**Important**: `SiLA2/TecanM200SiLA2Server/src/bridge_launcher.py` always prefers the **Release** build over Debug if both exist. If you rebuild only in Debug configuration while an older Release exe is still present, your changes will silently not run — either rebuild Release too, or delete the stale Release build. See [SERVERS.md](SERVERS.md#bridge-binary-is-up-to-date) for a concrete case of this happening.
 
 ---
 
@@ -167,8 +167,14 @@ From the dashboard:
 
 From the API:
 ```powershell
-Invoke-RestMethod http://localhost:5000/api/instruments | ConvertTo-Json -Depth 3
-Invoke-RestMethod http://localhost:5000/api/status
+Invoke-RestMethod http://localhost:5000/api/instruments/commands | ConvertTo-Json -Depth 3
+Invoke-RestMethod http://localhost:5000/api/devices
+```
+
+Or from `v1/`, without the web interface:
+```powershell
+python labos.py status        # which servers and interfaces are up
+python labos.py instruments   # what each one offers
 ```
 
 ---

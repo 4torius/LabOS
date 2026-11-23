@@ -42,7 +42,9 @@ First time on a new computer? See [SETUP.md](SETUP.md) for the full deployment g
 | [ADDING_NEW_INSTRUMENT.md](ADDING_NEW_INSTRUMENT.md) | Step-by-step guide to integrating a new instrument |
 | [SETUP.md](SETUP.md) | New PC deployment: prerequisites, venv, configuration, what to change |
 | [OPERATIONS.md](OPERATIONS.md) | Commissioning, day-to-day use, troubleshooting |
+| [NUOVA_PIASTRA.md](NUOVA_PIASTRA.md) | Adding a plate (Italian): one name for Opentrons, Tecan and the HAL; custom Opentrons definitions; Tecan `.pdfx` |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Code organization, testing, style guide, adding commands |
+| [REFACTOR_PLAN.md](REFACTOR_PLAN.md) | History: the September 2026 structural refactor and why each change was made. Names things that no longer exist, on purpose |
 
 ---
 
@@ -54,6 +56,6 @@ First time on a new computer? See [SETUP.md](SETUP.md) for the full deployment g
 
 **HAL**: The Hardware Abstraction Layer separates liquid-handling recipes (what to do) from deck configurations (where things physically are). The active HAL config persists across restarts; `ExecuteRecipe` always runs against whatever HAL is currently active.
 
-**DAG Workflows**: Experiments are JSON files with steps and dependencies. Independent steps execute concurrently. Validation runs before any instrument is touched. There is no loop/conditional control-flow mechanism — only linear DAG dependencies.
+**DAG Workflows**: Experiments are JSON files with steps and dependencies. Steps run one after another; independent steps run concurrently only when `workflow.parallel_execution` is on in `lab_config.yaml` (it is off). Validation runs before any instrument is touched. There is no loop/conditional control-flow mechanism — only linear DAG dependencies.
 
 **Recipe Generator**: Converts an Excel pipetting plan into a recipe (+ optional workflow + HAL) automatically — the normal way to create a recipe, rather than hand-writing JSON.

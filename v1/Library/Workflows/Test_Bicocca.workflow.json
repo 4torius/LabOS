@@ -169,7 +169,7 @@
       "Action": "RunMeasurement",
       "Parameters": {
         "ProtocolFile": "Script1",
-        "PlateType": "greiner_96_wellplate_flat",
+        "PlateType": "greiner_96_wellplate_382ul",
         "PlateID": "",
         "SampleSetID": ""
       },

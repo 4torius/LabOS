@@ -1,0 +1,34 @@
+{
+  "name": "Workflow_04_SPAAC_PROVA_All Reagents",
+  "version": "1.0",
+  "created": "2026-11-11T14:39:48.448482",
+  "description": "Generated workflow with 1 recipe(s), total wait time: 0 min",
+  "steps": [
+    {
+      "id": 1,
+      "type": "opentrons_protocol",
+      "name": "Execute 04_SPAAC_PROVA_All Reagents",
+      "server": "opentrons",
+      "command": "RunRecipe",
+      "parameters": {
+        "recipe": "04_SPAAC_PROVA_All Reagents",
+        "hal_config": "Standard_Flex_Setup"
+      },
+      "timeout_minutes": 60
+    },
+    {
+      "id": 2,
+      "type": "extension_point",
+      "name": "Final Analysis (optional)",
+      "server": "tecan",
+      "command": null,
+      "parameters": {},
+      "description": "Add final Tecan analysis commands here"
+    }
+  ],
+  "metadata": {
+    "total_recipes": 1,
+    "total_wait_seconds": 0,
+    "source": "excel_recipe_parser"
+  }
+}

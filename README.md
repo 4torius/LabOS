@@ -49,7 +49,7 @@ All documentation lives in [v1/docs/](v1/docs/):
 
 **HAL**: The Hardware Abstraction Layer separates liquid-handling recipes (what to do) from deck configurations (where things are). The same recipe runs on any compatible deck layout.
 
-**DAG Workflows**: Experiments are JSON files with steps and dependencies. Independent steps execute concurrently. Full validation runs before any instrument is touched.
+**DAG Workflows**: Experiments are JSON files with steps and dependencies. Steps run one after another; independent steps run concurrently only when `workflow.parallel_execution` is on in `lab_config.yaml` (it is off). Full validation runs before any instrument is touched.
 
 ---
 

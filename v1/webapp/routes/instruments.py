@@ -271,10 +271,22 @@ def create_instruments_router(
                 })
 
                 if result.options_changed:
-                    # A list a picker offers was re-read after this command
-                    # (the mobile robot's tasks after RefreshTasks, say).
+                    # A list a picker offers was re-read after this command,
+                    # so open pages refresh their pickers.
                     await ws_manager.broadcast({"type": "options_changed",
                                                 "hints": result.options_changed})
+                # Only the command declared to refresh a list (refreshed_by:
+                # the mobile robot's RefreshTasks) reports what it found - it
+                # answers just "success" otherwise. Returned to the page that
+                # ran it, which writes it in its command log.
+                options_read = core.describe_options(result.options_reported)
+                for o in options_read:
+                        state.add_log(
+                            "info" if o["from_server"] else "warning",
+                            f"{command}: {o['hint']} - {o['count']} found"
+                            + ("" if o["from_server"] else " (server not read, last saved list)")
+                            + (": " + ", ".join(o["names"]) if o["names"] else ""),
+                            actual_id)
 
                 # Plate ID assignment + DB population (Database page: Plates tab).
                 # Same shared logic the workflow-execution path uses, so a
@@ -299,7 +311,10 @@ def create_instruments_router(
                     device=actual_id, command=command, params=params,
                     result={"data": result.data, "message": result.message}, success=True
                 )
-                return {"status": "completed", "result": result.data or "OK"}
+                response = {"status": "completed", "result": result.data or "OK"}
+                if options_read:
+                    response["options"] = options_read
+                return response
             else:
                 if actual_id in state.devices:
                     state.devices[actual_id].status = "error"
@@ -470,7 +485,7 @@ def create_instruments_router(
 
     # /api/tecan/protocols, /api/tecan/plate-types and /api/mobile/tasks used
     # to be here: one instrument's lists, each fetched by name by the pages.
-    # The servers now declare them (the plate types as json_keys_file, the
+    # The servers now declare them (the plate types as json_files, the
     # mobile robot's tasks as a source_property), so they arrive with the
     # parameter as `options`, and /api/dynamic-options/{ui_hint} serves any
     # property-backed list without knowing whose it is.

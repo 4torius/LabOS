@@ -1,0 +1,46 @@
+{
+  "id": "custom_fra_euroclone_primo_48_wellplate_1.5ml_flat",
+  "display_name": "EuroClone Primo 48 Well 1.5 mL Flat (custom)",
+  "category": "wellPlate",
+  "format": "48Standard",
+  "rows": 6,
+  "columns": 8,
+  "total_wells": 48,
+  "row_labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F"
+  ],
+  "max_volume_ul": 1000,
+  "working_volume_ul": 800,
+  "well_shape": "circular",
+  "well_diameter_mm": 10.6,
+  "well_depth_mm": 17.5,
+  "dimensions_mm": {
+    "x": 127.2,
+    "y": 85.0,
+    "z": 20.2
+  },
+  "bottom_type": "flat",
+  "instruments": [
+    "opentrons",
+    "tecan"
+  ],
+  "opentrons_load_name": "custom_fra_euroclone_primo_48_wellplate_1.5ml_flat",
+  "tecan_compatible": true,
+  "tecan_plate_name": "GRE48ft",
+  "brand": "EuroClone",
+  "catalog_numbers": [
+    "ET3048"
+  ],
+  "tags": [
+    "cell-culture",
+    "48-well",
+    "flat-bottom",
+    "custom"
+  ],
+  "notes": "Scheda LabOS della definizione Opentrons custom Library/Labware/Reservoirs/custom_fra_euroclone_primo_48_wellplate_1.5ml_flat.json (volumi e misure presi da li'). Tenuta distinta da euroclone_48_wellplate_1500ul perche' le misure differiscono (127.2x85.0 contro 127.6x85.4 mm, 1000 contro 1500 uL). Tecan: GRE48ft e' la definizione installata piu' vicina (A1 18.38/10.24 mm contro 17.5/10.6 stimati, passo 13 mm uguale); le coordinate della piastra sono STIME, verificare con una misura di prova (docs/NUOVA_PIASTRA.md, punto 3d). AVVERTENZA dalla definizione Opentrons (spostata qui perche' lo schema Opentrons non ammette 'notes'): x/y/z/diameter/depth here are UNVERIFIED PLACEHOLDERS on a standard 48-well SBS grid, not a real measured/manufacturer geometry file. IMPORTANT (changed 2026-09-03, Fase B): this file is now pushed directly to the real robot via POST /runs/{id}/labware_definitions before a run starts (server.py::_collect_custom_labware_definitions) - it is NO LONGER just a Python-side planning aid, the robot uses THESE coordinates to physically address this labware. Safe for a load-only test (loading a labware definition causes no movement by itself), but do NOT use this labware for real pipetting/aspirate/dispense until the geometry here is replaced with real calibrated measurements - the placeholder x/y/z could send the pipette to the wrong position inside a well, or miss it entirely. total_wells/totalLiquidVolume set to 48 wells x 1500uL based on: (1) the pre-existing Library/Labware/Plates/primo_euroclone_46_wellplate_1000.plate.json entry, which already independently states 48 wells / 1500uL / EuroClone id 'euroclone_48_wellplate_1500ul', despite this file's own name saying '46_wellplate_1000'; (2) EuroClone's official Primo 48-well plate (cat. ET3048) datasheet, which lists a nominal volume of 1.55 mL/well. These two sources converge on 48 wells / ~1.5mL, contradicting the '46/1000' in the filename - flagged to the user, not silently assumed."
+}

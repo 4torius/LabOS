@@ -258,6 +258,45 @@
                         </select>
                     </div>
                     <div class="alert alert-info py-2 small" id="moduleNote" style="display:none"></div>
+
+                    <!-- What sits on the module: adapter and/or plate -->
+                    <div id="moduleStackFields">
+                        <hr>
+                        <div class="fw-semibold small mb-2">On top of the module <span class="text-muted fw-normal">(optional)</span></div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-7">
+                                <label class="form-label small mb-1">Adapter</label>
+                                <select class="form-select form-select-sm" id="moduleAdapterLoad" onchange="renderModuleStackHint()">
+                                    <option value="">— None —</option>
+                                    <option value="opentrons_96_flat_bottom_adapter">96 flat bottom adapter</option>
+                                    <option value="opentrons_96_pcr_adapter">96 PCR adapter</option>
+                                    <option value="opentrons_96_deep_well_adapter">96 deep well adapter</option>
+                                    <option value="opentrons_universal_flat_adapter">Universal flat adapter</option>
+                                </select>
+                            </div>
+                            <div class="col-5">
+                                <label class="form-label small mb-1">Adapter name</label>
+                                <input type="text" class="form-control form-control-sm" id="moduleAdapterName" placeholder="e.g. HS_Adapter">
+                            </div>
+                        </div>
+                        <div class="row g-2 mb-1">
+                            <div class="col-7">
+                                <label class="form-label small mb-1">Plate on it at the start</label>
+                                <select class="form-select form-select-sm" id="moduleLabwareLoad" onchange="renderModuleStackHint()">
+                                    <option value="">— None —</option>
+                                </select>
+                            </div>
+                            <div class="col-5">
+                                <label class="form-label small mb-1">Plate name</label>
+                                <input type="text" class="form-control form-control-sm" id="moduleLabwareName" placeholder="e.g. Piastra_HS">
+                            </div>
+                        </div>
+                        <div class="form-text" id="moduleStackHint">
+                            Recipes pipette into the plate by its name. Before pipetting the Heater-Shaker latch is closed
+                            automatically; pipetting while it shakes is refused by the robot. To bring plates here with the
+                            gripper instead, set only the adapter and move them onto the adapter's name.
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Trash fields -->
@@ -306,8 +345,12 @@
 
 const FLEX_SLOTS = ['A1','A2','A3','B1','B2','B3','C1','C2','C3','D1','D2','D3'];
 
-// slot → assignment: { type:'labware'|'module'|'trash', logicalName, loadName?, tecanPlateName?, moduleType? }
+// slot → assignment: { type:'labware'|'module'|'trash', logicalName, loadName?, tecanPlateName?, moduleType?,
+//   adapter?:{name,loadName}, onTop?:{name,loadName} }  (adapter/onTop: what sits on a module)
 let deckState = {};
+// Labware entries this page cannot show on the deck (e.g. a plate on an
+// adapter that sits in a slot): kept as they are, so saving never drops them.
+let extraLabware = {};
 let catalogs = { pipettes: [], modules: [], labware: [] };
 let currentFilename = null;
 let activeFilename = null;
@@ -358,6 +401,22 @@ function buildLabwareSelect() {
         });
         sel.innerHTML += '</optgroup>';
     });
+
+    // Plates that can sit on a module
+    const onModule = document.getElementById('moduleLabwareLoad');
+    onModule.innerHTML = '<option value="">— None —</option>';
+    catalogs.labware.filter(l => l.category === 'plate').forEach(l => {
+        onModule.innerHTML += `<option value="${LabOS.escapeAttr(l.load_name)}">${LabOS.escapeHtml(l.display_name)}</option>`;
+    });
+}
+
+// Suggest names for what is put on a module, from the module's name.
+function renderModuleStackHint() {
+    const mod = document.getElementById('moduleLogicalName').value.trim() || 'Module';
+    const adapterName = document.getElementById('moduleAdapterName');
+    const plateName = document.getElementById('moduleLabwareName');
+    if (document.getElementById('moduleAdapterLoad').value && !adapterName.value) adapterName.value = mod + '_Adapter';
+    if (document.getElementById('moduleLabwareLoad').value && !plateName.value) plateName.value = mod + '_Plate';
 }
 
 // ── Configs list ──────────────────────────────────────────────────────────
@@ -414,13 +473,32 @@ async function loadConfig(filename) {
 
     // Rebuild deck state from JSON
     deckState = {};
+    extraLabware = {};
+    const moduleSlot = {};
     Object.entries(data.Modules  || {}).forEach(([name, v]) => {
         deckState[v.Slot] = { type: 'module', logicalName: name, moduleType: v.Type };
+        moduleSlot[name] = v.Slot;
     });
     Object.entries(data.Trash || {}).forEach(([name, v]) => {
         deckState[v.Slot] = { type: 'trash', logicalName: name };
     });
-    Object.entries(data.Labware || {}).forEach(([name, v]) => {
+    const labware = Object.entries(data.Labware || {});
+    // On a module: an adapter (or a plate straight on it) ...
+    labware.filter(([, v]) => v.OnModule).forEach(([name, v]) => {
+        const mod = deckState[moduleSlot[v.OnModule]];
+        if (!mod) { extraLabware[name] = v; return; }
+        if (/adapter/i.test(v.LoadName || '') && !mod.adapter) mod.adapter = { name, loadName: v.LoadName };
+        else if (!mod.onTop) mod.onTop = { name, loadName: v.LoadName };
+        else extraLabware[name] = v;
+    });
+    // ... then a plate on that adapter.
+    labware.filter(([, v]) => v.OnAdapter).forEach(([name, v]) => {
+        const mod = Object.values(deckState).find(a => a.type === 'module' && a.adapter && a.adapter.name === v.OnAdapter);
+        if (mod && !mod.onTop) mod.onTop = { name, loadName: v.LoadName };
+        else extraLabware[name] = v;
+    });
+    labware.filter(([, v]) => !v.OnModule && !v.OnAdapter).forEach(([name, v]) => {
+        if (!v.Slot) { extraLabware[name] = v; return; }
         deckState[v.Slot] = { type: 'labware', logicalName: name, loadName: v.LoadName, tecanPlateName: v.TecanPlateName || '' };
     });
 
@@ -433,6 +511,7 @@ async function loadConfig(filename) {
 function newConfig() {
     currentFilename = null;
     deckState = {};
+    extraLabware = {};
     document.getElementById('configName').value = '';
     document.getElementById('configDesc').value = '';
     document.getElementById('pipetteLeft').value = '';
@@ -500,12 +579,15 @@ function renderDeck() {
         if (isTc) skipNext = 'B1';
 
         const tecanBadge = a?.tecanPlateName ? '<span class="badge bg-success" style="font-size:.55rem">Tecan ✅</span>' : '';
+        const stack = a?.type === 'module' && (a.onTop || a.adapter)
+            ? `<span class="slot-detail">↑ ${LabOS.escapeHtml((a.onTop || a.adapter).name)}</span>` : '';
 
         div.innerHTML = `
             <span class="slot-label">${slot}${isTc ? '+B1' : ''}</span>
             <i class="bi ${icon} slot-icon"></i>
             <span class="slot-name">${a?.logicalName || ''}</span>
             ${a?.loadName ? `<span class="slot-detail">${a.loadName.split('_').slice(0,3).join('_')}…</span>` : ''}
+            ${stack}
             ${tecanBadge}
         `;
         grid.appendChild(div);
@@ -525,7 +607,10 @@ function renderAssignTable() {
     }
     tbody.innerHTML = entries.sort((a, b) => a[0].localeCompare(b[0])).map(([slot, a]) => {
         const typeIcon = a.type === 'labware' ? 'bi-layers text-primary' : a.type === 'module' ? 'bi-cpu text-danger' : 'bi-trash3 text-secondary';
-        const detail = a.loadName || a.moduleType || 'TrashBin';
+        let detail = a.loadName || a.moduleType || 'TrashBin';
+        if (a.type === 'module' && (a.adapter || a.onTop)) {
+            detail += ' + ' + [a.adapter?.name, a.onTop?.name].filter(Boolean).join(' + ');
+        }
         const tecan = a.tecanPlateName ? `<span class="badge bg-success ms-1" style="font-size:.6rem">Tecan</span>` : '';
         return `
             <tr>
@@ -563,6 +648,10 @@ function openSlotModal(slot) {
     document.getElementById('moduleLogicalName').value = a?.logicalName || '';
     document.getElementById('moduleType').value = a?.moduleType || '';
     document.getElementById('trashLogicalName').value = a?.logicalName || 'Bin_Standard';
+    document.getElementById('moduleAdapterLoad').value = a?.adapter?.loadName || '';
+    document.getElementById('moduleAdapterName').value = a?.adapter?.name || '';
+    document.getElementById('moduleLabwareLoad').value = a?.onTop?.loadName || '';
+    document.getElementById('moduleLabwareName').value = a?.onTop?.name || '';
 
     onSlotTypeChange();
     onLoadNameChange();
@@ -632,6 +721,18 @@ function applySlot() {
         const logicalName = document.getElementById('moduleLogicalName').value.trim() || 'Module';
         const moduleType = document.getElementById('moduleType').value;
         deckState[slot] = { type: 'module', logicalName, moduleType };
+        const adapterLoad = document.getElementById('moduleAdapterLoad').value;
+        const plateLoad = document.getElementById('moduleLabwareLoad').value;
+        if (adapterLoad) {
+            deckState[slot].adapter = {
+                name: document.getElementById('moduleAdapterName').value.trim() || logicalName + '_Adapter',
+                loadName: adapterLoad };
+        }
+        if (plateLoad) {
+            deckState[slot].onTop = {
+                name: document.getElementById('moduleLabwareName').value.trim() || logicalName + '_Plate',
+                loadName: plateLoad };
+        }
         // Thermocycler auto-fills B1
         if (moduleType === 'thermocyclerModuleV2') {
             delete deckState['B1'];  // B1 is occupied, not separately assignable
@@ -664,6 +765,12 @@ function buildHalJson() {
     Object.entries(deckState).forEach(([slot, a]) => {
         if (a.type === 'module') {
             cfg.Modules[a.logicalName] = { Type: a.moduleType, Slot: slot };
+            if (a.adapter) cfg.Labware[a.adapter.name] = { LoadName: a.adapter.loadName, OnModule: a.logicalName };
+            if (a.onTop) {
+                cfg.Labware[a.onTop.name] = a.adapter
+                    ? { LoadName: a.onTop.loadName, OnAdapter: a.adapter.name }
+                    : { LoadName: a.onTop.loadName, OnModule: a.logicalName };
+            }
         } else if (a.type === 'trash') {
             cfg.Trash[a.logicalName] = { Type: 'TrashBin', Slot: slot };
         } else if (a.type === 'labware') {
@@ -671,6 +778,9 @@ function buildHalJson() {
             if (a.tecanPlateName) entry.TecanPlateName = a.tecanPlateName;
             cfg.Labware[a.logicalName] = entry;
         }
+    });
+    Object.entries(extraLabware).forEach(([name, v]) => {
+        if (!(name in cfg.Labware)) cfg.Labware[name] = v;
     });
     return cfg;
 }

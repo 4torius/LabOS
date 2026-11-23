@@ -157,7 +157,8 @@ class ServerCatalog:
         folders: List[Tuple[str, str]] = []
         for entry in self.library_types:
             folder = entry.get("folder")
-            if folder and not entry.get("values") and not entry.get("json_keys_file"):
+            if (folder and not entry.get("values") and not entry.get("json_keys_file")
+                    and not entry.get("json_files")):
                 folders.append(("library", folder))
         for result in self.result_types:
             folders.append(("results", result.folder))

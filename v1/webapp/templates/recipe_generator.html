@@ -732,12 +732,18 @@ function addTreatment(sheetIdx, scope, groupIdx, presetKey) {
         };
         // "Keep warm" needs a matching cleanup step later, or the source
         // stays on the heater-shaker (and heated) for the rest of the run.
+        // The two are linked: the cleanup follows the step's target and goes
+        // with it - otherwise picking "Target plate" afterwards left the
+        // cleanup moving the first reagent onto a module the plate occupies.
         if (preset.cleanup_params) {
+            const link = 'kw' + Date.now() + Math.floor(Math.random() * 1e6);
+            treatment.cleanup_link = link;
             getTreatmentList(sheetIdx, 'post', -1).push({
                 kind: preset.kind,
                 target: treatment.target,
                 params: { ...preset.cleanup_params },
-                return_after: true
+                return_after: true,
+                linked_to: link
             });
         }
     } else {
@@ -748,8 +754,19 @@ function addTreatment(sheetIdx, scope, groupIdx, presetKey) {
     renderGroups(sheetIdx);
 }
 
+// The "Keep warm" cleanup created together with this step, if any.
+function linkedCleanup(sheetIdx, treatment) {
+    if (!treatment || !treatment.cleanup_link) return null;
+    const post = getTreatmentList(sheetIdx, 'post', -1);
+    const idx = post.findIndex(t => t.linked_to === treatment.cleanup_link);
+    return idx === -1 ? null : { post, idx };
+}
+
 function removeTreatment(sheetIdx, scope, groupIdx, tIdx) {
-    getTreatmentList(sheetIdx, scope, groupIdx).splice(tIdx, 1);
+    const list = getTreatmentList(sheetIdx, scope, groupIdx);
+    const cleanup = linkedCleanup(sheetIdx, list[tIdx]);
+    list.splice(tIdx, 1);
+    if (cleanup) cleanup.post.splice(cleanup.idx, 1);
     renderGroups(sheetIdx);
 }
 
@@ -761,7 +778,13 @@ function updateTreatmentKind(sheetIdx, scope, groupIdx, tIdx, kind) {
 }
 
 function updateTreatmentTarget(sheetIdx, scope, groupIdx, tIdx, target) {
-    getTreatmentList(sheetIdx, scope, groupIdx)[tIdx].target = target;
+    const treatment = getTreatmentList(sheetIdx, scope, groupIdx)[tIdx];
+    treatment.target = target;
+    const cleanup = linkedCleanup(sheetIdx, treatment);
+    if (cleanup) {
+        cleanup.post[cleanup.idx].target = target;
+        renderGroups(sheetIdx);
+    }
 }
 
 function updateTreatmentReturn(sheetIdx, scope, groupIdx, tIdx, checked) {

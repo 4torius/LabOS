@@ -178,6 +178,9 @@ ui_dropdowns:
     value_field: TaskId
     label_field: TaskName
     folder: Library/MobileTasks
+    # The command whose result is the list: after it, the tasks found are
+    # written to the command log. Other commands re-read the list silently.
+    refreshed_by: RefreshTasks
 
 webapp:
   nodered_url: http://localhost:1880
