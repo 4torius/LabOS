@@ -61,9 +61,36 @@ def cmd_up(args) -> int:
     return 0
 
 
+def _report(lab: SimLab, result) -> dict:
+    """What happened, as data: for the workflow editor's "try it" button."""
+    intervals = lab.intervals()
+    origin = intervals[0].start if intervals else 0.0
+    return {
+        "success": bool(result.success),
+        "completed": result.steps_completed,
+        "failed": result.steps_failed,
+        "skipped": result.steps_skipped,
+        "duration_seconds": round(result.duration_seconds, 2),
+        "errors": list(result.errors),
+        "timeline": [{
+            "instrument": i.server, "command": i.command, "label": str(i),
+            "start": round(i.start - origin, 3),
+            "end": None if i.end == float("inf") else round(i.end - origin, 3),
+            "status": i.status,
+        } for i in intervals],
+        "together": len(lab.ran_together()),
+        "clashes": [{"a": str(a), "b": str(b), "resource": r}
+                    for a, b, r in lab.any_overlap()],
+    }
+
+
 def cmd_run(args) -> int:
     with _lab(args) as lab:
         result = asyncio.run(lab.run_workflow(args.workflow))
+        if args.json:
+            report = _report(lab, result)
+            print(json.dumps(report))
+            return 2 if report["clashes"] else (0 if result.success else 1)
         print()
         print(f"{'COMPLETED' if result.success else 'FAILED'}: "
               f"{result.steps_completed} completed, {result.steps_failed} failed, "
@@ -100,6 +127,8 @@ def main() -> int:
     commands.add_parser("up", help="start the simulated instruments and wait")
     run = commands.add_parser("run", help="run one workflow against them")
     run.add_argument("workflow", help="a name in Library/Workflows, or a path")
+    run.add_argument("--json", action="store_true",
+                     help="print one JSON object (result, timeline, overlaps) instead of text")
     args = parser.parse_args()
     if str(V1_DIR) not in sys.path:
         sys.path.insert(0, str(V1_DIR))

@@ -58,6 +58,12 @@ overlap. That is what the bench is for.
 
 ## Using it
 
+**From the Workflow Builder.** The **Simulate** button runs the workflow being
+edited, unsaved, and draws what each simulated instrument did. It starts and
+stops its own simulated lab, so it cannot run while `python -m sim_lab up` is
+running.
+
+
 **One workflow, from a terminal**
 
 ```bash

@@ -277,6 +277,63 @@
         });
     };
 
+    // ── Choosing what a step waits for ──────────────────────────────────────
+    // Ticking boxes in a list of every step is how DependsOn used to be set,
+    // and nearly every real case is one of four shapes. Each is one click:
+    //
+    //   after  — waits for the step written just before it (the default)
+    //   with   — waits for what the previous step waits for, so it runs
+    //            alongside it: the branch of a fork
+    //   join   — waits for every open branch above it: where two plates meet
+    //   start  — waits for nothing
+    //
+    // Anything else is "custom", chosen by clicking steps in the list.
+
+    function _sorted(list) {
+        return (list || []).slice().sort(function (a, b) { return a - b; });
+    }
+    function _same(a, b) {
+        a = _sorted(a); b = _sorted(b);
+        return a.length === b.length && a.every(function (n, i) { return n === b[i]; });
+    }
+
+    /**
+     * Positions (1-based) above `index` that nothing else above it waits for:
+     * the ends of the branches still open at that point.
+     */
+    LabOS.openBranches = function (steps, index) {
+        var waitedFor = {};
+        for (var i = 0; i < index; i++) {
+            (steps[i].dependsOn || []).forEach(function (n) { waitedFor[n] = true; });
+        }
+        var open = [];
+        for (var p = 1; p <= index; p++) if (!waitedFor[p]) open.push(p);
+        return open;
+    };
+
+    /** The dependency list a mode gives the step at `index` (0-based). */
+    LabOS.dependenciesFor = function (steps, index, mode) {
+        if (index <= 0 || mode === 'start') return [];
+        if (mode === 'after') return [index];
+        if (mode === 'with') return _sorted(steps[index - 1].dependsOn);
+        if (mode === 'join') return LabOS.openBranches(steps, index);
+        return _sorted(steps[index].dependsOn);
+    };
+
+    /** Which of the four shapes a step's dependencies are, or 'custom'. */
+    LabOS.dependencyMode = function (steps, index) {
+        var deps = steps[index].dependsOn || [];
+        if (index === 0) return deps.length ? 'custom' : 'start';
+        var order = ['after', 'with', 'join', 'start'];
+        for (var i = 0; i < order.length; i++) {
+            var candidate = LabOS.dependenciesFor(steps, index, order[i]);
+            // "with" a step that itself starts at the beginning is just "start".
+            if (order[i] === 'with' && candidate.length === 0) continue;
+            if (_same(deps, candidate)) return order[i];
+        }
+        return 'custom';
+    };
+
     // ── Page log ────────────────────────────────────────────────────────────
     // Several pages have a scrolling activity log with the same shape.
 

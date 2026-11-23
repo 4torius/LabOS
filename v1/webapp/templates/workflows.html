@@ -213,6 +213,39 @@
         border-color: #0d6efd;
         background: #1a2a4e;
     }
+
+    /* What the selected step waits for, and picking it by clicking */
+    .workflow-step.waited-for { outline: 2px dashed #ffc107; outline-offset: 2px; }
+    .workflow-steps.picking .workflow-step:not(.selected) { cursor: crosshair; }
+    .workflow-steps.picking .workflow-step:not(.selected):hover { outline: 2px solid #ffc107; outline-offset: 2px; }
+    .workflow-step.has-error { border-color: #dc3545; }
+    .step-errors { color: #ea868f; font-size: 11px; margin-top: 2px; }
+    .step-wait { font-size: 10px; padding: 1px 6px; border-radius: 9px; margin-left: 6px;
+                 background: rgba(255,193,7,.15); color: #ffc107; white-space: nowrap; }
+    .step-wait.start { background: rgba(13,202,240,.15); color: #0dcaf0; }
+    .step-wait.robot { background: rgba(173,181,189,.15); color: #adb5bd; }
+    .step-connector.parallel { border-left-style: dashed !important; opacity: .7; }
+    .step-connector-label { font-size: 10px; color: #adb5bd; margin-left: 30px; }
+
+    .dep-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+    .dep-modes .btn { font-size: 11px; padding: 4px 6px; text-align: left; }
+    .dep-help { font-size: 11px; color: #adb5bd; margin-top: 6px; }
+
+    .validation-bar { font-size: 12px; padding: 6px 10px; border-radius: 6px; margin-bottom: 8px;
+                      display: flex; gap: 8px; align-items: flex-start; }
+    .validation-bar.ok { background: rgba(25,135,84,.15); color: #75b798; }
+    .validation-bar.bad { background: rgba(220,53,69,.15); color: #ea868f; }
+    .validation-bar.warn { background: rgba(255,193,7,.12); color: #ffda6a; }
+    .validation-bar ul { margin: 0; padding-left: 16px; }
+
+    .sim-lanes { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+    .sim-lane { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: center; }
+    .sim-lane-name { font-size: 12px; color: #adb5bd; overflow: hidden; text-overflow: ellipsis; }
+    .sim-track { position: relative; height: 24px; background: rgba(255,255,255,.04); border-radius: 4px; }
+    .sim-bar { position: absolute; top: 2px; height: 20px; border-radius: 3px; font-size: 10px;
+               overflow: hidden; white-space: nowrap; padding: 2px 4px; color: #fff;
+               background: #0d6efd; min-width: 3px; }
+    .sim-bar.failed { background: #dc3545; }
     
     /* Step colors */
     .workflow-step.opentrons { border-left: 4px solid #0d6efd; }
@@ -360,6 +393,9 @@
             <button class="btn btn-outline-danger" id="btnClear" title="Clear the canvas">
                 <i class="bi bi-trash"></i> Clear
             </button>
+            <button class="btn btn-outline-info" id="btnSimulate" title="Run this workflow in the simulated lab: no instrument moves">
+                <i class="bi bi-cpu"></i> Simulate
+            </button>
             <button class="btn btn-success" id="btnRun">
                 <i class="bi bi-play-fill"></i> Run
             </button>
@@ -392,6 +428,7 @@
                 <i class="bi bi-arrows-move"></i>
                 <p>Drag instruments here<br>to create the workflow</p>
             </div>
+            <div class="validation-bar" id="validationBar" hidden></div>
             <div class="workflow-steps" id="workflowSteps"></div>
         </div>
         
@@ -403,6 +440,30 @@
                     <i class="bi bi-hand-index"></i>
                     <p>Select a step<br>to configure it</p>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Simulation Modal -->
+<div class="modal fade" id="simulateModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-cpu me-2"></i>Simulated lab</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex gap-2 align-items-center mb-2">
+                    <label class="small text-muted" for="simConcurrency">Steps at once</label>
+                    <select class="form-select form-select-sm" id="simConcurrency" style="width:auto">
+                        <option value="0" selected>No cap (what dependencies and resources allow)</option>
+                        <option value="1">1 (as the bench runs today)</option>
+                    </select>
+                    <button class="btn btn-sm btn-info" id="btnSimulateRun"><i class="bi bi-play"></i> Run simulation</button>
+                </div>
+                <p class="small text-muted mb-2">Stand-in servers on this PC, with the real instruments' commands and declarations. Nothing reaches the lab. Durations are not real: what matters is the order and what overlaps.</p>
+                <div id="simulateResult"></div>
             </div>
         </div>
     </div>
@@ -1011,6 +1072,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     document.getElementById('btnClear').addEventListener('click', clearWorkflowCanvas);
     document.getElementById('btnLoad').addEventListener('click', loadWorkflow);
     document.getElementById('btnRun').addEventListener('click', runWorkflow);
+    document.getElementById('btnSimulate').addEventListener('click', openSimulation);
+    document.getElementById('btnSimulateRun').addEventListener('click', runSimulation);
     document.getElementById('btnConfirmRun').addEventListener('click', confirmExecution);
     document.getElementById('btnTemplates').addEventListener('click', openTemplatesModal);
     document.getElementById('btnExport').addEventListener('click', exportWorkflow);
@@ -1160,6 +1223,7 @@ function removeStep(index) {
     workflowSteps.splice(index, 1);
     workflowSteps.forEach(function (step, i) { step.dependsOn = remapped[i]; });
     selectedStepIndex = null;
+    pickingDeps = false;
     renderSteps();
     renderProperties();
 }
@@ -1182,6 +1246,7 @@ function moveStep(index, direction) {
 }
 
 function selectStep(index) {
+    if (index !== selectedStepIndex) pickingDeps = false;
     selectedStepIndex = index;
     renderSteps();
     renderProperties();
@@ -1220,16 +1285,28 @@ function renderSteps() {
         }
         if (!cmd) cmd = inst.commands[0] || { id: step.command, label: step.command + ' (non disponibile)' };
         
-        // Add connector line (except for first)
+        // Connector: solid when this step waits for the one above it,
+        // dashed (and said in words) when it does not - it may run alongside.
         if (i > 0) {
+            var follows = (step.dependsOn || []).indexOf(i) !== -1 || _impliedOf(i).indexOf(i) !== -1;
             var connector = document.createElement('div');
-            connector.className = 'step-connector';
+            connector.className = 'step-connector' + (follows ? '' : ' parallel');
             stepsContainer.appendChild(connector);
+            if (!follows) {
+                var connectorLabel = document.createElement('div');
+                connectorLabel.className = 'step-connector-label';
+                connectorLabel.textContent = 'does not wait for step ' + i;
+                stepsContainer.appendChild(connectorLabel);
+            }
         }
         
         // Create step element
         var stepEl = document.createElement('div');
-        stepEl.className = 'workflow-step ' + step.type + (selectedStepIndex === i ? ' selected' : '');
+        var waitedFor = selectedStepIndex !== null && selectedStepIndex !== i &&
+            (workflowSteps[selectedStepIndex].dependsOn || []).indexOf(i + 1) !== -1;
+        var stepErrors = _errorsOf(i);
+        stepEl.className = 'workflow-step ' + step.type + (selectedStepIndex === i ? ' selected' : '') +
+            (waitedFor ? ' waited-for' : '') + (stepErrors.length ? ' has-error' : '');
         if (INSTRUMENTS[step.type] && !INSTRUMENTS[step.type].isUtility) {
             stepEl.style.borderLeft = '4px solid ' + _instrumentBorder(inst);
         }
@@ -1254,9 +1331,7 @@ function renderSteps() {
             paramsDisplay = paramParts.join(', ');
         }
         
-        var depsBadge = (step.dependsOn && step.dependsOn.length > 0) ?
-            ' <span class="badge bg-warning text-dark" title="Depends on steps: ' + step.dependsOn.join(', ') + '" style="font-size:9px;">' +
-            '<i class="bi bi-diagram-2"></i> ' + step.dependsOn.join(',') + '</span>' : '';
+        var depsBadge = _waitBadge(i);
 
         stepEl.innerHTML =
             '<div class="step-number">' + (i + 1) + '</div>' +
@@ -1266,6 +1341,7 @@ function renderSteps() {
             '<div class="step-content">' +
                 '<div class="step-title">' + inst.name + ' - ' + cmd.label + depsBadge + '</div>' +
                 '<div class="step-details">' + (paramsDisplay || 'No parameters') + '</div>' +
+                (stepErrors.length ? '<div class="step-errors">' + stepErrors.map(_escapeHtml).join('<br>') + '</div>' : '') +
             '</div>' +
             '<div class="step-actions">' +
                 '<button class="btn btn-sm btn-outline-secondary btn-move-up" data-index="' + i + '" ' + (i === 0 ? 'disabled' : '') + '>' +
@@ -1287,6 +1363,12 @@ function renderSteps() {
     for (var s = 0; s < allSteps.length; s++) {
         allSteps[s].addEventListener('click', function(e) {
             var idx = parseInt(this.getAttribute('data-index'));
+            // While choosing dependencies, a click on another step adds or
+            // removes it instead of selecting it.
+            if (pickingDeps && selectedStepIndex !== null && idx !== selectedStepIndex) {
+                _toggleDependency(selectedStepIndex, idx + 1);
+                return;
+            }
             selectStep(idx);
         });
     }
@@ -1316,7 +1398,9 @@ function renderSteps() {
         });
     }
 
+    stepsContainer.classList.toggle('picking', !!pickingDeps);
     _saveBuilderState();
+    _scheduleValidation();
 }
 
 // ============================================================================
@@ -1734,7 +1818,7 @@ function saveWorkflow() {
         var step = workflowSteps[i];
         steps.push({
             StepNumber: i + 1,
-            Instrument: INSTRUMENTS[step.type].name,
+            Instrument: _instrumentFor(step),
             Action: step.command,
             Parameters: _stepParams(step),
             DependsOn: step.dependsOn || []
@@ -1743,6 +1827,7 @@ function saveWorkflow() {
     
     var workflow = {
         WorkflowName: name,
+        SchemaVersion: '1.0',
         Steps: steps
     };
     
@@ -1940,7 +2025,7 @@ function _buildSteps() {
         var params = _stepParams(step);
         return {
             StepNumber: i + 1,
-            Instrument: (INSTRUMENTS[step.type] || {}).name || step.type,
+            Instrument: _instrumentFor(step),
             Action: step.command,
             Parameters: params,
             DependsOn: step.dependsOn || []
@@ -2095,7 +2180,7 @@ function saveCurrentAsTemplate() {
         var steps = workflowSteps.map(function(step, i) {
             return {
                 StepNumber: i + 1,
-                Instrument: (INSTRUMENTS[step.type] || {}).name || step.type,
+                Instrument: _instrumentFor(step),
                 Action: step.command,
                 Parameters: _stepParams(step),
                 DependsOn: step.dependsOn || []
@@ -2153,7 +2238,7 @@ function exportWorkflow() {
     var steps = workflowSteps.map(function(step, i) {
         return {
             StepNumber: i + 1,
-            Instrument: (INSTRUMENTS[step.type] || {}).name || step.type,
+            Instrument: _instrumentFor(step),
             Action: step.command,
             Parameters: _stepParams(step),
             DependsOn: step.dependsOn || []
@@ -2204,38 +2289,279 @@ function importWorkflow(e) {
 }
 
 // ============================================================================
-// DEPENDSON — integrated into properties panel and step save (Settimana 9)
+// WHAT A STEP WAITS FOR
 // ============================================================================
-function _buildDependsOnHTML(stepIndex) {
-    if (workflowSteps.length < 2) return '';
-    var step = workflowSteps[stepIndex];
-    var deps = step.dependsOn || [];
-    var options = '';
-    workflowSteps.forEach(function(s, i) {
-        if (i === stepIndex) return;
-        var inst = INSTRUMENTS[s.type] || {};
-        var label = 'Step ' + (i + 1) + ': ' + (inst.name || s.type) + ' / ' + s.command;
-        var checked = deps.indexOf(i + 1) !== -1 ? 'checked' : '';
-        options += '<div class="form-check form-check-sm">' +
-            '<input class="form-check-input depends-on-check" type="checkbox" value="' + (i + 1) + '" id="dep_' + i + '" ' + checked + '>' +
-            '<label class="form-check-label small" for="dep_' + i + '">' + label + '</label></div>';
+// Four shapes cover nearly every real case, one click each (the logic is in
+// labos-core.js, tested in tests/unit/test_workflow_designer_deps.py):
+//   after - waits for the step above (the default for a new step)
+//   with  - waits for what the step above waits for: runs alongside it
+//   join  - waits for every open branch above: where two plates meet
+//   start - waits for nothing
+// Anything else: "Choose steps", then click them in the list.
+// The robot's own steps are kept in written order by LabOS itself
+// (resources.ordered in its catalog), so they never need chaining by hand.
+
+var pickingDeps = false;
+
+var DEP_MODES = [
+    { id: 'after', icon: 'bi-arrow-down', label: 'After previous',
+      help: 'Starts when the step above has finished.' },
+    { id: 'with', icon: 'bi-pause', label: 'With previous',
+      help: 'Waits for what the step above waits for, so the two can run at the same time (if they use different instruments).' },
+    { id: 'join', icon: 'bi-sign-merge-left', label: 'Join branches',
+      help: 'Waits for every branch still open above it: where two lines of work meet.' },
+    { id: 'start', icon: 'bi-play', label: 'At start',
+      help: 'Waits for nothing: may start as soon as the run begins.' }
+];
+
+function _escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
+}
+
+function _instrumentFor(step) {
+    // The key (mobile, tecan) is what a workflow should name; the name an
+    // instrument announces (GoFaGo Mobile Robot) only resolves loosely.
+    var inst = INSTRUMENTS[step.type];
+    return inst && inst.isUtility ? inst.name : step.type;
+}
+
+function _impliedOf(index) {
+    var implied = lastValidation && lastValidation.implied && lastValidation.implied[String(index + 1)];
+    return implied || [];
+}
+
+function _waitBadge(index) {
+    var step = workflowSteps[index];
+    var deps = (step.dependsOn || []).slice().sort(function (a, b) { return a - b; });
+    var robot = _impliedOf(index);
+    var html = '';
+    if (index > 0) {
+        var mode = LabOS.dependencyMode(workflowSteps, index);
+        if (mode === 'start' && !robot.length) {
+            html += '<span class="step-wait start" title="Waits for nothing">at start</span>';
+        } else if (mode === 'with') {
+            html += '<span class="step-wait" title="Runs alongside step ' + index + '">with ' + index + '</span>';
+        } else if (mode !== 'after' && deps.length) {
+            html += '<span class="step-wait" title="Waits for steps ' + deps.join(', ') + '">after ' + deps.join(', ') + '</span>';
+        }
+    }
+    if (robot.length) {
+        html += '<span class="step-wait robot" title="The robot runs its steps in the order they are written">robot order: after ' + robot.join(', ') + '</span>';
+    }
+    return html;
+}
+
+function _setDependencyMode(mode) {
+    if (selectedStepIndex === null) return;
+    pickingDeps = false;
+    workflowSteps[selectedStepIndex].dependsOn = LabOS.dependenciesFor(workflowSteps, selectedStepIndex, mode);
+    renderSteps();
+    renderProperties();
+}
+
+function _toggleDependency(stepIndex, number) {
+    var deps = (workflowSteps[stepIndex].dependsOn || []).slice();
+    var at = deps.indexOf(number);
+    if (at === -1) deps.push(number); else deps.splice(at, 1);
+    workflowSteps[stepIndex].dependsOn = deps.sort(function (a, b) { return a - b; });
+    renderSteps();
+    renderProperties();
+}
+
+function _buildDependsOnHTML(stepIndex) {
+    if (workflowSteps.length < 2 || stepIndex === 0) return '';
+    var mode = LabOS.dependencyMode(workflowSteps, stepIndex);
+    var deps = workflowSteps[stepIndex].dependsOn || [];
+    var buttons = DEP_MODES.map(function (m) {
+        var active = (m.id === mode && !pickingDeps);
+        return '<button type="button" class="btn btn-sm ' + (active ? 'btn-warning' : 'btn-outline-secondary') +
+            ' dep-mode" data-mode="' + m.id + '" title="' + _escapeHtml(m.help) + '">' +
+            '<i class="bi ' + m.icon + ' me-1"></i>' + m.label + '</button>';
+    }).join('');
+    var choose = '<button type="button" class="btn btn-sm w-100 mt-1 ' +
+        (pickingDeps || mode === 'custom' ? 'btn-warning' : 'btn-outline-secondary') + '" id="depChoose">' +
+        '<i class="bi bi-hand-index me-1"></i>' + (pickingDeps ? 'Done choosing' : 'Choose steps…') + '</button>';
+    var help = pickingDeps
+        ? 'Click steps in the list to add or remove them. Outlined steps are the ones this step waits for.'
+        : (DEP_MODES.filter(function (m) { return m.id === mode; })[0] ||
+           { help: 'Waits for the steps chosen by hand, outlined in the list.' }).help;
+    var summary = deps.length ? 'Waits for: ' + deps.join(', ') : 'Waits for nothing';
+    var robot = _impliedOf(stepIndex);
+    if (robot.length) summary += ' · robot order: after ' + robot.join(', ');
     return '<div class="property-group mt-2">' +
-        '<label><i class="bi bi-diagram-2 me-1 text-warning"></i>Depends on</label>' +
-        '<div id="dependsOnGroup" style="max-height:120px; overflow-y:auto; border:1px solid var(--bs-border-color); border-radius:4px; padding:6px;">' +
-        options + '</div></div>';
+        '<label><i class="bi bi-diagram-2 me-1 text-warning"></i>When does it start?</label>' +
+        '<div class="dep-modes">' + buttons + '</div>' + choose +
+        '<div class="dep-help">' + _escapeHtml(help) + '</div>' +
+        '<div class="dep-help"><strong>' + _escapeHtml(summary) + '</strong></div>' +
+        '</div>';
 }
 
 function _bindDependsOnListeners() {
-    document.querySelectorAll('.depends-on-check').forEach(function(cb) {
-        cb.addEventListener('change', function() {
-            if (selectedStepIndex === null) return;
-            var checked = Array.from(document.querySelectorAll('.depends-on-check:checked'))
-                .map(function(el) { return parseInt(el.value); });
-            workflowSteps[selectedStepIndex].dependsOn = checked;
-            renderSteps(); // refresh connector display
-        });
+    document.querySelectorAll('.dep-mode').forEach(function (button) {
+        button.addEventListener('click', function () { _setDependencyMode(this.getAttribute('data-mode')); });
+    });
+    var choose = document.getElementById('depChoose');
+    if (choose) choose.addEventListener('click', function () {
+        pickingDeps = !pickingDeps;
+        renderSteps();
+        renderProperties();
     });
 }
+
+// ============================================================================
+// CHECKING AS YOU EDIT
+// ============================================================================
+// The same validation a run does, asked for shortly after every change, so a
+// mistake shows on its step while the workflow is being written instead of
+// as a refusal when Run is pressed.
+
+var lastValidation = null;
+var _validationTimer = null;
+var _validatedSignature = null;
+
+function _workflowForCheck() {
+    return {
+        WorkflowName: document.getElementById('workflowName').value.trim() || 'Workflow',
+        SchemaVersion: '1.0',
+        Steps: _buildSteps()
+    };
+}
+
+function _errorsOf(index) {
+    if (!lastValidation) return [];
+    return (lastValidation.errors || [])
+        .filter(function (e) { return e.step === index + 1; })
+        .map(function (e) { return (e.field ? e.field + ': ' : '') + e.message; });
+}
+
+function _scheduleValidation() {
+    clearTimeout(_validationTimer);
+    if (!workflowSteps.length) {
+        lastValidation = null;
+        _renderValidationBar();
+        return;
+    }
+    _validationTimer = setTimeout(_validateNow, 700);
+}
+
+function _validateNow() {
+    var workflow = _workflowForCheck();
+    var signature = JSON.stringify(workflow.Steps);
+    if (signature === _validatedSignature) return;
+    _validatedSignature = signature;
+    fetch('/api/workflows/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(workflow)
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (result) {
+        if (signature !== JSON.stringify(_buildSteps())) return; // edited meanwhile
+        lastValidation = result;
+        _renderValidationBar();
+        renderSteps();
+        if (selectedStepIndex !== null) renderProperties();
+    })
+    .catch(function () { _validatedSignature = null; });
+}
+
+function _renderValidationBar() {
+    var bar = document.getElementById('validationBar');
+    if (!bar) return;
+    if (!lastValidation || !workflowSteps.length) { bar.hidden = true; return; }
+    var errors = lastValidation.errors || [];
+    var warnings = lastValidation.warnings || [];
+    var general = errors.filter(function (e) { return !e.step; });
+    bar.hidden = false;
+    if (errors.length) {
+        bar.className = 'validation-bar bad';
+        bar.innerHTML = '<i class="bi bi-x-octagon"></i><div><strong>' + errors.length +
+            ' problem' + (errors.length > 1 ? 's' : '') + '</strong> - a run would be refused. ' +
+            'Each is shown on its step.' +
+            (general.length ? '<ul>' + general.map(function (e) { return '<li>' + _escapeHtml(e.message) + '</li>'; }).join('') + '</ul>' : '') +
+            '</div>';
+    } else if (warnings.length) {
+        bar.className = 'validation-bar warn';
+        bar.innerHTML = '<i class="bi bi-exclamation-triangle"></i><div>' +
+            warnings.map(function (w) { return _escapeHtml(w.message); }).join('<br>') + '</div>';
+    } else {
+        bar.className = 'validation-bar ok';
+        bar.innerHTML = '<i class="bi bi-check-circle"></i><div>Valid: every instrument, command and parameter checks out.</div>';
+    }
+}
+
+// ============================================================================
+// SIMULATED LAB
+// ============================================================================
+
+function openSimulation() {
+    if (!workflowSteps.length) {
+        showToast('warning', 'Empty workflow', 'Add at least one step first.');
+        return;
+    }
+    document.getElementById('simulateResult').innerHTML = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('simulateModal')).show();
+    runSimulation();
+}
+
+function runSimulation() {
+    var target = document.getElementById('simulateResult');
+    var button = document.getElementById('btnSimulateRun');
+    var cap = parseInt(document.getElementById('simConcurrency').value, 10) || 0;
+    button.disabled = true;
+    target.innerHTML = '<div class="text-muted small"><span class="spinner-border spinner-border-sm me-2"></span>' +
+        'Starting the simulated instruments and running the workflow (about half a minute)…</div>';
+    fetch('/api/workflows/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workflow: _workflowForCheck(), max_concurrency: cap })
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (report) { target.innerHTML = _simulationHTML(report); })
+    .catch(function (e) { target.innerHTML = '<div class="text-danger small">' + _escapeHtml(e.message) + '</div>'; })
+    .finally(function () { button.disabled = false; });
+}
+
+function _simulationHTML(report) {
+    if (report.status !== 'ok') {
+        return '<div class="alert alert-warning small mb-0">' + _escapeHtml(report.error || 'The simulation did not run.') + '</div>';
+    }
+    var head = report.success
+        ? '<div class="alert alert-success small py-2 mb-2">Completed: ' + report.completed + ' steps.</div>'
+        : '<div class="alert alert-danger small py-2 mb-2">Did not complete: ' + report.completed + ' completed, ' +
+          report.failed + ' failed, ' + report.skipped + ' skipped.' +
+          (report.errors.length ? '<ul class="mb-0 mt-1">' + report.errors.slice(0, 8).map(function (e) { return '<li>' + _escapeHtml(e) + '</li>'; }).join('') + '</ul>' : '') +
+          '</div>';
+    var clash = report.clashes.length
+        ? '<div class="alert alert-danger small py-2">Two commands overlapped on a shared resource - this must never happen: ' +
+          report.clashes.map(function (c) { return _escapeHtml(c.resource + ': ' + c.a + ' with ' + c.b); }).join('; ') + '</div>'
+        : '<div class="small text-success mb-1"><i class="bi bi-shield-check me-1"></i>No two commands overlapped on a resource they both occupy.</div>';
+    var together = '<div class="small text-muted mb-1">Commands on different instruments running at the same time: ' + report.together + '.</div>';
+    var timeline = report.timeline || [];
+    if (!timeline.length) return head + clash + '<div class="small text-muted">No command reached an instrument.</div>';
+    var total = Math.max.apply(null, timeline.map(function (t) { return t.end || t.start; })) || 1;
+    var lanes = {};
+    timeline.forEach(function (t) { (lanes[t.instrument] = lanes[t.instrument] || []).push(t); });
+    var rows = Object.keys(lanes).map(function (name) {
+        var bars = lanes[name].map(function (t) {
+            var end = t.end === null ? total : t.end;
+            var left = (t.start / total * 100).toFixed(2);
+            var width = Math.max((end - t.start) / total * 100, 0.4).toFixed(2);
+            // "mobile.ExecuteTask(go_to_tecan)" reads as "go_to_tecan".
+            var detail = /\(([^)]*)\)$/.exec(t.label);
+            var text = detail ? detail[1] : t.command;
+            return '<div class="sim-bar' + (t.status === 'ok' ? '' : ' failed') + '" style="left:' + left + '%;width:' + width + '%"' +
+                ' title="' + _escapeHtml(text + ' · ' + t.start.toFixed(1) + '-' + (t.end === null ? '…' : t.end.toFixed(1)) + ' s') + '">' +
+                _escapeHtml(text) + '</div>';
+        }).join('');
+        return '<div class="sim-lane"><div class="sim-lane-name" title="' + _escapeHtml(name) + '">' + _escapeHtml(name) +
+            '</div><div class="sim-track">' + bars + '</div></div>';
+    }).join('');
+    return head + clash + together + '<div class="sim-lanes">' + rows + '</div>' +
+        '<div class="small text-muted mt-2">Simulated time ' + report.duration_seconds + ' s. Hover a bar for its times.</div>';
+}
+
 </script>
 {% endblock %}

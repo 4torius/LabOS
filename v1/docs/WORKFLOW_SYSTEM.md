@@ -71,12 +71,12 @@ A workflow in LabOS is a JSON file that chains instrument commands into a comple
 | `OnFailure` | no | `"stop"` (default), `"skip"`, or `"continue"` |
 
 The file also carries `SchemaVersion` (currently `"1.0"`). Files without it
-still load and run under the same rules. The Workflow Builder does not write it
-yet, and it saves instruments under their display names (`TecanM200Pro`,
-`GoFaGo Mobile Robot`), so a workflow saved from the web app has neither.
+still load and run under the same rules. The Workflow Builder writes both
+`SchemaVersion` and the canonical instrument keys. Files saved by an older
+builder carry display names (`TecanM200Pro`, `GoFaGo Mobile Robot`):
 `python scripts/migrate_workflows.py --apply` adds `SchemaVersion` and
-rewrites instrument names to their canonical form; run it after saving a
-workflow you intend to commit. Without `--apply` it only reports.
+rewrites instrument names to their canonical form. Without `--apply` it only
+reports.
 
 ### Instrument names
 
@@ -127,13 +127,40 @@ top to bottom and mark a step SKIPPED when its dependency happened to be
 written further down, so a valid workflow silently lost steps because of the
 order it was typed in.
 
-**Declare your dependencies.** With `parallel_execution: true`, a file whose
-steps declare none dispatches all of them at once — for a workflow that passes
-one plate between a mobile robot, a liquid handler and a plate reader, that is
-a collision. The Workflow Builder saves `DependsOn: []` unless you tick the
-boxes, so a workflow built there runs in file order only because parallel
-execution is off. `python scripts/migrate_workflows.py --apply --chain-linear`
-gives such a file the sequential chain explicitly.
+**Declare your dependencies.** With `max_concurrency` above 1, a file whose
+steps declare none may start all of them at once. Resources stop two steps
+colliding on an instrument; they do not know that the recipe comes *after* the
+plate is placed. `python scripts/migrate_workflows.py --apply --chain-linear`
+gives an old file the sequential chain explicitly.
+
+**The robot keeps its written order by itself.** Where the mobile robot is
+cannot be a resource, so its catalog declares `"ordered": true`: each robot
+step depends on the robot step written before it, without anybody writing it.
+The edges are added at validation and at run time, kept out of the saved file,
+and shown in the builder as "robot order: after N". A robot step that
+explicitly depends on one written further down is a cycle and is refused.
+
+### Setting dependencies in the Workflow Builder
+
+Selecting a step shows **When does it start?** with one button per shape:
+
+| Button | Waits for | Use it for |
+|---|---|---|
+| After previous | the step just above (default for a new step) | the normal sequence |
+| With previous | what the step above waits for | a step that may run alongside the one above, on another instrument |
+| Join branches | every branch still open above it | where two lines of work meet |
+| At start | nothing | a step that needs nothing before it |
+
+**Choose steps…** switches the list to picking: click steps to add or remove
+them; the ones the selected step waits for are outlined. In the list, a dashed
+connector marks a step that does not wait for the one above it.
+
+The builder validates as you edit (`POST /api/workflows/validate`): problems
+show on their step and in a bar above the list, before Run is pressed.
+**Simulate** runs the workflow in the simulated lab (`POST
+/api/workflows/simulate`, see SIMULATED_LAB.md) and draws what each instrument
+did; nothing reaches the real instruments. It cannot run while `python -m
+sim_lab up` is holding the simulated ports.
 
 ---
 

@@ -172,3 +172,48 @@ class TestDeletingClosesOverTheRemovedStep:
         after = _run("dependenciesAfterRemove", steps, 2)
         for deps in after:
             assert len(deps) == len(set(deps))
+
+
+def _deps(*lists):
+    return [{"dependsOn": list(d)} for d in lists]
+
+
+@needs_node
+class TestTheFourShapes:
+    """One click per shape instead of ticking boxes (see labos-core.js)."""
+
+    def test_after_waits_for_the_step_just_above(self):
+        assert _run("dependenciesFor", _chain(3), 2, "after") == [2]
+
+    def test_with_runs_alongside_the_step_above(self):
+        # 3 waits for 2; a fourth step "with" 3 also waits for 2.
+        steps = _chain(3) + [{"dependsOn": []}]
+        assert _run("dependenciesFor", steps, 3, "with") == [2]
+
+    def test_join_waits_for_every_open_branch(self):
+        # 1; 2 after 1; 3 with 2 (also after 1): two open branches, 2 and 3.
+        steps = _deps([], [1], [1], [])
+        assert _run("openBranches", steps, 3) == [2, 3]
+        assert _run("dependenciesFor", steps, 3, "join") == [2, 3]
+
+    def test_the_two_plate_meeting_point_is_a_join(self):
+        # 13 = a read, 19 = the robot arriving; 20 waits for both.
+        steps = [{"dependsOn": []}] + [{"dependsOn": [i]} for i in range(1, 13)]  # 1..13
+        steps += [{"dependsOn": [11]}] + [{"dependsOn": [i]} for i in range(14, 19)]  # 14..19
+        steps += [{"dependsOn": [13, 19]}]  # 20
+        assert _run("dependencyMode", steps, 19) == "join"
+
+    def test_start_waits_for_nothing(self):
+        assert _run("dependenciesFor", _chain(3), 2, "start") == []
+
+    @pytest.mark.parametrize("deps,mode", [
+        ([2], "after"), ([1], "with"), ([], "start"), ([1, 2], "custom"),
+    ])
+    def test_the_mode_is_read_back_from_the_list(self, deps, mode):
+        # 1; 2 after 1; then the step under test at position 3. Its open
+        # branches are just [2], so [2] reads as "after", not "join".
+        steps = _deps([], [1], deps)
+        assert _run("dependencyMode", steps, 2) == mode
+
+    def test_a_first_step_is_start(self):
+        assert _run("dependencyMode", _deps([]), 0) == "start"

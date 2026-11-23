@@ -350,6 +350,19 @@ serves the catalog (`LibraryProviderImpl(server, augment=...)`, see
 `SiLA2/MobileSiLA2Server/src/task_resources.py`). Check a real workflow file
 rather than assuming.
 
+#### `ordered` — when where the instrument *is* matters
+
+```json
+"resources": { "ordered": true, "provides": ["instrument:x"], "commands": { ... } }
+```
+
+For an instrument with a state its commands assume and no resource can
+express: the mobile robot's position (`pick_from_tecan` is only right after
+`go_to_tecan`). Its steps in a workflow then run in the order they are
+written, as if each depended on the one before it; control commands are left
+out. Most instruments do not need it: a liquid handler's recipe does not
+depend on which recipe ran before.
+
 #### `emergency_stop` — how your instrument is stopped
 
 Outside `resources`, at the top level of the catalog:
