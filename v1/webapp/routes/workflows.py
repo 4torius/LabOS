@@ -277,6 +277,10 @@ def create_workflows_router(
                             "which keeps its written order, every step may start at once "
                             "when max_concurrency is above 1."),
             })
+        plates = _plate_report(executor, data.get("Steps") or [])
+        for number, entry in plates.items():
+            for message in entry["warnings"]:
+                warnings.append({"step": int(number), "field": "Plate", "message": message})
         return {
             "valid": not errors,
             "errors": [{"step": e.step_number, "field": e.field, "message": e.message}
@@ -284,7 +288,26 @@ def create_workflows_router(
             "warnings": warnings,
             "implied": {str(s.step_number): list(s.implied_depends_on)
                         for s in workflow.steps if s.implied_depends_on},
+            "plates": plates,
         }
+
+    def _plate_report(executor, raw_steps) -> dict:
+        """Where each labelled plate is after each step (src/plates.py)."""
+        from src.plates import report_workflow
+
+        try:
+            topology = executor._topology()
+        except Exception as exc:  # advice only: no topology, no advice
+            logger.warning("Plate check skipped: %s", exc)
+            return {}
+
+        def key_of(instrument: str, action: str) -> str:
+            if is_locally_handled(instrument, action):
+                return ""
+            server = executor.registry.get_server_by_name(instrument)
+            return executor._key_of(server) if server is not None else ""
+
+        return report_workflow(raw_steps, key_of, topology)
 
     # Blocks: named sequences of steps the builder inserts in one go
     # (src/blocks.py, Library/Blocks/*.block.json)
@@ -340,7 +363,8 @@ def create_workflows_router(
             return None, f"'{label}' is not among the {parameter} options (known: {known})"
 
         steps, errors = expand(block, resolve_label)
-        return {"id": block.id, "name": block.name, "steps": steps, "errors": errors}
+        return {"id": block.id, "name": block.name, "category": block.category,
+                "steps": steps, "errors": errors}
 
     _simulation_lock = asyncio.Lock()
 

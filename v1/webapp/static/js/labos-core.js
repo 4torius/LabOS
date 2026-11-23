@@ -332,10 +332,27 @@
         return open;
     };
 
+    /**
+     * Position (1-based) of the closest step above `index` on the same plate,
+     * or 0 when there is none (or the step names no plate).
+     */
+    LabOS.previousOfPlate = function (steps, index) {
+        var plate = steps[index] && steps[index].plate;
+        if (!plate) return 0;
+        for (var i = index - 1; i >= 0; i--) if (steps[i].plate === plate) return i + 1;
+        return 0;
+    };
+
     /** The dependency list a mode gives the step at `index` (0-based). */
     LabOS.dependenciesFor = function (steps, index, mode) {
         if (index <= 0 || mode === 'start') return [];
         if (mode === 'after') return [index];
+        // plate - waits for the step above it on the same plate only, so two
+        // plates' steps written interleaved can still run side by side.
+        if (mode === 'plate') {
+            var previous = LabOS.previousOfPlate(steps, index);
+            return previous ? [previous] : [];
+        }
         if (mode === 'with') return _sorted(steps[index - 1].dependsOn);
         if (mode === 'join') return LabOS.openBranches(steps, index);
         return _sorted(steps[index].dependsOn);
@@ -345,11 +362,12 @@
     LabOS.dependencyMode = function (steps, index) {
         var deps = steps[index].dependsOn || [];
         if (index === 0) return deps.length ? 'custom' : 'start';
-        var order = ['after', 'with', 'join', 'start'];
+        var order = ['after', 'plate', 'with', 'join', 'start'];
         for (var i = 0; i < order.length; i++) {
             var candidate = LabOS.dependenciesFor(steps, index, order[i]);
-            // "with" a step that itself starts at the beginning is just "start".
-            if (order[i] === 'with' && candidate.length === 0) continue;
+            // "with" a step that itself starts at the beginning is just "start";
+            // a step with no earlier step on its plate has no "plate" shape.
+            if ((order[i] === 'with' || order[i] === 'plate') && candidate.length === 0) continue;
             if (_same(deps, candidate)) return order[i];
         }
         return 'custom';

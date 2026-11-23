@@ -60,6 +60,8 @@ class BlockStep:
     depends_on: Optional[List[int]] = None
     description: str = ""
     ask: List[str] = field(default_factory=list)
+    #: "onto:<instrument>" or "off": a move only a person makes (src/plates.py)
+    plate_move: str = ""
 
 
 @dataclass
@@ -113,10 +115,15 @@ def parse_block(block_id: str, raw: Any, problems: List[str]) -> Optional[Block]
         if not isinstance(ask, list) or not all(isinstance(a, str) for a in ask):
             problems.append(f"{where}: Ask must be a list of parameter names")
             return None
+        move = str(entry.get("PlateMove") or "")
+        if move and move != "off" and not move.startswith("onto:"):
+            problems.append(f"{where}: PlateMove must be \"off\" or \"onto:<instrument>\"")
+            return None
         steps.append(BlockStep(
             instrument=instrument, action=action, parameters=dict(parameters),
             depends_on=list(depends) if depends is not None else None,
-            description=str(entry.get("Description") or ""), ask=list(ask)))
+            description=str(entry.get("Description") or ""), ask=list(ask),
+            plate_move=move))
 
     return Block(id=block_id, name=str(raw.get("Name") or block_id),
                  description=str(raw.get("Description") or ""),
@@ -179,5 +186,6 @@ def expand(block: Block, resolve_label: LabelResolver) -> Tuple[List[Dict[str, A
             "DependsOn": depends,
             "Description": step.description,
             "Ask": list(step.ask),
+            "PlateMove": step.plate_move,
         })
     return out, errors

@@ -119,6 +119,12 @@ class CommandResources:
     acquires_by_parameter: Mapping[str, Mapping[str, Tuple[str, ...]]] = field(default_factory=dict)
     releases_by_parameter: Mapping[str, Mapping[str, Tuple[str, ...]]] = field(default_factory=dict)
     exhaustive: bool = False
+    #: Where a plate must be for this command to make sense: the read needs a
+    #: plate in the reader (`slot:tecan`). Advisory - the builder uses it to
+    #: warn when a step works on a plate that is somewhere else; the executor
+    #: does not refuse on it, because a plate loaded by hand is in the reader
+    #: without any step having said so.
+    needs: Tuple[str, ...] = ()
 
     @staticmethod
     def _value_of(parameter: str, params: Mapping[str, Any]) -> Any:
@@ -205,6 +211,7 @@ class CommandResources:
                 for ids in mapping.values():
                     found.update(ids)
         found.update(self.holds)
+        found.update(self.needs)
         return frozenset(found)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -223,6 +230,7 @@ class CommandResources:
             "acquires_by_parameter": _table(self.acquires_by_parameter),
             "releases_by_parameter": _table(self.releases_by_parameter),
             "exhaustive": self.exhaustive,
+            "needs": list(self.needs),
         }
 
 
@@ -386,6 +394,8 @@ def parse_declaration(raw: Any, source: str = "") -> ResourceDeclaration:
                 continue
             holds[resource.strip()] = releaser.strip()
 
+        needs = _resource_ids(spec.get("needs"), label, f"{where}.needs",
+                              declaration.problems)
         control = bool(spec.get("control", False))
         occupies = (claims or acquires or releases or holds
                     or any(ids for table in tables.values()
@@ -412,6 +422,7 @@ def parse_declaration(raw: Any, source: str = "") -> ResourceDeclaration:
             acquires_by_parameter=tables["acquires"],
             releases_by_parameter=tables["releases"],
             exhaustive=bool(spec.get("exhaustive", False)),
+            needs=() if control else needs,
         )
 
     for releaser, resources in released_by.items():
@@ -561,6 +572,13 @@ class ResourceTopology:
         if spec is not None:
             found.update(self._resolve_alias(r) for r in spec.resolve(parameters))
         return frozenset(found)
+
+    def needs_for(self, instrument_id: str, command: str) -> FrozenSet[str]:
+        """Where the plate a step works on has to be (advisory, see `needs`)."""
+        spec = self._spec(instrument_id, command)
+        if spec is None:
+            return frozenset()
+        return frozenset(self._resolve_alias(r) for r in spec.needs)
 
     def is_ordered(self, instrument_id: str, command: str) -> bool:
         """Whether this step takes its place in the instrument's written order.

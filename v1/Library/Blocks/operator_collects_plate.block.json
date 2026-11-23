@@ -12,7 +12,8 @@
         "TaskDescription": "Ritirare la piastra dalla dima del robot",
         "SourceInstrument": ""
       },
-      "Description": "The operator collects the plate from the jig"
+      "Description": "The operator collects the plate from the jig",
+      "PlateMove": "off"
     }
   ]
 }

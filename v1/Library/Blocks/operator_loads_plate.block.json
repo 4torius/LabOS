@@ -12,7 +12,8 @@
         "TaskDescription": "Caricare la piastra sulla dima del robot",
         "SourceInstrument": ""
       },
-      "Description": "The operator loads the plate onto the jig"
+      "Description": "The operator loads the plate onto the jig",
+      "PlateMove": "onto:mobile"
     }
   ]
 }

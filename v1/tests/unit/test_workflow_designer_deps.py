@@ -240,3 +240,27 @@ class TestInsertingInTheMiddle:
     def test_later_references_follow_their_steps(self):
         steps = [{"dependsOn": []}, {"dependsOn": [1]}, {"dependsOn": [1, 2]}]
         assert _run("dependenciesAfterInsert", steps, 2, 3) == [[], [1], [1, 5]]
+
+
+@needs_node
+class TestAfterThisPlatesPrevious:
+
+    STEPS = [{"dependsOn": [], "plate": "A"},
+             {"dependsOn": [1], "plate": "A"},
+             {"dependsOn": [2], "plate": "B"},
+             {"dependsOn": [3], "plate": "A"}]
+
+    def test_it_waits_for_the_last_step_of_its_plate(self):
+        assert _run("dependenciesFor", self.STEPS, 3, "plate") == [2]
+
+    def test_the_first_step_of_a_plate_has_no_plate_predecessor(self):
+        assert _run("dependenciesFor", self.STEPS, 2, "plate") == []
+
+    def test_the_shape_is_read_back(self):
+        steps = [dict(s) for s in self.STEPS]
+        steps[3]["dependsOn"] = [2]
+        assert _run("dependencyMode", steps, 3) == "plate"
+
+    def test_after_previous_still_wins_when_the_two_coincide(self):
+        # Step 2 on plate A right below step 1 on plate A: same list either way.
+        assert _run("dependencyMode", self.STEPS, 1) == "after"

@@ -227,6 +227,27 @@
     .step-connector.parallel { border-left-style: dashed !important; opacity: .7; }
     .step-connector-label { font-size: 10px; color: #adb5bd; margin-left: 30px; }
 
+    .canvas-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+    .canvas-bar .form-select { width: auto; font-size: 12px; padding: 2px 28px 2px 8px; }
+    .canvas-bar label { font-size: 12px; color: #adb5bd; }
+    .plate-chip { font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 9px; margin-left: 6px;
+                  background: rgba(111,66,193,.25); color: #c29ffa; white-space: nowrap; }
+    .plate-where { font-size: 10px; color: #a3cfbb; margin-top: 2px; }
+    .step-warnings { color: #ffda6a; font-size: 11px; margin-top: 2px; }
+    .workflow-step.has-warning { border-color: rgba(255,193,7,.6); }
+
+    .lanes { display: grid; gap: 4px 10px; align-items: stretch; overflow-x: auto; }
+    .lane-head { font-size: 12px; font-weight: 600; color: #c29ffa; padding: 4px 6px;
+                 border-bottom: 1px solid rgba(255,255,255,.12); position: sticky; top: 0;
+                 background: #1a1a2e; z-index: 1; }
+    .lane-head.other { color: #adb5bd; }
+    .lane-cell { min-height: 8px; border-left: 2px solid rgba(255,255,255,.06); padding-left: 6px; }
+    .lane-cell .workflow-step { padding: 6px 8px; gap: 8px; }
+    .lane-cell .workflow-step .step-number { width: 22px; height: 22px; font-size: 11px; }
+    .lane-cell .workflow-step .step-icon, .lane-cell .workflow-step .step-actions { display: none; }
+    .lane-cell .step-title { font-size: 12px; }
+    .lane-cell .step-details { font-size: 10px; }
+
     .block-header { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
                     color: #9ec5fe; margin: 10px 0 2px 2px; display: flex; gap: 6px; align-items: center; }
     .workflow-step.in-block { box-shadow: inset 3px 0 0 rgba(158,197,254,.35); }
@@ -440,6 +461,14 @@
             <div class="canvas-placeholder" id="canvasPlaceholder">
                 <i class="bi bi-arrows-move"></i>
                 <p>Drag instruments here<br>to create the workflow</p>
+            </div>
+            <div class="canvas-bar">
+                <div class="btn-group btn-group-sm" role="group" aria-label="View">
+                    <button type="button" class="btn btn-outline-secondary active" id="viewList"><i class="bi bi-list-ol"></i> List</button>
+                    <button type="button" class="btn btn-outline-secondary" id="viewLanes"><i class="bi bi-layout-three-columns"></i> Plates</button>
+                </div>
+                <label for="currentPlate">New steps go to</label>
+                <select class="form-select form-select-sm" id="currentPlate"></select>
             </div>
             <div class="validation-bar" id="validationBar" hidden></div>
             <div class="workflow-steps" id="workflowSteps"></div>
@@ -1099,6 +1128,18 @@ document.addEventListener('DOMContentLoaded', async function() {
     addViewAllToggle();
 
     loadBlocks();
+
+    document.getElementById('viewList').addEventListener('click', function () { _setView('list'); });
+    document.getElementById('viewLanes').addEventListener('click', function () { _setView('lanes'); });
+    document.getElementById('currentPlate').addEventListener('change', function () {
+        if (this.value === '__new') {
+            currentPlate = _nextPlateName();
+            _extraPlates.push(currentPlate);
+        } else {
+            currentPlate = this.value;
+        }
+        _refreshPlateSelect();
+    });
     
     // Load available files
     loadFiles();
@@ -1220,7 +1261,8 @@ function addStep(type) {
         type: type,
         command: _defaultCommand(inst),
         params: {},
-        dependsOn: workflowSteps.length > 0 ? [workflowSteps.length] : []
+        dependsOn: workflowSteps.length > 0 ? [workflowSteps.length] : [],
+        plate: currentPlate
     };
 
     workflowSteps.push(step);
@@ -1271,7 +1313,16 @@ function selectStep(index) {
 // RENDER STEPS
 // ============================================================================
 function renderSteps() {
+    _refreshPlateSelect();
+    if (viewMode === 'lanes') {
+        renderLanes();
+        _saveBuilderState();
+        _scheduleValidation();
+        return;
+    }
     var stepsContainer = document.getElementById('workflowSteps');
+    stepsContainer.className = 'workflow-steps';
+    stepsContainer.style.gridTemplateColumns = '';
     var placeholder = document.getElementById('canvasPlaceholder');
     
     // Show/hide placeholder
@@ -1330,9 +1381,10 @@ function renderSteps() {
         var waitedFor = selectedStepIndex !== null && selectedStepIndex !== i &&
             (workflowSteps[selectedStepIndex].dependsOn || []).indexOf(i + 1) !== -1;
         var stepErrors = _errorsOf(i);
+        var stepWarnings = _warningsOf(i);
         stepEl.className = 'workflow-step ' + step.type + (selectedStepIndex === i ? ' selected' : '') +
             (waitedFor ? ' waited-for' : '') + (stepErrors.length ? ' has-error' : '') +
-            (step.block ? ' in-block' : '');
+            (step.block ? ' in-block' : '') + (stepWarnings.length && !stepErrors.length ? ' has-warning' : '');
         if (INSTRUMENTS[step.type] && !INSTRUMENTS[step.type].isUtility) {
             stepEl.style.borderLeft = '4px solid ' + _instrumentBorder(inst);
         }
@@ -1357,7 +1409,8 @@ function renderSteps() {
             paramsDisplay = paramParts.join(', ');
         }
         
-        var depsBadge = _waitBadge(i) + ((step.ask && step.ask.length)
+        var depsBadge = (step.plate ? '<span class="plate-chip" title="Plate">' + _escapeHtml(step.plate) + '</span>' : '') +
+            _waitBadge(i) + ((step.ask && step.ask.length)
             ? '<span class="step-wait ask" title="The block asks you to choose these">choose: ' + _escapeHtml(step.ask.join(', ')) + '</span>' : '');
 
         stepEl.innerHTML =
@@ -1369,6 +1422,8 @@ function renderSteps() {
                 '<div class="step-title">' + inst.name + ' - ' + cmd.label + depsBadge + '</div>' +
                 '<div class="step-details">' + (paramsDisplay || 'No parameters') + '</div>' +
                 (stepErrors.length ? '<div class="step-errors">' + stepErrors.map(_escapeHtml).join('<br>') + '</div>' : '') +
+                (stepWarnings.length ? '<div class="step-warnings">' + stepWarnings.map(_escapeHtml).join('<br>') + '</div>' : '') +
+                _plateWhereHTML(i) +
             '</div>' +
             '<div class="step-actions">' +
                 '<button class="btn btn-sm btn-outline-secondary btn-move-up" data-index="' + i + '" ' + (i === 0 ? 'disabled' : '') + '>' +
@@ -1713,7 +1768,8 @@ function renderProperties() {
         }
     }
     
-    // Append DependsOn selector (Settimana 9)
+    // Which plate, then what it waits for
+    html += _buildPlateHTML(selectedStepIndex);
     html += _buildDependsOnHTML(selectedStepIndex);
 
     propertiesContent.innerHTML = html;
@@ -1854,7 +1910,9 @@ function saveWorkflow() {
             DependsOn: step.dependsOn || [],
             Block: step.block ? step.block.name : undefined,
             BlockRun: step.block ? step.block.run : undefined,
-            Ask: (step.ask && step.ask.length) ? step.ask : undefined
+            Ask: (step.ask && step.ask.length) ? step.ask : undefined,
+            Plate: step.plate || undefined,
+            PlateMove: step.plateMove || undefined
         });
     }
     
@@ -1942,7 +2000,9 @@ function loadWorkflowFile(filename) {
                     params: normalizeStepParamsForCommand(s.Action, s.Parameters || {}),
                     dependsOn: s.DependsOn || [],
                 block: s.Block ? { name: s.Block, run: s.BlockRun || 0 } : null,
-                ask: (s.Ask || []).slice()
+                ask: (s.Ask || []).slice(),
+                plate: s.Plate || '',
+                plateMove: s.PlateMove || ''
                 });
             }
             
@@ -2078,7 +2138,9 @@ function _buildSteps() {
             DependsOn: step.dependsOn || [],
             Block: step.block ? step.block.name : undefined,
             BlockRun: step.block ? step.block.run : undefined,
-            Ask: (step.ask && step.ask.length) ? step.ask : undefined
+            Ask: (step.ask && step.ask.length) ? step.ask : undefined,
+            Plate: step.plate || undefined,
+            PlateMove: step.plateMove || undefined
         };
     });
 }
@@ -2204,7 +2266,9 @@ function _loadTemplate(templateId) {
                 params: normalizeStepParamsForCommand(s.Action, s.Parameters || {}),
                 dependsOn: s.DependsOn || [],
                 block: s.Block ? { name: s.Block, run: s.BlockRun || 0 } : null,
-                ask: (s.Ask || []).slice()
+                ask: (s.Ask || []).slice(),
+                plate: s.Plate || '',
+                plateMove: s.PlateMove || ''
             });
         });
         _applyRequiredDefaultsToAllSteps();
@@ -2238,7 +2302,9 @@ function saveCurrentAsTemplate() {
                 DependsOn: step.dependsOn || [],
             Block: step.block ? step.block.name : undefined,
             BlockRun: step.block ? step.block.run : undefined,
-            Ask: (step.ask && step.ask.length) ? step.ask : undefined
+            Ask: (step.ask && step.ask.length) ? step.ask : undefined,
+            Plate: step.plate || undefined,
+            PlateMove: step.plateMove || undefined
             };
         });
         fetch('/api/templates/save', {
@@ -2299,7 +2365,9 @@ function exportWorkflow() {
             DependsOn: step.dependsOn || [],
             Block: step.block ? step.block.name : undefined,
             BlockRun: step.block ? step.block.run : undefined,
-            Ask: (step.ask && step.ask.length) ? step.ask : undefined
+            Ask: (step.ask && step.ask.length) ? step.ask : undefined,
+            Plate: step.plate || undefined,
+            PlateMove: step.plateMove || undefined
         };
     });
     var workflow = { WorkflowName: name, Steps: steps, ExportedAt: new Date().toISOString() };
@@ -2331,7 +2399,9 @@ function importWorkflow(e) {
                     params: normalizeStepParamsForCommand(s.Action, s.Parameters || {}),
                     dependsOn: s.DependsOn || [],
                 block: s.Block ? { name: s.Block, run: s.BlockRun || 0 } : null,
-                ask: (s.Ask || []).slice()
+                ask: (s.Ask || []).slice(),
+                plate: s.Plate || '',
+                plateMove: s.PlateMove || ''
                 });
             });
             _applyRequiredDefaultsToAllSteps();
@@ -2366,6 +2436,8 @@ var pickingDeps = false;
 var DEP_MODES = [
     { id: 'after', icon: 'bi-arrow-down', label: 'After previous',
       help: 'Starts when the step above has finished.' },
+    { id: 'plate', icon: 'bi-arrow-down-short', label: "After its plate's previous",
+      help: "Waits only for the step above it on the same plate, so two plates' steps can run side by side." },
     { id: 'with', icon: 'bi-pause', label: 'With previous',
       help: 'Waits for what the step above waits for, so the two can run at the same time (if they use different instruments).' },
     { id: 'join', icon: 'bi-sign-merge-left', label: 'Join branches',
@@ -2412,6 +2484,9 @@ function _waitBadge(index) {
         var mode = LabOS.dependencyMode(workflowSteps, index);
         if (mode === 'start' && !robot.length) {
             html += '<span class="step-wait start" title="Waits for nothing">at start</span>';
+        } else if (mode === 'plate') {
+            html += '<span class="step-wait" title="Waits for the step above it on plate ' + _escapeHtml(step.plate) + '">after ' +
+                _escapeHtml(step.plate) + "'s " + deps.join(', ') + '</span>';
         } else if (mode === 'with') {
             html += '<span class="step-wait" title="Runs alongside step ' + index + '">with ' + index + '</span>';
         } else if (mode !== 'after' && deps.length) {
@@ -2445,7 +2520,8 @@ function _buildDependsOnHTML(stepIndex) {
     if (workflowSteps.length < 2 || stepIndex === 0) return '';
     var mode = LabOS.dependencyMode(workflowSteps, stepIndex);
     var deps = workflowSteps[stepIndex].dependsOn || [];
-    var buttons = DEP_MODES.map(function (m) {
+    var hasPlate = !!workflowSteps[stepIndex].plate;
+    var buttons = DEP_MODES.filter(function (m) { return m.id !== 'plate' || hasPlate; }).map(function (m) {
         var active = (m.id === mode && !pickingDeps);
         return '<button type="button" class="btn btn-sm ' + (active ? 'btn-warning' : 'btn-outline-secondary') +
             ' dep-mode" data-mode="' + m.id + '" title="' + _escapeHtml(m.help) + '">' +
@@ -2473,11 +2549,180 @@ function _bindDependsOnListeners() {
     document.querySelectorAll('.dep-mode').forEach(function (button) {
         button.addEventListener('click', function () { _setDependencyMode(this.getAttribute('data-mode')); });
     });
+    var plateSelect = document.getElementById('propPlate');
+    if (plateSelect) plateSelect.addEventListener('change', function () {
+        var value = this.value === '__new' ? _nextPlateName() : this.value;
+        if (this.value === '__new') _extraPlates.push(value);
+        _setPlateOf(selectedStepIndex, value);
+    });
+    var moveSelect = document.getElementById('propPlateMove');
+    if (moveSelect) moveSelect.addEventListener('change', function () {
+        workflowSteps[selectedStepIndex].plateMove = this.value;
+        renderSteps();
+    });
     var choose = document.getElementById('depChoose');
     if (choose) choose.addEventListener('click', function () {
         pickingDeps = !pickingDeps;
         renderSteps();
         renderProperties();
+    });
+}
+
+// ============================================================================
+// PLATES: which plate a step concerns, one column per plate, where each is
+// ============================================================================
+// A step may name its plate ("A"). The executor ignores it; the builder uses it
+// to lay steps out in one column per plate (rows stay in written order, which
+// is also the robot's order) and the validate route follows each plate from
+// what the instruments declare - src/plates.py - and warns on a step that
+// cannot make sense where the plate is.
+
+var viewMode = 'list';
+var currentPlate = '';
+var _extraPlates = [];
+
+function _platesInUse() {
+    var seen = [];
+    workflowSteps.forEach(function (st) { if (st.plate && seen.indexOf(st.plate) === -1) seen.push(st.plate); });
+    _extraPlates.forEach(function (p) { if (seen.indexOf(p) === -1) seen.push(p); });
+    return seen.sort();
+}
+
+function _nextPlateName() {
+    var used = _platesInUse();
+    for (var c = 65; c < 91; c++) {
+        var name = String.fromCharCode(c);
+        if (used.indexOf(name) === -1) return name;
+    }
+    return 'P' + (used.length + 1);
+}
+
+function _refreshPlateSelect() {
+    var select = document.getElementById('currentPlate');
+    if (!select) return;
+    var options = '<option value=""' + (currentPlate ? '' : ' selected') + '>no plate</option>';
+    _platesInUse().forEach(function (p) {
+        options += '<option value="' + _escapeHtml(p) + '"' + (p === currentPlate ? ' selected' : '') + '>plate ' + _escapeHtml(p) + '</option>';
+    });
+    options += '<option value="__new">+ new plate</option>';
+    select.innerHTML = options;
+}
+
+function _setView(mode) {
+    viewMode = mode;
+    document.getElementById('viewList').classList.toggle('active', mode === 'list');
+    document.getElementById('viewLanes').classList.toggle('active', mode === 'lanes');
+    renderSteps();
+}
+
+// A block is one operation on one plate: changing the plate of one of its
+// steps changes the whole block.
+function _setPlateOf(index, plate) {
+    var step = workflowSteps[index];
+    workflowSteps.forEach(function (other) {
+        if (other === step || (step.block && other.block &&
+                other.block.name === step.block.name && other.block.run === step.block.run)) {
+            other.plate = plate;
+        }
+    });
+    renderSteps();
+    renderProperties();
+}
+
+function _warningsOf(index) {
+    if (!lastValidation) return [];
+    return (lastValidation.warnings || [])
+        .filter(function (w) { return w.step === index + 1; })
+        .map(function (w) { return w.message; });
+}
+
+// "A in tecan" under a step that moved its plate.
+function _plateWhereHTML(index) {
+    var step = workflowSteps[index];
+    var plates = lastValidation && lastValidation.plates;
+    if (!step.plate || !plates) return '';
+    var now = plates[String(index + 1)] && plates[String(index + 1)].after[step.plate];
+    var before = index > 0 && plates[String(index)] ? plates[String(index)].after[step.plate] : undefined;
+    if (now === before) return '';
+    return '<div class="plate-where"><i class="bi bi-geo-alt"></i> ' + _escapeHtml(step.plate) + ' ' +
+        _escapeHtml(now === undefined ? 'has left' : now) + '</div>';
+}
+
+function _buildPlateHTML(stepIndex) {
+    var step = workflowSteps[stepIndex];
+    var options = '<option value=""' + (step.plate ? '' : ' selected') + '>no plate</option>';
+    _platesInUse().forEach(function (p) {
+        options += '<option value="' + _escapeHtml(p) + '"' + (p === step.plate ? ' selected' : '') + '>plate ' + _escapeHtml(p) + '</option>';
+    });
+    options += '<option value="__new">+ new plate</option>';
+    var html = '<div class="property-group mt-2">' +
+        '<label for="propPlate"><i class="bi bi-grid-3x3-gap me-1"></i>Plate</label>' +
+        '<select class="form-select form-select-sm" id="propPlate">' + options + '</select>' +
+        (step.block ? '<div class="dep-help">Applies to the whole block.</div>' : '');
+    if (step.plate) {
+        var moves = [['', 'nothing - or what the instrument declares'], ['off', 'the plate leaves (taken away)']];
+        Object.keys(INSTRUMENTS).forEach(function (key) {
+            if (!INSTRUMENTS[key].isUtility) moves.push(['onto:' + key, 'the plate is put onto ' + INSTRUMENTS[key].name]);
+        });
+        html += '<label for="propPlateMove" class="mt-2">Moved by hand in this step</label>' +
+            '<select class="form-select form-select-sm" id="propPlateMove">' +
+            moves.map(function (m) {
+                return '<option value="' + _escapeHtml(m[0]) + '"' + ((step.plateMove || '') === m[0] ? ' selected' : '') + '>' + _escapeHtml(m[1]) + '</option>';
+            }).join('') + '</select>' +
+            '<div class="dep-help">For an operator step: robots and instruments already say where they put a plate.</div>';
+    }
+    return html + '</div>';
+}
+
+function _laneCardHTML(i) {
+    var step = workflowSteps[i];
+    var inst = INSTRUMENTS[step.type] || { name: step.type, commands: [] };
+    var cmd = (inst.commands || []).find(function (c) { return c.id === step.command; }) || { id: step.command, label: step.command };
+    var task = step.params && step.params.TaskId ? _shownValue(cmd, 'TaskId', step.params.TaskId) : '';
+    var errors = _errorsOf(i), warnings = _warningsOf(i);
+    var waitedFor = selectedStepIndex !== null && selectedStepIndex !== i &&
+        (workflowSteps[selectedStepIndex].dependsOn || []).indexOf(i + 1) !== -1;
+    return '<div class="workflow-step ' + step.type + (selectedStepIndex === i ? ' selected' : '') +
+        (waitedFor ? ' waited-for' : '') + (errors.length ? ' has-error' : '') +
+        (warnings.length && !errors.length ? ' has-warning' : '') + '" data-index="' + i + '">' +
+        '<div class="step-number">' + (i + 1) + '</div>' +
+        '<div class="step-content">' +
+            '<div class="step-title">' + _escapeHtml(task || String(cmd.label).replace(/^\u2b50\s*/, '')) +
+                _waitBadge(i) + ((step.ask && step.ask.length) ? '<span class="step-wait ask">choose</span>' : '') + '</div>' +
+            '<div class="step-details">' + _escapeHtml(inst.name) + (step.block ? ' · ' + _escapeHtml(step.block.name) : '') + '</div>' +
+            (errors.length ? '<div class="step-errors">' + errors.map(_escapeHtml).join('<br>') + '</div>' : '') +
+            (warnings.length ? '<div class="step-warnings">' + warnings.map(_escapeHtml).join('<br>') + '</div>' : '') +
+            _plateWhereHTML(i) +
+        '</div></div>';
+}
+
+// One column per plate, plus one for steps on no plate. Rows are the written
+// order, so reading across a row shows what happens to every plate at once.
+function renderLanes() {
+    var container = document.getElementById('workflowSteps');
+    document.getElementById('canvasPlaceholder').style.display = workflowSteps.length === 0 ? 'block' : 'none';
+    var plates = _platesInUse();
+    var columns = plates.concat(['']);
+    container.className = 'workflow-steps lanes' + (pickingDeps ? ' picking' : '');
+    container.style.gridTemplateColumns = 'repeat(' + columns.length + ', minmax(180px, 1fr))';
+    var html = columns.map(function (p) {
+        return '<div class="lane-head' + (p ? '' : ' other') + '">' + (p ? 'Plate ' + _escapeHtml(p) : 'No plate') + '</div>';
+    }).join('');
+    workflowSteps.forEach(function (step, i) {
+        columns.forEach(function (p) {
+            html += '<div class="lane-cell">' + ((step.plate || '') === p ? _laneCardHTML(i) : '') + '</div>';
+        });
+    });
+    container.innerHTML = html;
+    container.querySelectorAll('.workflow-step').forEach(function (el) {
+        el.addEventListener('click', function () {
+            var idx = parseInt(this.getAttribute('data-index'));
+            if (pickingDeps && selectedStepIndex !== null && idx !== selectedStepIndex) {
+                _toggleDependency(selectedStepIndex, idx + 1);
+                return;
+            }
+            selectStep(idx);
+        });
     });
 }
 
@@ -2559,9 +2804,11 @@ function _renderValidationBar() {
             (general.length ? '<ul>' + general.map(function (e) { return '<li>' + _escapeHtml(e.message) + '</li>'; }).join('') + '</ul>' : '') +
             '</div>';
     } else if (warnings.length) {
+        var onSteps = warnings.filter(function (w) { return w.step; }).length;
+        var lines = warnings.filter(function (w) { return !w.step; }).map(function (w) { return _escapeHtml(w.message); });
+        if (onSteps) lines.push(onSteps + ' warning' + (onSteps > 1 ? 's' : '') + ' about where the plates are, shown on their steps.');
         bar.className = 'validation-bar warn';
-        bar.innerHTML = '<i class="bi bi-exclamation-triangle"></i><div>' +
-            warnings.map(function (w) { return _escapeHtml(w.message); }).join('<br>') + '</div>';
+        bar.innerHTML = '<i class="bi bi-exclamation-triangle"></i><div>' + lines.join('<br>') + '</div>';
     } else {
         bar.className = 'validation-bar ok';
         bar.innerHTML = '<i class="bi bi-check-circle"></i><div>Valid: every instrument, command and parameter checks out.</div>';
@@ -2634,7 +2881,10 @@ function insertBlock(blockId) {
                     params: normalizeStepParamsForCommand(s.Action, s.Parameters || {}),
                     dependsOn: deps,
                     block: { name: block.name, run: run },
-                    ask: (s.Ask || []).slice()
+                    ask: (s.Ask || []).slice(),
+                    // A robot-only block (working pose, docking) moves no plate.
+                    plate: block.category === 'Robot' ? '' : currentPlate,
+                    plateMove: s.PlateMove || ''
                 });
             });
             Array.prototype.splice.apply(workflowSteps, [offset, 0].concat(inserted));

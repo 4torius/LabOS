@@ -27,7 +27,9 @@
       "DependsOn": [
         1
       ],
-      "Description": "A: l'operatore carica la piastra A"
+      "Description": "A: l'operatore carica la piastra A",
+      "Plate": "A",
+      "PlateMove": "onto:mobile"
     },
     {
       "StepNumber": 3,
@@ -53,7 +55,8 @@
       "DependsOn": [
         3
       ],
-      "Description": "A: presa dalla dima (pick_from_dima)"
+      "Description": "A: presa dalla dima (pick_from_dima)",
+      "Plate": "A"
     },
     {
       "StepNumber": 5,
@@ -66,7 +69,8 @@
       "DependsOn": [
         4
       ],
-      "Description": "A: posata sul deck (place_on_Opentrons)"
+      "Description": "A: posata sul deck (place_on_Opentrons)",
+      "Plate": "A"
     },
     {
       "StepNumber": 6,
@@ -78,7 +82,8 @@
       "DependsOn": [
         5
       ],
-      "Description": "A: ricetta di pipettaggio"
+      "Description": "A: ricetta di pipettaggio",
+      "Plate": "A"
     },
     {
       "StepNumber": 7,
@@ -91,7 +96,8 @@
       "DependsOn": [
         6
       ],
-      "Description": "A: ripresa dal deck, sulla dima (pick_from_opentrons)"
+      "Description": "A: ripresa dal deck, sulla dima (pick_from_opentrons)",
+      "Plate": "A"
     },
     {
       "StepNumber": 8,
@@ -127,7 +133,8 @@
       "DependsOn": [
         9
       ],
-      "Description": "A: presa dalla dima (pick_from_dima)"
+      "Description": "A: presa dalla dima (pick_from_dima)",
+      "Plate": "A"
     },
     {
       "StepNumber": 11,
@@ -140,7 +147,8 @@
       "DependsOn": [
         10
       ],
-      "Description": "A: posata sul cassetto (place_on_Tecan)"
+      "Description": "A: posata sul cassetto (place_on_Tecan)",
+      "Plate": "A"
     },
     {
       "StepNumber": 12,
@@ -165,7 +173,8 @@
       "DependsOn": [
         12
       ],
-      "Description": "A: lettura (in parallelo con la piastra B)"
+      "Description": "A: lettura (in parallelo con la piastra B)",
+      "Plate": "A"
     },
     {
       "StepNumber": 14,
@@ -180,7 +189,9 @@
       "DependsOn": [
         11
       ],
-      "Description": "B: l'operatore carica la piastra B (A è già nel lettore)"
+      "Description": "B: l'operatore carica la piastra B (A è già nel lettore)",
+      "Plate": "B",
+      "PlateMove": "onto:mobile"
     },
     {
       "StepNumber": 15,
@@ -206,7 +217,8 @@
       "DependsOn": [
         15
       ],
-      "Description": "B: presa dalla dima (pick_from_dima)"
+      "Description": "B: presa dalla dima (pick_from_dima)",
+      "Plate": "B"
     },
     {
       "StepNumber": 17,
@@ -219,7 +231,8 @@
       "DependsOn": [
         16
       ],
-      "Description": "B: posata sul deck (place_on_Opentrons)"
+      "Description": "B: posata sul deck (place_on_Opentrons)",
+      "Plate": "B"
     },
     {
       "StepNumber": 18,
@@ -231,7 +244,8 @@
       "DependsOn": [
         17
       ],
-      "Description": "B: ricetta di pipettaggio (in parallelo con la lettura di A)"
+      "Description": "B: ricetta di pipettaggio (in parallelo con la lettura di A)",
+      "Plate": "B"
     },
     {
       "StepNumber": 19,
@@ -268,7 +282,8 @@
       "DependsOn": [
         20
       ],
-      "Description": "A: ripresa dal cassetto, sulla dima (pick_from_tecan)"
+      "Description": "A: ripresa dal cassetto, sulla dima (pick_from_tecan)",
+      "Plate": "A"
     },
     {
       "StepNumber": 22,
@@ -293,7 +308,9 @@
       "DependsOn": [
         21
       ],
-      "Description": "A: l'operatore ritira la piastra A"
+      "Description": "A: l'operatore ritira la piastra A",
+      "Plate": "A",
+      "PlateMove": "off"
     },
     {
       "StepNumber": 24,
@@ -320,7 +337,8 @@
         18,
         24
       ],
-      "Description": "B: ripresa dal deck (ricetta finita), sulla dima (pick_from_opentrons)"
+      "Description": "B: ripresa dal deck (ricetta finita), sulla dima (pick_from_opentrons)",
+      "Plate": "B"
     },
     {
       "StepNumber": 26,
@@ -357,7 +375,8 @@
       "DependsOn": [
         27
       ],
-      "Description": "B: presa dalla dima (pick_from_dima)"
+      "Description": "B: presa dalla dima (pick_from_dima)",
+      "Plate": "B"
     },
     {
       "StepNumber": 29,
@@ -370,7 +389,8 @@
       "DependsOn": [
         28
       ],
-      "Description": "B: posata sul cassetto (place_on_Tecan)"
+      "Description": "B: posata sul cassetto (place_on_Tecan)",
+      "Plate": "B"
     },
     {
       "StepNumber": 30,
@@ -395,7 +415,8 @@
       "DependsOn": [
         30
       ],
-      "Description": "B: lettura"
+      "Description": "B: lettura",
+      "Plate": "B"
     },
     {
       "StepNumber": 32,
@@ -418,7 +439,8 @@
       "DependsOn": [
         32
       ],
-      "Description": "B: ripresa dal cassetto, sulla dima (pick_from_tecan)"
+      "Description": "B: ripresa dal cassetto, sulla dima (pick_from_tecan)",
+      "Plate": "B"
     },
     {
       "StepNumber": 34,
@@ -443,7 +465,9 @@
       "DependsOn": [
         33
       ],
-      "Description": "B: l'operatore ritira la piastra B"
+      "Description": "B: l'operatore ritira la piastra B",
+      "Plate": "B",
+      "PlateMove": "off"
     },
     {
       "StepNumber": 36,

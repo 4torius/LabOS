@@ -363,6 +363,16 @@ written, as if each depended on the one before it; control commands are left
 out. Most instruments do not need it: a liquid handler's recipe does not
 depend on which recipe ran before.
 
+#### `needs` — where the plate a command works on has to be
+
+```json
+"RunMeasurement": { "claims": ["instrument:tecan", "tray:tecan"], "needs": ["slot:tecan"] }
+```
+
+Advisory: the Workflow Builder warns when a step works on a plate that is
+somewhere else (see WORKFLOW_SYSTEM.md, *Plates*). It is never refused at run
+time, because a plate loaded by hand is there without any step saying so.
+
 #### `emergency_stop` — how your instrument is stopped
 
 Outside `resources`, at the top level of the catalog:

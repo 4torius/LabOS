@@ -188,6 +188,40 @@ exists on the robot and is declared; the tray is open whenever the robot
 reaches into it, and closed at the end), and a workflow made of them runs in
 the simulated lab (`tests/simlab/test_blocks_in_sim.py`).
 
+### Plates
+
+A step may name the plate it concerns: `"Plate": "A"`. The executor ignores
+it; the builder uses it in three ways.
+
+- **New steps go to** (above the list) sets the plate every step or block
+  added from then on belongs to; *+ new plate* creates the next letter. A
+  robot-only block (working pose, docking) gets no plate. In the Properties
+  panel a step's plate can be changed; for a step of a block it changes the
+  whole block.
+- **Plates** view: one column per plate and one for steps on no plate. Rows
+  stay in written order - which is also the robot's order - so reading across
+  a row shows what happens to every plate at that point.
+- **Where each plate is.** Following the steps in written order, LabOS works
+  out where each labelled plate is from what the instruments declare (a step
+  that *acquires* `slot:tecan` puts its plate in the reader, one that
+  *releases* it takes it out onto the robot, and `RunMeasurement` *needs*
+  `slot:tecan`). Under a step that moved its plate the list shows where it is
+  now ("A in tecan"), and a step that cannot make sense there is marked in
+  yellow: reading A while A is still on the deck, putting B on the deck while
+  A is on it, taking A out of the reader when it was never put there, the
+  robot carrying two plates at once. A person's move no catalog can declare
+  is said by the step: *Moved by hand in this step* (`"PlateMove": "onto:mobile"`
+  or `"off"`); the operator blocks carry it.
+
+These are warnings, never refusals: the written order is not always the run
+order, and a plate loaded by hand is somewhere no step said, so a plate nobody
+has moved yet draws no warning. The logic is `src/plates.py`.
+
+**After its plate's previous** is a fifth dependency shape, offered on a step
+that has a plate: it waits only for the step above it on the same plate. It
+is how two plates' steps, written interleaved, run side by side - the
+default stays *After previous*.
+
 The builder validates as you edit (`POST /api/workflows/validate`): problems
 show on their step and in a bar above the list, before Run is pressed.
 **Simulate** runs the workflow in the simulated lab (`POST

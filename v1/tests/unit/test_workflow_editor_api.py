@@ -44,7 +44,7 @@ class TestValidate:
         body = client.post("/api/workflows/validate", json=_wf(
             ("delay", "Wait", {"seconds": 0}, []),
             ("delay", "Wait", {"seconds": 0}, [1]))).json()
-        assert body == {"valid": True, "errors": [], "warnings": [], "implied": {}}
+        assert body == {"valid": True, "errors": [], "warnings": [], "implied": {}, "plates": {}}
 
     def test_an_instrument_that_is_off_is_named(self, client):
         body = client.post("/api/workflows/validate", json=_wf(
