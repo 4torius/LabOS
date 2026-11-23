@@ -1351,7 +1351,7 @@ function renderSteps() {
             for (var k = 0; k < paramKeys.length; k++) {
                 var key = paramKeys[k];
                 if (step.params[key]) {
-                    paramParts.push(key + ': ' + step.params[key]);
+                    paramParts.push(key + ': ' + _shownValue(cmd, key, step.params[key]));
                 }
             }
             paramsDisplay = paramParts.join(', ');
@@ -1980,6 +1980,18 @@ function runWorkflow() {
         showToast('warning', 'Empty workflow', 'Add at least one step before running.');
         return;
     }
+    // A choice a block asked for and nobody made (a recipe, a protocol) is
+    // either empty or a default the builder picked: neither should reach
+    // the instruments.
+    var pending = [];
+    workflowSteps.forEach(function (st, i) {
+        if (st.ask && st.ask.length) pending.push('step ' + (i + 1) + ': ' + st.ask.join(', '));
+    });
+    if (pending.length) {
+        showToast('warning', 'Choices still to make', 'Pick a value for ' + pending.join('; ') +
+            ' (the steps marked "choose"). Simulate works meanwhile.');
+        return;
+    }
 
     // Build steps for scanning
     var steps = _buildSteps();
@@ -2368,6 +2380,17 @@ function _escapeHtml(text) {
     });
 }
 
+// What a parameter's value reads as: the label its dropdown shows (the robot's
+// task name rather than its id), or the value itself.
+function _shownValue(cmd, key, value) {
+    var param = cmd && (cmd.parameters || []).find(function (p) { return p.name === key; });
+    if (param) {
+        var match = LabOS.params.normalizeOptions(param).find(function (o) { return o.value === value; });
+        if (match && match.label) return match.label;
+    }
+    return value;
+}
+
 function _instrumentFor(step) {
     // The key (mobile, tecan) is what a workflow should name; the name an
     // instrument announces (GoFaGo Mobile Robot) only resolves loosely.
@@ -2525,7 +2548,7 @@ function _renderValidationBar() {
     var asked = workflowSteps.reduce(function (n, s) { return n + ((s.ask && s.ask.length) ? s.ask.length : 0); }, 0);
     if (asked) {
         warnings = [{ message: asked + ' choice' + (asked > 1 ? 's' : '') +
-            ' still to make: the steps marked "choose" have a value filled in by default, not by you.' }].concat(warnings);
+            ' still to make in the steps marked "choose" (empty, or a default nobody picked). Run waits for them; Simulate does not.' }].concat(warnings);
     }
     bar.hidden = false;
     if (errors.length) {
@@ -2573,7 +2596,7 @@ function loadBlocks() {
                 }
                 var item = document.createElement('div');
                 item.className = 'tool-block block-item';
-                item.title = (b.description || b.name) + ' (' + b.steps + ' steps) - click to add';
+                item.title = (b.description || b.name) + ' (' + b.steps + ' steps) - click to add it below the selected step, or at the end';
                 item.innerHTML = '<i class="bi bi-box"></i><span>' + _escapeHtml(b.name) + '</span>';
                 item.addEventListener('click', function () { insertBlock(b.id); });
                 section.appendChild(item);
@@ -2593,14 +2616,18 @@ function insertBlock(blockId) {
         .then(function (r) { return r.json(); })
         .then(function (block) {
             if (!block.steps) { showToast('error', 'Block', block.detail || 'Could not add the block'); return; }
-            var offset = workflowSteps.length;
+            // Below the selected step if there is one, otherwise at the end.
+            var offset = selectedStepIndex !== null ? selectedStepIndex + 1 : workflowSteps.length;
+            var remapped = LabOS.dependenciesAfterInsert(workflowSteps, offset, block.steps.length);
+            workflowSteps.forEach(function (st, i) { st.dependsOn = remapped[i]; });
+            var inserted = [];
             var run = ++_blockRuns + Date.now() % 100000;
             block.steps.forEach(function (s, k) {
                 var type = _instrumentKeyFor(s.Instrument);
                 var deps = (s.DependsOn || []).map(function (d) { return d + offset; });
                 // The block's first step waits for whatever is above it.
                 if (k === 0 && !deps.length && offset > 0) deps = [offset];
-                workflowSteps.push({
+                inserted.push({
                     id: Date.now() + Math.random(),
                     type: type,
                     command: s.Action,
@@ -2610,13 +2637,18 @@ function insertBlock(blockId) {
                     ask: (s.Ask || []).slice()
                 });
             });
+            Array.prototype.splice.apply(workflowSteps, [offset, 0].concat(inserted));
             _applyRequiredDefaultsToAllSteps();
             renderSteps();
-            selectStep(offset);
+            // Select the block's last step, so the next block clicked lands
+            // after this one: clicking blocks in order builds them in order.
+            selectStep(offset + inserted.length - 1);
+            var where = offset < workflowSteps.length - block.steps.length
+                ? ' below step ' + offset : '';
             if (block.errors && block.errors.length) {
                 showToast('warning', 'Block added with gaps', block.errors.join(' | '));
             } else {
-                showNotification('Added: ' + block.name + ' (' + block.steps.length + ' steps)', 'info');
+                showNotification('Added: ' + block.name + ' (' + block.steps.length + ' steps)' + where, 'info');
             }
         })
         .catch(function (e) { showToast('error', 'Block', e.message); });

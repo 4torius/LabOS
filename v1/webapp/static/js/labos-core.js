@@ -277,6 +277,27 @@
         });
     };
 
+    /**
+     * Dependencies of the existing steps after `count` steps are inserted
+     * below the first `at` steps (so the new ones take positions at+1..at+count).
+     *
+     * Every reference to a step that moved down follows it. The step that was
+     * just below the insertion point and waited for the step just above it now
+     * waits for the last inserted step instead: inserting a block into a chain
+     * puts it *in* the chain (selected -> block -> next) rather than beside it.
+     * @returns {Array<Array<number>>} one dependency list per existing step, in order
+     */
+    LabOS.dependenciesAfterInsert = function (steps, at, count) {
+        return steps.map(function (step, i) {
+            var deps = (step.dependsOn || []).map(function (n) { return n > at ? n + count : n; });
+            if (i === at && at > 0 && count > 0) {
+                var k = deps.indexOf(at);
+                if (k !== -1) deps[k] = at + count;
+            }
+            return deps.sort(function (a, b) { return a - b; });
+        });
+    };
+
     // ── Choosing what a step waits for ──────────────────────────────────────
     // Ticking boxes in a list of every step is how DependsOn used to be set,
     // and nearly every real case is one of four shapes. Each is one click:

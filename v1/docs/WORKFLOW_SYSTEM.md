@@ -173,9 +173,15 @@ Two parts of it matter when writing one:
 - A robot task is named, not numbered: `"TaskId": {"label": "go_to_tecan"}`.
   The id is looked up when the block is inserted, from the task list the robot
   last reported, so a task re-taught with a new id is still found.
-- `"Ask": ["RecipeName"]` marks a choice the person must make. The builder
-  fills a default so the step is valid, then shows the step as *choose:
-  RecipeName* and counts it in the bar above the list until it is changed.
+- `"Ask": ["RecipeName"]` marks a choice the person must make. The step shows
+  *choose: RecipeName* and the bar above the list counts it until a value is
+  picked; until then **Run** refuses (the value is empty, or a default nobody
+  chose) while **Simulate** still works.
+
+A block is added **below the selected step**, or at the end when none is
+selected, and goes into the chain: the step that was below it now waits for
+the block's last step. After adding, the block's last step is selected, so
+clicking blocks one after another builds them in that order.
 
 The shipped blocks are checked by `tests/unit/test_blocks.py` (every task
 exists on the robot and is declared; the tray is open whenever the robot

@@ -217,3 +217,26 @@ class TestTheFourShapes:
 
     def test_a_first_step_is_start(self):
         assert _run("dependencyMode", _deps([]), 0) == "start"
+
+
+@needs_node
+class TestInsertingInTheMiddle:
+    """A block inserted below the selected step goes into the chain."""
+
+    def test_the_block_goes_into_the_chain(self):
+        # 1 -> 2 -> 3, insert two steps below step 1: the old step 2 (now 4)
+        # waits for the last inserted step (3), the old 3 (now 5) for it.
+        assert _run("dependenciesAfterInsert", _chain(3), 1, 2) == [[], [3], [4]]
+
+    def test_a_branch_from_the_selected_step_keeps_waiting_for_it(self):
+        # 1; 2 after 1; 3 also after 1 (a branch). Insert one step below 1:
+        # only the step right below the insertion point is re-chained.
+        steps = [{"dependsOn": []}, {"dependsOn": [1]}, {"dependsOn": [1]}]
+        assert _run("dependenciesAfterInsert", steps, 1, 1) == [[], [2], [1]]
+
+    def test_inserting_at_the_end_changes_nothing(self):
+        assert _run("dependenciesAfterInsert", _chain(3), 3, 4) == [[], [1], [2]]
+
+    def test_later_references_follow_their_steps(self):
+        steps = [{"dependsOn": []}, {"dependsOn": [1]}, {"dependsOn": [1, 2]}]
+        assert _run("dependenciesAfterInsert", steps, 2, 3) == [[], [1], [1, 5]]
